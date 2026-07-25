@@ -5,3 +5,14 @@ release/
 *.log
 .env
 .mimocode/
+.idea/
+.vscode/
+assistant_log.json
+bak/
+config.json
+memory.db
+memory.mv.db
+memory.trace.db
+memory.trace.db.old
+nul
+target/

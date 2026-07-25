@@ -1,0 +1,102 @@
+const fs = require('fs');
+const path = require('path');
+const ollama = require('ollama').default;
+const logger = require('./logger');
+
+const RAG_DIR = path.join(require('os').homedir(), '.biling-ai', 'rag');
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function getIndexPath(kbId) {
+  ensureDir(RAG_DIR);
+  return path.join(RAG_DIR, `${kbId}.json`);
+}
+
+function chunkText(text, maxLen = 512) {
+  const paragraphs = text.split(/\n\s*\n/);
+  const chunks = [];
+  let current = '';
+  for (const p of paragraphs) {
+    const trimmed = p.trim();
+    if (!trimmed) continue;
+    if ((current + '\n\n' + trimmed).length > maxLen && current) {
+      chunks.push(current.trim());
+      current = trimmed;
+    } else {
+      current = current ? current + '\n\n' + trimmed : trimmed;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.length ? chunks : [text.trim()];
+}
+
+async function embed(text) {
+  const client = new ollama.Ollama();
+  const res = await client.embed({ model: 'nomic-embed-text', input: text });
+  return res.embeddings[0];
+}
+
+function cosineSimilarity(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+async function indexKnowledgeBase(kbId, kbPath) {
+  const index = { chunks: [], embeddings: [] };
+  const files = [];
+  walkDir(kbPath, files);
+  for (const file of files) {
+    const content = fs.readFileSync(file, 'utf-8');
+    const chunks = chunkText(content);
+    for (const chunk of chunks) {
+      try {
+        const emb = await embed(chunk);
+        index.chunks.push({ text: chunk, source: file });
+        index.embeddings.push(emb);
+      } catch (e) {
+        logger.error(`[RAG] embed error: ${file}`, e.message);
+      }
+    }
+  }
+  fs.writeFileSync(getIndexPath(kbId), JSON.stringify(index));
+  return { totalChunks: index.chunks.length, files: files.length };
+}
+
+async function searchKnowledgeBase(kbId, query, topK = 5) {
+  const indexPath = getIndexPath(kbId);
+  if (!fs.existsSync(indexPath)) return [];
+  const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+  if (!index.chunks.length) return [];
+  const queryEmb = await embed(query);
+  const scored = index.chunks.map((c, i) => ({
+    ...c,
+    score: cosineSimilarity(queryEmb, index.embeddings[i]),
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK).filter(c => c.score > 0.3);
+}
+
+function getIndexStatus(kbId) {
+  const indexPath = getIndexPath(kbId);
+  if (!fs.existsSync(indexPath)) return { indexed: false, chunks: 0 };
+  const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+  return { indexed: true, chunks: index.chunks.length };
+}
+
+function walkDir(dir, files) {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walkDir(full, files);
+    else if (entry.name.endsWith('.md')) files.push(full);
+  }
+}
+
+module.exports = { indexKnowledgeBase, searchKnowledgeBase, getIndexStatus, chunkText, embed };

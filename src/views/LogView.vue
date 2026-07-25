@@ -1,41 +1,40 @@
 <template>
   <div class="log-view">
     <div class="content-header">
-      <h1 class="content-title">操作日志</h1>
-      <button class="btn btn-secondary" @click="loadLogs">刷新</button>
+      <h1 class="content-title">日志</h1>
+      <div class="header-actions">
+        <select v-model="levelFilter" class="form-control" style="width:auto;">
+          <option value="">全部级别</option>
+          <option value="ERROR">ERROR</option>
+          <option value="WARN">WARN</option>
+          <option value="INFO">INFO</option>
+          <option value="DEBUG">DEBUG</option>
+        </select>
+        <select v-model="currentFile" class="form-control" style="width:auto;">
+          <option v-for="f in files" :key="f.name" :value="f.name">{{ f.name }} ({{ formatSize(f.size) }})</option>
+        </select>
+        <label class="tail-toggle">
+          <input type="checkbox" v-model="autoTail">
+          <span>自动刷新</span>
+        </label>
+        <button class="btn btn-secondary" @click="loadLogs">刷新</button>
+        <button class="btn btn-danger" @click="clearLog" :disabled="clearing">{{ clearing ? '清空中...' : '清空' }}</button>
+      </div>
     </div>
 
-    <div class="content-body">
-      <div class="card">
-        <div class="text-muted mb-2">最近 100 条操作记录。</div>
-
-        <div v-if="logs.length > 0">
-          <table class="log-table">
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>操作</th>
-                <th>状态</th>
-                <th>详情</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(log, index) in logs" :key="index">
-                <td style="white-space:nowrap;">{{ log.time }}</td>
-                <td>{{ log.action }}</td>
-                <td>
-                  <span v-if="log.status === '成功'" class="badge badge-success">✓ 成功</span>
-                  <span v-else-if="log.status === '失败'" class="badge badge-danger">✗ 失败</span>
-                  <span v-else class="badge badge-gray">ℹ {{ log.status }}</span>
-                </td>
-                <td class="text-muted">{{ log.detail }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div v-else class="text-muted" style="padding: 40px 0; text-align: center;">
-          <div style="font-size: 48px; margin-bottom: 16px;">📋</div>
-          <div>暂无日志记录。</div>
+    <div class="content-body" ref="logContainer">
+      <div v-if="filteredLines.length === 0" class="empty-state">
+        <div style="font-size:48px;margin-bottom:16px;">📋</div>
+        <div>暂无日志。</div>
+      </div>
+      <div v-else class="log-lines">
+        <div v-for="(line, i) in filteredLines" :key="i"
+          class="log-line"
+          :class="levelClass(line)"
+          @dblclick="copyLine(line)">
+          <span class="log-ts">{{ formatTs(line) }}</span>
+          <span class="log-level" :class="levelClass(line)">{{ extractLevel(line) }}</span>
+          <span class="log-msg">{{ extractMsg(line) }}</span>
         </div>
       </div>
     </div>
@@ -43,129 +42,127 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
 
-const API_BASE = 'http://localhost:6790/api';
+const API = window.electronAPI;
 
-interface LogEntry {
-  time: string;
-  action: string;
-  status: string;
-  detail: string;
+const lines = ref<string[]>([]);
+const files = ref<{ name: string; size: number; mtime: string }[]>([]);
+const currentFile = ref('app.log');
+const levelFilter = ref('');
+const autoTail = ref(true);
+const clearing = ref(false);
+const logContainer = ref<HTMLElement | null>(null);
+
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function extractLevel(line: string) {
+  const m = line.match(/\[(DEBUG|INFO|WARN|ERROR)\]/);
+  return m ? m[1] : 'INFO';
 }
 
-const logs = ref<LogEntry[]>([]);
+function extractMsg(line: string) {
+  return line.replace(/^\S+\s+\[(DEBUG|INFO|WARN|ERROR)\]\s+/, '');
+}
+
+function formatTs(line: string) {
+  const m = line.match(/^(\S+)/);
+  return m ? m[1] : '';
+}
+
+function levelClass(line: string) {
+  const level = extractLevel(line);
+  return level.toLowerCase();
+}
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + 'MB';
+}
 
 async function loadLogs() {
   try {
-    const r = await fetch(`${API_BASE}/logs`);
-    const d = await r.json();
-    if (d.ok && d.logs) {
-      logs.value = d.logs;
+    if (currentFile.value === 'app.log') {
+      lines.value = await API.log.lines({ count: 200, tail: true });
     } else {
-      logs.value = [];
+      lines.value = await API.log.readFile(currentFile.value, { count: 500, tail: true });
     }
+    await loadFiles();
+    if (autoTail.value) await nextTick(() => scrollToBottom());
   } catch (e) {
     console.warn('加载日志失败:', e);
-    logs.value = [];
   }
 }
 
-onMounted(() => {
-  loadLogs();
+async function loadFiles() {
+  try {
+    files.value = await API.log.files();
+  } catch {}
+}
+
+function scrollToBottom() {
+  const el = logContainer.value;
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+const filteredLines = computed(() => {
+  if (!levelFilter.value) return lines.value;
+  return lines.value.filter(l => extractLevel(l) === levelFilter.value);
+});
+
+async function clearLog() {
+  clearing.value = true;
+  try {
+  } catch {}
+  lines.value = [];
+  clearing.value = false;
+}
+
+function copyLine(line: string) {
+  navigator.clipboard.writeText(line).catch(() => {});
+}
+
+watch(currentFile, () => loadLogs());
+
+onMounted(async () => {
+  await loadLogs();
+  pollTimer = setInterval(() => {
+    if (autoTail.value) loadLogs();
+  }, 3000);
+});
+
+onBeforeUnmount(() => {
+  if (pollTimer) clearInterval(pollTimer);
 });
 </script>
 
 <style scoped>
-.log-view {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.content-header {
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  background: white;
-}
-
-.content-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.content-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px;
-}
-
-.card {
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 20px;
-}
-
-.text-muted {
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.mb-2 {
-  margin-bottom: 8px;
-}
-
-.log-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  margin-top: 8px;
-}
-
-.log-table th, .log-table td {
-  padding: 10px 12px;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-}
-
-.log-table th {
-  background: var(--hover);
-  font-weight: 600;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.log-table tr:hover {
-  background: var(--hover);
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.badge-gray {
-  background: #f5f5f7;
-  color: #909296;
-}
-
-.badge-success {
-  background: rgba(34, 197, 94, 0.1);
-  color: #2b8a3e;
-}
-
-.badge-danger {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-}
+.log-view { display: flex; flex-direction: column; height: 100%; }
+.content-header { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: white; gap: 12px; flex-wrap: wrap; }
+.content-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0; }
+.header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tail-toggle { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-muted); cursor: pointer; user-select: none; }
+.tail-toggle input { margin: 0; }
+.content-body { flex: 1; overflow-y: auto; padding: 0; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 12px; line-height: 1.6; background: #1e1e2e; color: #cdd6f4; }
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #6c7086; }
+.log-lines { padding: 8px 0; }
+.log-line { padding: 2px 16px; cursor: pointer; display: flex; gap: 12px; white-space: pre-wrap; word-break: break-all; }
+.log-line:hover { background: rgba(255,255,255,0.05); }
+.log-line.debug .log-ts { color: #6c7086; }
+.log-line.info .log-ts { color: #89b4fa; }
+.log-line.warn .log-ts { color: #f9e2af; }
+.log-line.error .log-ts { color: #f38ba8; }
+.log-ts { color: #6c7086; flex-shrink: 0; width: 200px; }
+.log-level { font-weight: 700; flex-shrink: 0; width: 48px; text-align: center; }
+.log-level.debug { color: #6c7086; }
+.log-level.info { color: #89b4fa; }
+.log-level.warn { color: #f9e2af; }
+.log-level.error { color: #f38ba8; }
+.log-msg { color: #cdd6f4; }
+.form-control { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; background: white; color: var(--text-primary); }
+.btn { padding: 4px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; background: white; color: var(--text-primary); }
+.btn-secondary { background: #f5f5f7; }
+.btn-danger { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
+.btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

@@ -10,9 +10,5 @@ export default defineConfig({
   server: {
     port: 15173,
     strictPort: true,
-    proxy: {
-      '/v3': { target: 'http://localhost:6790', changeOrigin: true },
-      '/api': { target: 'http://localhost:6790', changeOrigin: true }
-    }
   },
 });

@@ -3,97 +3,79 @@
     <div class="content-header">
       <h1 class="content-title">对话</h1>
       <div class="content-actions">
-        <button class="btn btn-secondary btn-sm" @click="clearChat">清空</button>
+        <select v-model="selectedAgent" class="agent-select">
+          <option value="pi">pi agent</option>
+          <option value="opencode">opencode</option>
+        </select>
+        <select v-model="selectedKbId" class="kb-select">
+          <option :value="null">不使用知识库</option>
+          <option v-for="kb in kbList" :key="kb.id" :value="kb.id">
+            {{ kb.name }}{{ kb.status?.indexed ? ' ✓' : '' }}
+          </option>
+        </select>
+        <button class="btn btn-secondary btn-sm" @click="newSession">新对话</button>
       </div>
     </div>
-    
+
     <div class="content-body">
       <div class="chat-wrapper">
         <div class="chat-messages" ref="messagesContainer">
-          <div v-if="!hasKb" class="empty-state">
+          <div v-if="!messages.length" class="empty-state">
             <div class="empty-icon">💬</div>
             <div class="empty-title">开始对话</div>
-            <div class="empty-desc">你还没有添加任何笔记库。<br>可以直接与 AI 对话，或添加笔记库后使用 @笔记库名 进行知识库问答。</div>
-            <button class="empty-action" @click="goToConfig">去配置笔记库</button>
+            <div class="empty-desc">
+              选择 agent 和知识库，然后开始提问。<br>
+              pi agent 适合代码分析，opencode 适合通用任务。
+            </div>
           </div>
-          
-          <div v-else id="messagesList">
-            <div v-for="msg in messages" :key="msg.id" class="message" :class="msg.role">
-              <div class="message-avatar">
-                <span v-if="msg.role === 'user'">👤</span>
-                <span v-else>🤖</span>
+
+          <div v-for="(msg, idx) in messages" :key="idx" class="message" :class="msg.role">
+            <div class="message-avatar">
+              <span v-if="msg.role === 'user'">👤</span>
+              <span v-else-if="msg.role === 'tool'">🔧</span>
+              <span v-else>🤖</span>
+            </div>
+            <div class="message-content-wrapper">
+              <div class="message-header">
+                <span class="message-author">
+                  {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : selectedAgent === 'pi' ? 'pi agent' : 'opencode' }}
+                </span>
+                <span class="message-status" v-if="msg.status">{{ msg.status }}</span>
               </div>
-              <div class="message-content-wrapper">
-                <div class="message-header">
-                  <span class="message-author">{{ msg.role === 'user' ? '我' : '笔灵 AI' }}</span>
-                  <span v-if="msg.time" class="message-time">{{ msg.time }}</span>
-                </div>
-                <div
-                  class="message-content"
-                  :class="{ 'markdown-content': msg.role === 'assistant' }"
-                  v-html="msg.role === 'user' ? highlightMentions(msg.content) : renderMarkdown(msg.content)"
-                ></div>
-              </div>
+              <div
+                class="message-content"
+                :class="{ 'markdown-body': msg.role === 'assistant' }"
+                v-html="msg.role === 'user' ? escHtml(msg.content) : renderMarkdown(msg.content)"
+              ></div>
             </div>
           </div>
         </div>
-        
+
         <div class="chat-input-area">
           <div class="input-wrapper">
-            <textarea 
-              v-model="inputText" 
-              class="chat-input" 
-              placeholder="有问题尽管问"
-              @keydown.enter.exact.prevent="sendChat"
+            <textarea
+              v-model="inputText"
+              class="chat-input"
+              placeholder="输入问题，按 Enter 发送..."
+              @keydown.enter.exact.prevent="sendMessage"
               @input="autoResize"
               ref="inputRef"
+              :disabled="isStreaming"
             ></textarea>
-            
             <div class="input-footer">
               <div class="input-left">
-                <button class="footer-btn" ref="mentionBtnRef" @click="toggleMentionDropdown">
-                  <span>@</span>
-                </button>
-                <div class="divider"></div>
-                <button class="footer-btn" ref="modelBtnRef" @click="toggleModelDropdown">
-                  <span>{{ currentModel || '默认模型' }}</span>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
-                    <path d="M6 9l6 6 6-6"/>
-                  </svg>
-                </button>
+                <span class="input-hint" v-if="selectedKbId">
+                  📚 知识库已启用
+                </span>
               </div>
               <div class="input-right">
-                <button class="send-btn" @click="sendChat" :disabled="!inputText.trim()">
+                <button class="send-btn" @click="sendMessage" :disabled="!inputText.trim() || isStreaming">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                     <line x1="22" y1="2" x2="11" y2="13"/>
                     <polygon points="22 2 15 22 11 13 2 9 22 2"/>
                   </svg>
                 </button>
               </div>
-            </div>
-          </div>
-          
-          <div v-show="showMentionDropdown" class="dropdown-menu" ref="mentionDropdown">
-            <div 
-              v-for="kb in kbList" 
-              :key="kb.id" 
-              class="dropdown-item"
-              @click="insertMention(kb.name)"
-            >
-              <div class="dropdown-item-icon">📚</div>
-              <span>{{ kb.name }}</span>
-            </div>
-          </div>
-          
-          <div v-show="showModelDropdown" class="dropdown-menu" ref="modelDropdown">
-            <div 
-              v-for="model in chatModels" 
-              :key="model.name" 
-              class="dropdown-item"
-              :class="{ selected: model.name === currentModel }"
-              @click="selectModel(model.name)"
-            >
-              <span>{{ model.name }}</span>
             </div>
           </div>
         </div>
@@ -106,124 +88,31 @@
 import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue';
 import { marked } from 'marked';
 
-const API_BASE = '';
+const API = window.electronAPI;
 
 const inputText = ref('');
 const messages = ref<any[]>([]);
 const kbList = ref<any[]>([]);
-const chatModels = ref<any[]>([]);
-const currentModel = ref('');
-const currentKbId = ref<number | null>(null);
-const hasKb = ref(true);
-const showMentionDropdown = ref(false);
-const showModelDropdown = ref(false);
+const selectedAgent = ref('pi');
+const selectedKbId = ref<string | null>(null);
+const isStreaming = ref(false);
 const messagesContainer = ref<HTMLElement>();
 const inputRef = ref<HTMLTextAreaElement>();
-const mentionBtnRef = ref<HTMLElement>();
-const modelBtnRef = ref<HTMLElement>();
-const mentionDropdown = ref<HTMLElement>();
-const modelDropdown = ref<HTMLElement>();
+const currentSessionId = ref('');
 
-// ========== Markdown 渲染 ==========
 const renderMarkdown = (content: string) => {
   if (!content) return '';
   try {
     return marked(content);
-  } catch (e) {
-    return content.replace(/\n/g, '<br>');
+  } catch {
+    return escHtml(content).replace(/\n/g, '<br>');
   }
 };
 
-const highlightMentions = (text: string) => {
-  return text.replace(/@(\S+)/g, '<span class="mention-tag">@$1</span>');
-};
-
-// ========== 加载对话列表 ==========
-async function loadMessages() {
-  if (!currentKbId.value) return;
-  try {
-    const r = await fetch(`${API_BASE}/api/chat/messages?kbId=${currentKbId.value}`);
-    const d = await r.json();
-    if (d.ok && d.messages) {
-      messages.value = d.messages.map((msg: any, i: number) => ({
-        id: msg.id || i,
-        role: msg.role,
-        content: msg.content,
-        time: msg.time || ''
-      }));
-      await nextTick();
-      scrollToBottom();
-    }
-  } catch (e) {
-    console.error('加载对话失败:', e);
-  }
-}
-
-// ========== 加载笔记库列表 ==========
-async function loadKbList() {
-  try {
-    const r = await fetch(`${API_BASE}/api/chat/kbs`);
-
-    const d = await r.json();
-    if (d.ok && d.data) {
-      kbList.value = d.data;
-      hasKb.value = d.data.length > 0;
-      if (d.data.length > 0) {
-        currentKbId.value = d.data[0].id;
-        await loadMessages();
-      } else {
-        hasKb.value = false;
-      }
-    } else {
-      hasKb.value = false;
-    }
-  } catch (e) {
-    console.error('加载笔记库失败:', e);
-    hasKb.value = false;
-  }
-}
-
-// ========== 加载模型列表 ==========
-async function loadModels() {
-  try {
-    const r = await fetch(`/api/chat/models`);
-    const d = await r.json();
-    if (d.ok && d.data) {
-      // 过滤掉 image 类型，只保留对话/多模态模型
-      const textModels = d.data.filter((p: any) => p.modelType !== 'image');
-      chatModels.value = textModels;
-      if (d.defaultModel) {
-        currentModel.value = d.defaultModel;
-      } else if (textModels.length > 0) {
-        currentModel.value = textModels[0].name;
-      }
-    }
-  } catch (e) {
-    chatModels.value = [{ name: '默认模型' }];
-    currentModel.value = '默认模型';
-  }
-}
-
-// ========== 清空对话 ==========
-const clearChat = async () => {
-  if (!currentKbId.value) {
-    alert('请先选择一个笔记库');
-    return;
-  }
-  try {
-    const r = await fetch(`${API_BASE}/api/chat/clear?kbId=${currentKbId.value}`, { method: 'DELETE' });
-    const d = await r.json();
-    if (d.ok) {
-      messages.value = [];
-    }
-  } catch (e) {
-    console.error('清空对话失败:', e);
-  }
-};
-
-const goToConfig = () => {
-  // TODO: 路由到配置页（待添加）
-  console.log('导航到配置页面');
+const escHtml = (text: string) => {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 };
 
 const autoResize = () => {
@@ -233,296 +122,115 @@ const autoResize = () => {
   }
 };
 
-// ========== 下拉菜单 ==========
-const toggleMentionDropdown = () => {
-  if (showMentionDropdown.value) {
-    showMentionDropdown.value = false;
-    return;
-  }
-  showMentionDropdown.value = true;
-  showModelDropdown.value = false;
-  // 定位到按钮上方
+const newSession = () => {
+  messages.value = [];
+  currentSessionId.value = 'session_' + Date.now();
+};
+
+const scrollToBottom = () => {
   nextTick(() => {
-    const btn = mentionBtnRef.value;
-    const menu = mentionDropdown.value;
-    if (btn && menu) {
-      const rect = btn.getBoundingClientRect();
-      menu.style.left = rect.left + 'px';
-      menu.style.top = (rect.top - menu.offsetHeight - 4) + 'px';
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
     }
   });
 };
 
-const toggleModelDropdown = () => {
-  if (showModelDropdown.value) {
-    showModelDropdown.value = false;
-    return;
-  }
-  showModelDropdown.value = true;
-  showMentionDropdown.value = false;
-  // 定位到按钮上方
-  nextTick(() => {
-    const btn = modelBtnRef.value;
-    const menu = modelDropdown.value;
-    if (btn && menu) {
-      const rect = btn.getBoundingClientRect();
-      menu.style.left = rect.left + 'px';
-      menu.style.top = (rect.top - menu.offsetHeight - 4) + 'px';
-    }
-  });
-};
-
-const insertMention = (name: string) => {
-  inputText.value += `@${name} `;
-  showMentionDropdown.value = false;
-  inputRef.value?.focus();
-};
-
-const selectModel = (modelName: string) => {
-  currentModel.value = modelName;
-  showModelDropdown.value = false;
-};
-
-// ========== 发送消息（SSE流式） ==========
-const isSending = ref(false);
-const sendChat = async () => {
+const sendMessage = async () => {
   const text = inputText.value.trim();
-  if (!text || isSending.value) return;
-  isSending.value = true;
+  if (!text || isStreaming.value) return;
+
+  const sessionId = currentSessionId.value || 'session_' + Date.now();
+  currentSessionId.value = sessionId;
 
   messages.value.push({
-    id: Date.now(),
     role: 'user',
     content: text,
-    time: formatTime(new Date())
   });
 
   inputText.value = '';
   autoResize();
-  await nextTick();
+
+  const msgIdx = messages.value.length;
+  messages.value.push({
+    role: 'assistant',
+    content: '',
+    status: '准备中...',
+  });
+
+  isStreaming.value = true;
   scrollToBottom();
 
-  // 添加打字指示器
-  addTypingIndicator();
+  const onDelta = (data: { sessionId: string; text: string }) => {
+    if (data.sessionId !== sessionId) return;
+    const msg = messages.value[msgIdx];
+    msg.content += data.text;
+    msg.status = '';
+    scrollToBottom();
+  };
 
-  // 解析 @提及
-  const mentionedKb = parseMentionedKb(text);
-  const sendKbId = mentionedKb !== null ? mentionedKb : currentKbId.value;
+  const onStatus = (data: { sessionId: string; text: string }) => {
+    if (data.sessionId !== sessionId) return;
+    const msg = messages.value[msgIdx];
+    msg.status = data.text;
+  };
+
+  const onTool = (data: { sessionId: string; type: string; name: string }) => {
+    if (data.sessionId !== sessionId) return;
+    if (data.type === 'start') {
+      messages.value.push({ role: 'tool', content: `🔧 正在执行: ${data.name}` });
+    }
+    scrollToBottom();
+  };
+
+  const onDone = (data: { sessionId: string }) => {
+    if (data.sessionId !== sessionId) return;
+    isStreaming.value = false;
+    const msg = messages.value[msgIdx];
+    msg.status = '✓ 完成';
+    scrollToBottom();
+  };
+
+  const onError = (data: { sessionId: string; text: string }) => {
+    if (data.sessionId !== sessionId) return;
+    isStreaming.value = false;
+    messages.value[msgIdx].content = '❌ ' + data.text;
+    messages.value[msgIdx].status = '错误';
+    scrollToBottom();
+  };
+
+  API.on('chat:delta', onDelta);
+  API.on('chat:status', onStatus);
+  API.on('chat:tool', onTool);
+  API.on('chat:done', onDone);
+  API.on('chat:error', onError);
 
   try {
-    const formData = new FormData();
-    formData.append('message', text);
-    if (sendKbId) formData.append('kbId', String(sendKbId));
-    formData.append('modelName', currentModel.value);
-
-    const response = await fetch(`${API_BASE}/api/chat/send`, {
-      method: 'POST',
-      body: formData
-    });
-
-    if (!response.ok) throw new Error('Network response was not ok');
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let replyContent = '';
-    let replyDiv: HTMLElement | null = null;
-
-    function readChunk() {
-      reader.read().then((result: any) => {
-        if (result.done) {
-          isSending.value = false;
-          removeTypingIndicator();
-          scrollToBottom();
-          return;
-        }
-
-        const chunk = decoder.decode(result.value, { stream: true });
-        const lines = chunk.split('\n');
-
-        lines.forEach((line: string) => {
-          if (!line.trim()) return;
-          if (line.startsWith('data:')) {
-            line = line.substring(5).trim();
-          }
-
-          try {
-            const data = JSON.parse(line);
-
-            if (data.type === 'text') {
-              removeTypingIndicator();
-              if (!replyDiv) {
-                replyDiv = document.createElement('div');
-                replyDiv.className = 'message assistant';
-                replyDiv.innerHTML = `
-                  <div class="message-avatar">AI</div>
-                  <div class="message-content-wrapper">
-                    <div class="message-header">
-                      <span class="message-author">AI</span>
-                    </div>
-                    <div class="message-content markdown-content"></div>
-                  </div>
-                `;
-                messagesContainer.value?.querySelector('.empty-state')?.remove();
-                const listEl = messagesContainer.value?.querySelector('#messagesList') || messagesContainer.value;
-                listEl?.appendChild(replyDiv);
-              }
-              replyContent += data.content;
-              const contentEl = replyDiv!.querySelector('.message-content') as HTMLElement;
-              if (contentEl) {
-                contentEl.innerHTML = String(renderMarkdown(replyContent));
-              }
-              scrollToBottom();
-            } else if (data.type === 'status') {
-              updateStatusInReply(data.content);
-            } else if (data.type === 'done') {
-              isSending.value = false;
-              scrollToBottom();
-            } else if (data.type === 'error') {
-              removeTypingIndicator();
-              addMessage('assistant', '❌ ' + data.content);
-              isSending.value = false;
-            }
-          } catch (err) {
-            console.warn('Parse error:', err, line);
-          }
-        });
-
-        readChunk();
-      }).catch((err: Error) => {
-        console.error('Read error:', err);
-        isSending.value = false;
-        removeTypingIndicator();
-      });
-    }
-
-    readChunk();
+    await API.chat.send(text, selectedAgent.value, selectedKbId.value, '');
   } catch (err: any) {
-    console.error('Fetch error:', err);
-    isSending.value = false;
-    removeTypingIndicator();
-    addMessage('assistant', '❌ 发送失败: ' + err.message);
+    isStreaming.value = false;
+    messages.value[msgIdx].content = '❌ ' + (err.message || '发送失败');
   }
 };
 
-// ========== 辅助方法 ==========
-function addMessage(role: string, content: string) {
-  const div = document.createElement('div');
-  div.className = 'message ' + role;
-  const avatar = role === 'user' ? 'U' : 'AI';
-  const author = role === 'user' ? '你' : 'AI';
-  const displayContent = role === 'assistant' ? renderMarkdown(content) : content;
-  div.innerHTML = `
-    <div class="message-avatar">${avatar}</div>
-    <div class="message-content-wrapper">
-      <div class="message-header">
-        <span class="message-author">${author}</span>
-      </div>
-      <div class="message-content ${role === 'assistant' ? 'markdown-content' : ''}">${displayContent}</div>
-    </div>
-  `;
-  const listEl = messagesContainer.value?.querySelector('.empty-state')?.parentElement || messagesContainer.value;
-  listEl?.appendChild(div);
-  scrollToBottom();
-}
-
-function addTypingIndicator() {
-  const container = messagesContainer.value;
-  if (!container) return;
-  const div = document.createElement('div');
-  div.className = 'message assistant';
-  div.id = 'typingIndicator';
-  div.innerHTML = `
-    <div class="message-avatar">AI</div>
-    <div class="message-content-wrapper">
-      <div class="message-header">
-        <span class="message-author">AI</span>
-      </div>
-      <div class="message-content">
-        <div class="typing-indicator">
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
-        </div>
-      </div>
-    </div>
-  `;
-  container.appendChild(div);
-  scrollToBottom();
-}
-
-function removeTypingIndicator() {
-  const el = document.getElementById('typingIndicator');
-  if (el) el.remove();
-}
-
-function updateStatusInReply(text: string) {
-  const typingIndicator = document.getElementById('typingIndicator');
-  if (typingIndicator) {
-    const contentWrapper = typingIndicator.querySelector('.message-content-wrapper');
-    if (contentWrapper) {
-      let statusArea = contentWrapper.querySelector('.status-area') as HTMLElement;
-      if (statusArea) {
-        statusArea.textContent = text;
-      } else {
-        statusArea = document.createElement('div');
-        statusArea.className = 'status-area';
-        statusArea.textContent = text;
-        const messageContent = contentWrapper.querySelector('.message-content');
-        if (messageContent) {
-          contentWrapper.insertBefore(statusArea, messageContent);
-        }
-      }
-    }
-  }
-}
-
-function parseMentionedKb(message: string): number | null {
-  const match = message.match(/@(\S+)/);
-  if (match) {
-    const kbName = match[1];
-    for (const kb of kbList.value) {
-      if (kb.name === kbName || kb.name.includes(kbName)) {
-        return kb.id;
-      }
-    }
-  }
-  return null;
-}
-
-function formatTime(date: Date): string {
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  if (diff < 60000) return '刚刚';
-  if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
-  if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
-  return (date.getMonth() + 1) + '月' + date.getDate() + '日 ' +
-    date.getHours().toString().padStart(2, '0') + ':' +
-    date.getMinutes().toString().padStart(2, '0');
-}
-
-const scrollToBottom = () => {
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+const loadKbList = async () => {
+  try {
+    kbList.value = await API.kb.list();
+  } catch {
+    kbList.value = [];
   }
 };
-
-// ========== 点击外部关闭下拉 ==========
-function handleClickOutside(e: MouseEvent) {
-  const target = e.target as HTMLElement;
-  const isFooterBtn = target.classList.contains('footer-btn') || target.closest('.footer-btn');
-  const isMentionDropdown = target.closest('#mentionDropdown');
-  const isModelDropdown = target.closest('#modelDropdown');
-  if (!isFooterBtn && !isMentionDropdown) showMentionDropdown.value = false;
-  if (!isFooterBtn && !isModelDropdown) showModelDropdown.value = false;
-}
 
 onMounted(async () => {
-  document.addEventListener('click', handleClickOutside);
-  await Promise.all([loadKbList(), loadModels()]);
+  await loadKbList();
+  newSession();
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', handleClickOutside);
+  API.removeAllListeners('chat:delta');
+  API.removeAllListeners('chat:status');
+  API.removeAllListeners('chat:tool');
+  API.removeAllListeners('chat:done');
+  API.removeAllListeners('chat:error');
 });
 </script>
 
@@ -534,7 +242,7 @@ onBeforeUnmount(() => {
 }
 
 .content-header {
-  padding: 16px 24px;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -547,6 +255,27 @@ onBeforeUnmount(() => {
   font-size: 18px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.content-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-select, .kb-select {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  background: white;
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+}
+
+.agent-select:focus, .kb-select:focus {
+  border-color: var(--primary);
 }
 
 .content-body {
@@ -615,6 +344,11 @@ onBeforeUnmount(() => {
   color: white;
 }
 
+.message.tool .message-avatar {
+  background: #f59e0b;
+  color: white;
+}
+
 .message-content-wrapper {
   display: flex;
   flex-direction: column;
@@ -633,12 +367,13 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
-.message.user .message-author {
-  color: #64748b;
-}
+.message.user .message-author { color: #64748b; }
+.message.assistant .message-author { color: #6366f1; }
+.message.tool .message-author { color: #f59e0b; }
 
-.message.assistant .message-author {
-  color: #6366f1;
+.message-status {
+  font-size: 11px;
+  color: #94a3b8;
 }
 
 .message-content {
@@ -660,13 +395,12 @@ onBeforeUnmount(() => {
   border: 1px solid #e2e8f0;
 }
 
-.message-time {
-  font-size: 11px;
-  color: #94a3b8;
-}
-
-.message.user .message-time {
-  text-align: right;
+.message.tool .message-content {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  font-size: 13px;
+  padding: 8px 14px;
 }
 
 .empty-state {
@@ -680,35 +414,9 @@ onBeforeUnmount(() => {
   color: #94a3b8;
 }
 
-.empty-icon {
-  font-size: 64px;
-  margin-bottom: 16px;
-  opacity: 0.3;
-}
-
-.empty-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: #1e293b;
-}
-
-.empty-desc {
-  font-size: 14px;
-  line-height: 1.6;
-  color: #64748b;
-}
-
-.empty-action {
-  margin-top: 20px;
-  padding: 8px 20px;
-  background: #6366f1;
-  color: white;
-  border: none;
-  border-radius: 12px;
-  font-size: 14px;
-  cursor: pointer;
-}
+.empty-icon { font-size: 64px; margin-bottom: 16px; opacity: 0.3; }
+.empty-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #1e293b; }
+.empty-desc { font-size: 14px; line-height: 1.6; color: #64748b; }
 
 .chat-input-area {
   padding: 12px 20px;
@@ -737,9 +445,12 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
-.chat-input::placeholder {
-  color: #94a3b8;
+.chat-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
+
+.chat-input::placeholder { color: #94a3b8; }
 
 .input-footer {
   display: flex;
@@ -749,40 +460,15 @@ onBeforeUnmount(() => {
   border-top: 1px solid #f1f5f9;
 }
 
-.input-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.input-left { display: flex; align-items: center; gap: 8px; }
+.input-right { display: flex; align-items: center; gap: 4px; }
 
-.input-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.footer-btn {
-  padding: 6px 12px;
-  border: none;
-  background: transparent;
-  color: #64748b;
+.input-hint {
+  font-size: 12px;
+  color: var(--primary);
+  padding: 4px 10px;
+  background: rgba(99, 102, 241, 0.08);
   border-radius: 10px;
-  font-size: 13px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s;
-}
-
-.footer-btn:hover {
-  background: #f1f5f9;
-  color: #1e293b;
-}
-
-.footer-btn.active {
-  background: rgba(99, 102, 241, 0.1);
-  color: #6366f1;
 }
 
 .send-btn {
@@ -799,137 +485,25 @@ onBeforeUnmount(() => {
   border: none;
 }
 
-.send-btn:hover {
-  background: #4f46e5;
-}
+.send-btn:hover { background: #4f46e5; }
+.send-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
 
-.send-btn:disabled {
-  background: #cbd5e1;
-  cursor: not-allowed;
-}
-
-.divider {
-  width: 1px;
-  height: 16px;
-  background: #e2e8f0;
-}
-
-.dropdown-menu {
-  position: fixed;
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  padding: 8px;
-  width: 200px;
-  max-height: 250px;
-  overflow-y: auto;
-  z-index: 9999;
-}
-
-.dropdown-item {
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.dropdown-item:hover {
-  background: var(--hover);
-}
-
-.dropdown-item.selected {
-  background: rgba(99, 102, 241, 0.08);
-  color: #6366f1;
-}
-
-.dropdown-item-icon {
-  width: 24px;
-  height: 24px;
-  background: rgba(99, 102, 241, 0.1);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--primary);
-  font-size: 12px;
-}
-
-.status-area {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background: rgba(99, 102, 241, 0.08);
-  color: #6366f1;
-  border-radius: 12px;
-  font-size: 12px;
-  margin-bottom: 8px;
-  border: 1px solid rgba(99, 102, 241, 0.15);
-  width: fit-content;
-}
-
-.typing-indicator {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 14px 18px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-}
-
-.typing-dot {
-  width: 6px;
-  height: 6px;
-  background: #94a3b8;
-  border-radius: 50%;
-  animation: typing 1.4s infinite ease-in-out both;
-}
-
-.typing-dot:nth-child(1) {
-  animation-delay: -0.32s;
-}
-
-.typing-dot:nth-child(2) {
-  animation-delay: -0.16s;
-}
-
-@keyframes typing {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-  40% { transform: scale(1); opacity: 1; }
-}
-
-.markdown-content {
+.markdown-body {
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.markdown-content p {
-  margin-bottom: 8px;
-}
-
-.markdown-content ul, .markdown-content ol {
-  padding-left: 20px;
-  margin-bottom: 8px;
-}
-
-.markdown-content li {
-  margin-bottom: 4px;
-}
-
-.markdown-content code {
+.markdown-body p { margin-bottom: 8px; }
+.markdown-body ul, .markdown-body ol { padding-left: 20px; margin-bottom: 8px; }
+.markdown-body li { margin-bottom: 4px; }
+.markdown-body code {
   background: rgba(0,0,0,0.04);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: monospace;
   font-size: 13px;
 }
-
-.markdown-content pre {
+.markdown-body pre {
   background: #1e293b;
   color: #e2e8f0;
   padding: 12px;
@@ -939,34 +513,13 @@ onBeforeUnmount(() => {
   font-family: monospace;
   font-size: 13px;
 }
-
-.markdown-content blockquote {
+.markdown-body blockquote {
   border-left: 3px solid #6366f1;
   padding-left: 10px;
   color: #64748b;
   margin-bottom: 8px;
 }
-
-.markdown-content strong {
-  font-weight: 600;
-}
-
-.markdown-content a {
-  color: #6366f1;
-  text-decoration: none;
-}
-
-.markdown-content a:hover {
-  text-decoration: underline;
-}
-
-.mention-tag {
-  display: inline-block;
-  padding: 1px 6px;
-  background: rgba(99, 102, 241, 0.1);
-  color: #6366f1;
-  font-size: 12px;
-  border-radius: 4px;
-  margin-right: 4px;
-}
+.markdown-body strong { font-weight: 600; }
+.markdown-body a { color: #6366f1; text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
 </style>
