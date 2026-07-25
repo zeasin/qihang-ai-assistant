@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     scan: (id) => ipcRenderer.invoke('kb:scan', { id }),
     search: (id, query) => ipcRenderer.invoke('kb:search', { id, query }),
     status: (id) => ipcRenderer.invoke('kb:status', { id }),
+    setDefault: (id) => ipcRenderer.invoke('kb:setDefault', { id }),
+    getDefault: () => ipcRenderer.invoke('kb:getDefault'),
   },
 
   // Dataset
@@ -48,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createSession: (sessionId, title, mode, source) =>
       ipcRenderer.invoke('chat:session:create', { id: sessionId, title, mode, source }),
     getSessions: () => ipcRenderer.invoke('chat:session:list'),
+    getSessionsBySource: (source) => ipcRenderer.invoke('chat:session:listBySource', { source }),
     getMessages: (sessionId) => ipcRenderer.invoke('chat:session:messages', { sessionId }),
     deleteSession: (sessionId) => ipcRenderer.invoke('chat:session:delete', { sessionId }),
     updateSessionTitle: (sessionId, title) => ipcRenderer.invoke('chat:session:updateTitle', { sessionId, title }),

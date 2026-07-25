@@ -84,8 +84,9 @@ async function start(configData, onMessage) {
             const text = content.text || '';
             const openId = sender.sender_id?.open_id || sender.open_id || '';
             const chatId = message.chat_id || '';
+            const chatType = message.chat_type || 'p2p';
             const messageId = message.message_id || '';
-            logger.info('[Feishu] Parsed message - text: "%s", openId: %s, chatId: %s, messageId: %s', text.slice(0, 200), openId, chatId, messageId);
+            logger.info('[Feishu] Parsed message - text: "%s", openId: %s, chatId: %s, chatType: %s, messageId: %s', text.slice(0, 200), openId, chatId, chatType, messageId);
             if (text && openId && messageHandler) {
               const cleaned = text.replace(/@_user_\d+/g, '').trim();
               logger.info('[Feishu] Dispatching to messageHandler: "%s"', cleaned);
@@ -93,6 +94,7 @@ async function start(configData, onMessage) {
                 text: cleaned,
                 sender: openId,
                 chatId: chatId,
+                chatType: chatType,
                 messageId: messageId,
               });
             } else {
@@ -116,17 +118,17 @@ async function start(configData, onMessage) {
   }
 }
 
-async function sendMessage(openId, content, msgType = 'text') {
+async function sendMessage(receiveId, receiveIdType, content, msgType = 'text') {
   if (!client) {
     logger.warn('[Feishu] sendMessage: no client');
     return;
   }
   try {
-    logger.info('[Feishu] Sending message to %s: "%s"', openId, (typeof content === 'string' ? content : JSON.stringify(content)).slice(0, 200));
+    logger.info('[Feishu] Sending message to %s (type=%s): "%s"', receiveId, receiveIdType, (typeof content === 'string' ? content : JSON.stringify(content)).slice(0, 200));
     await client.im.v1.message.create({
-      params: { receive_id_type: 'open_id' },
+      params: { receive_id_type: receiveIdType },
       data: {
-        receive_id: openId,
+        receive_id: receiveId,
         msg_type: msgType,
         content: typeof content === 'string'
           ? JSON.stringify({ text: content })
@@ -137,6 +139,11 @@ async function sendMessage(openId, content, msgType = 'text') {
   } catch (e) {
     logger.error('[Feishu] sendMessage error: %s', e.message);
   }
+}
+
+function replyMessage(msg, content, msgType) {
+  logger.info('[Feishu] replyMessage: chatId=%s chatType=%s sender=%s', msg.chatId, msg.chatType, msg.sender);
+  return sendMessage(msg.chatId, 'chat_id', content, msgType);
 }
 
 function stop() {
@@ -154,4 +161,4 @@ function isRunning() {
   return running;
 }
 
-module.exports = { sendViaWebhook, setWebhook, getWebhook, start, stop, isRunning, sendMessage };
+module.exports = { sendViaWebhook, setWebhook, getWebhook, start, stop, isRunning, sendMessage, replyMessage };

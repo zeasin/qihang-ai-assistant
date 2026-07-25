@@ -6,7 +6,6 @@ const logger = require('./logger');
 
 let piSdk = null;
 let activeSession = null;
-let modelRuntime = null;
 
 async function ensurePi() {
   if (!piSdk) {
@@ -18,35 +17,6 @@ async function ensurePi() {
 }
 
 // ========== Model Runtime Setup ==========
-
-async function setupModelRuntime() {
-  const sdk = await ensurePi();
-  if (!modelRuntime) {
-    logger.info('[Orchestrator] Creating model runtime...');
-    try {
-      modelRuntime = await sdk.ModelRuntime.create();
-      logger.info('[Orchestrator] Model runtime created');
-    } catch (e) {
-      logger.error('[Orchestrator] Model runtime creation failed:', e.message);
-      return null;
-    }
-  }
-
-  // Check available models
-  try {
-    const available = await modelRuntime.getAvailable();
-    logger.info(`[Orchestrator] Available models: ${available.length}`);
-    if (available.length > 0) {
-      logger.info(`[Orchestrator] First model: ${available[0].provider}/${available[0].name || available[0].id}`);
-    } else {
-      logger.warn('[Orchestrator] No models available! You need to configure API keys.');
-    }
-  } catch (e) {
-    logger.warn(`[Orchestrator] getAvailable failed: ${e.message}`);
-  }
-
-  return modelRuntime;
-}
 
 // ========== Custom Tool Definitions ==========
 
@@ -198,14 +168,14 @@ const SYSTEM_PROMPT = `你是一位智能办公助理，可以帮助用户处理
 
 async function createSession(projectDir) {
   const sdk = await ensurePi();
-  logger.info('[Orchestrator] Setting up model runtime...');
-  const mr = await setupModelRuntime();
+  logger.info('[Orchestrator] createSession: cwd=%s', projectDir || process.cwd());
 
   logger.info('[Orchestrator] Creating tools...');
   const tools = await createTools(db);
+  logger.info('[Orchestrator] Custom tools: %d', tools.length);
 
   const builtinTools = ['read', 'bash', 'grep', 'find', 'ls'];
-  logger.info(`[Orchestrator] Built-in tools: ${builtinTools.join(', ')}`);
+  logger.info('[Orchestrator] Built-in tools: %s', builtinTools.join(', '));
 
   const sessionOptions = {
     cwd: projectDir || process.cwd(),
@@ -214,24 +184,19 @@ async function createSession(projectDir) {
     sessionManager: sdk.SessionManager.inMemory(),
   };
 
-  if (mr) {
-    sessionOptions.modelRuntime = mr;
-    logger.info('[Orchestrator] Model runtime attached to session');
-  } else {
-    logger.warn('[Orchestrator] No model runtime — pi agent will try default auth');
-  }
-
   try {
-    logger.info('[Orchestrator] Creating agent session...');
+    logger.info('[Orchestrator] Calling createAgentSession...');
     const result = await sdk.createAgentSession(sessionOptions);
-    logger.info('[Orchestrator] Session created:', result.session.sessionId);
+    logger.info('[Orchestrator] Session created: id=%s', result.session?.sessionId || 'unknown');
     if (result.modelFallbackMessage) {
-      logger.warn('[Orchestrator] Model fallback:', result.modelFallbackMessage);
+      logger.warn('[Orchestrator] Model fallback: %s', result.modelFallbackMessage);
     }
     activeSession = result.session;
+    logger.info('[Orchestrator] Session ready');
     return result.session;
   } catch (e) {
-    logger.error('[Orchestrator] Session creation FAILED:', e.message);
+    logger.error('[Orchestrator] Session creation FAILED: %s', e.message);
+    logger.error('[Orchestrator] Session creation stack: %s', e.stack);
     throw e;
   }
 }
@@ -240,64 +205,72 @@ async function chat(session, text, onDelta, onTool, onDone, onError, images) {
   logger.info(`[Orchestrator] chat() called, text length: ${text.length}${images?.length ? `, images: ${images.length}` : ''}`);
 
   session.subscribe((event) => {
-    logger.info(`[Orchestrator] Event: ${event.type}`);
     switch (event.type) {
-      case 'message_update':
-        if (event.assistantMessageEvent?.type === 'text_delta') {
-          const delta = event.assistantMessageEvent.delta;
-          logger.info(`[Orchestrator] Delta: ${delta.substring(0, 80)}${delta.length > 80 ? '...' : ''}`);
+      case 'message_update': {
+        const msg = event.assistantMessageEvent;
+        if (!msg) { logger.debug('[Orchestrator] message_update without assistantMessageEvent'); break; }
+        if (msg.type === 'text_delta') {
+          const delta = msg.delta;
+          logger.info(`[Orchestrator] text_delta: ${delta.substring(0, 120)}`);
           onDelta?.(delta);
-        } else if (event.assistantMessageEvent?.type === 'thinking_delta') {
-          onTool?.({ type: 'thinking', text: event.assistantMessageEvent.delta });
+        } else if (msg.type === 'thinking_delta') {
+          logger.info(`[Orchestrator] thinking_delta: ${(msg.delta || '').substring(0, 120)}`);
+          onTool?.({ type: 'thinking', text: msg.delta });
+        } else {
+          logger.info(`[Orchestrator] message_update type=${msg.type}`);
         }
         break;
+      }
       case 'tool_execution_start':
-        logger.info(`[Orchestrator] Tool start: ${event.toolName}`);
+        logger.info(`[Orchestrator] tool_start: ${event.toolName} args=${JSON.stringify(event.args || {}).substring(0, 200)}`);
         onTool?.({ type: 'start', name: event.toolName, args: event.args });
         break;
       case 'tool_execution_end':
-        logger.info(`[Orchestrator] Tool end: ${event.toolName} error=${event.isError}`);
+        logger.info(`[Orchestrator] tool_end: ${event.toolName} error=${event.isError} result=${JSON.stringify(event.result || {}).substring(0, 200)}`);
         onTool?.({ type: 'end', name: event.toolName, error: event.isError });
         break;
       case 'agent_start':
-        logger.info('[Orchestrator] Agent start');
+        logger.info('[Orchestrator] agent_start — pi agent 开始处理');
         break;
       case 'agent_end':
-        logger.info('[Orchestrator] Agent end');
+        logger.info('[Orchestrator] agent_end — pi agent 处理完成');
         onDone?.();
         break;
       case 'turn_start':
-        logger.info('[Orchestrator] Turn start');
+        logger.info('[Orchestrator] turn_start — 新的一轮 LLM 调用');
         break;
       case 'turn_end':
-        logger.info('[Orchestrator] Turn end');
+        logger.info('[Orchestrator] turn_end — 本轮 LLM 调用结束');
         break;
       case 'message_start':
-        logger.info('[Orchestrator] Message start');
+        logger.info('[Orchestrator] message_start — 新消息开始');
         break;
       case 'message_end':
-        logger.info('[Orchestrator] Message end');
+        logger.info('[Orchestrator] message_end — 消息完成');
         break;
       default:
-        logger.info(`[Orchestrator] Unhandled event: ${event.type}`);
+        logger.info(`[Orchestrator] event: ${event.type} data=${JSON.stringify(event).substring(0, 300)}`);
     }
   });
 
+  const startTime = Date.now();
   try {
     logger.info('[Orchestrator] Calling session.prompt()...');
     const promptOptions = images?.length ? { images } : undefined;
+    logger.info('[Orchestrator] prompt input length: %d, images: %d', text.length, images?.length || 0);
 
-    const timeoutMs = 120000;
+    const timeoutMs = 30000;
     const promptPromise = session.prompt(text, promptOptions);
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error(`AI 响应超时（${timeoutMs / 1000}秒），请检查模型配置是否可用`)), timeoutMs)
     );
     await Promise.race([promptPromise, timeoutPromise]);
-
-    logger.info('[Orchestrator] session.prompt() completed');
+    const elapsed = Date.now() - startTime;
+    logger.info('[Orchestrator] session.prompt() completed in %dms', elapsed);
   } catch (e) {
-    logger.error('[Orchestrator] session.prompt() FAILED:', e.message);
-    logger.error('[Orchestrator] Error stack:', e.stack);
+    const elapsed = Date.now() - startTime;
+    logger.error('[Orchestrator] session.prompt() FAILED after %dms: %s', elapsed, e.message);
+    logger.error('[Orchestrator] Error stack: %s', e.stack);
     onError?.(e.message);
   } finally {
     setTimeout(() => {
@@ -313,24 +286,14 @@ async function chat(session, text, onDelta, onTool, onDone, onError, images) {
 async function checkStatus() {
   try {
     await ensurePi();
-    if (!modelRuntime) await setupModelRuntime();
-    let availableCount = 0;
-    let firstModel = null;
-    try {
-      const available = await modelRuntime?.getAvailable();
-      if (available) {
-        availableCount = available.length;
-        firstModel = available[0] ? `${available[0].provider}/${available[0].name || available[0].id}` : null;
-      }
-    } catch {}
     return {
       installed: true,
       version: '0.82.0',
-      modelsAvailable: availableCount,
-      firstModel,
+      modelsAvailable: -1,
+      firstModel: 'default',
     };
   } catch (e) {
-    return { installed: false, version: null, modelsAvailable: 0, firstModel: null, hasApiKey: false, error: e.message };
+    return { installed: false, version: null, modelsAvailable: 0, firstModel: null, error: e.message };
   }
 }
 

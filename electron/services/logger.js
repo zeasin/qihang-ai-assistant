@@ -90,18 +90,21 @@ const logger = {
     if (LEVELS['INFO'] < LEVELS[currentLogLevel]) return;
     const line = format('INFO', message, ...args);
     append(line);
+    console.log(line);
   },
 
   warn(message, ...args) {
     if (LEVELS['WARN'] < LEVELS[currentLogLevel]) return;
     const line = format('WARN', message, ...args);
     append(line);
+    console.warn(line);
   },
 
   error(message, ...args) {
     if (LEVELS['ERROR'] < LEVELS[currentLogLevel]) return;
     const line = format('ERROR', message, ...args);
     append(line);
+    console.error(line);
   },
 
   getLogDir() {

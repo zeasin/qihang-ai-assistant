@@ -219,9 +219,9 @@ function initSchema() {
 /** Migrate from old app branch schema to plan branch schema */
 function migrate() {
   const version = schemaVersion();
-  if (version >= 1) return;
-  setSchemaVersion(1);
-  saveDb();
+
+  if (version < 1) {
+    setSchemaVersion(1);
 
   // 1) knowledge_bases: old schema uses TEXT id + path; new uses INTEGER id + notes_dir
   const hasOldKb = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='knowledge_bases' AND sql LIKE '%TEXT%id%'");
@@ -326,6 +326,12 @@ function migrate() {
   // If old documents table had TEXT kb_id referencing old kb, it still works
   // Just add missing columns if needed
   try { db.run("ALTER TABLE documents ADD COLUMN kb_id INTEGER"); } catch {}
+  }
+
+  if (version < 2) {
+    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN is_default INTEGER DEFAULT 0"); } catch {}
+    setSchemaVersion(2);
+  }
 
   saveDb();
 }
@@ -389,6 +395,14 @@ const kb = {
   insertChunk: (docId, content) => run('INSERT INTO chunks (doc_id, content) VALUES (?, ?)', docId, content),
   getChunks: (kbId) => q('SELECT c.content FROM chunks c JOIN documents d ON c.doc_id = d.id WHERE d.kb_id = ?', kbId).map(r => r.content),
   deleteDocs: (kbId) => { run('DELETE FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE kb_id = ?)', kbId); run('DELETE FROM documents WHERE kb_id = ?', kbId); },
+  setDefault: (id) => {
+    run('UPDATE knowledge_bases SET is_default = 0 WHERE is_default = 1');
+    if (id) run('UPDATE knowledge_bases SET is_default = 1 WHERE id = ?', id);
+  },
+  getDefault: () => {
+    const r = qOne('SELECT * FROM knowledge_bases WHERE is_default = 1');
+    return r ? { ...r, path: r.notes_dir } : null;
+  },
 };
 
 // ========== Datasets ==========
@@ -428,6 +442,7 @@ const chat = {
   messages: (sessionId) => q("SELECT * FROM messages WHERE session_id = ? ORDER BY id", sessionId),
   deleteSession: (sessionId) => { run("DELETE FROM turn_embeddings WHERE session_id = ?", sessionId); run('DELETE FROM messages WHERE session_id = ?', sessionId); run('DELETE FROM sessions WHERE id = ?', sessionId); },
   updateSessionTitle: (id, title) => { run("UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ?", title, id); },
+  updateSessionMode: (id, mode) => { run("UPDATE sessions SET mode = ?, updated_at = datetime('now') WHERE id = ?", mode, id); },
 };
 
 // ========== Projects ==========

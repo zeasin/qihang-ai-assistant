@@ -162,6 +162,55 @@ function sendToRenderer(channel, data) {
 
 // ========== Feishu message handler (shared) ==========
 
+function parseFeishuContext(text, db) {
+  const projects = db.project.list();
+  const kbs = db.kb.list();
+  let cleanText = text;
+  let projectDir = '';
+  const kbIds = [];
+
+  const projectMatch = text.match(/\/code\s*[：:]\s*(\S+)/);
+  if (projectMatch) {
+    const projectName = projectMatch[1];
+    const found = projects.find(p => p.name.includes(projectName));
+    if (found) projectDir = found.dir;
+    cleanText = cleanText.replace(projectMatch[0], '').trim();
+  }
+
+  const bracketMatch = text.match(/\[笔记库\s*[：:]\s*([^\]]+)\]/);
+  if (bracketMatch) {
+    const kbName = bracketMatch[1].trim();
+    const found = kbs.find(k => k.name.includes(kbName) || kbName.includes(k.name));
+    if (found) kbIds.push(found.id);
+    cleanText = cleanText.replace(bracketMatch[0], '').trim();
+  }
+
+  const colonMatch = cleanText.match(/笔记库\s*[：:]\s*(\S+)/);
+  if (colonMatch && kbIds.length === 0) {
+    const kbName = colonMatch[1];
+    const found = kbs.find(k => k.name.includes(kbName) || kbName.includes(k.name));
+    if (found) kbIds.push(found.id);
+    cleanText = cleanText.replace(colonMatch[0], '').trim();
+  }
+
+  if (kbIds.length === 0) {
+    for (const kb of kbs) {
+      if (text.includes(kb.name)) {
+        kbIds.push(kb.id);
+        cleanText = cleanText.replace(kb.name, '').trim();
+        break;
+      }
+    }
+  }
+
+  if (!projectDir && kbIds.length === 0) {
+    const defaultKb = db.kb.getDefault();
+    if (defaultKb) kbIds.push(defaultKb.id);
+  }
+
+  return { projectDir, kbIds, cleanText: cleanText || text };
+}
+
 const feishuMessageHandler = async (msg) => {
   const sessionId = 'feishu_' + msg.chatId + '_' + new Date().toISOString().slice(0, 10);
   logger.info('═══════════════════════════════════════');
@@ -179,51 +228,104 @@ const feishuMessageHandler = async (msg) => {
     mainWindow.webContents.send('feishu:message', msg);
   }
 
+  feishu.replyMessage(msg, '🤔 AI 正在思考，请稍后...');
+
   try {
-    const feishuRouter = require('./services/feishu-router');
-    const deps = {
-      db,
-      kb: require('./services/knowledge-base'),
-      project: db.project,
-      feishu,
-      orchestrator,
+    const context = parseFeishuContext(msg.text, db);
+
+    const kbFallback = { hasResults: false, text: '' };
+    const buildKBInjectedPrompt = async () => {
+      if (context.kbIds.length === 0) return context.cleanText;
+      const kbNames = context.kbIds.map(id => db.kb.get(id)?.name).filter(Boolean).join(', ');
+      try {
+        const rag = require('./services/rag');
+        let allResults = [];
+        for (const kbId of context.kbIds) {
+          const docs = await rag.searchKnowledgeBase(kbId, context.cleanText);
+          allResults.push(...docs);
+        }
+        allResults.sort((a, b) => b.score - a.score);
+        const top = allResults.slice(0, 6);
+        if (top.length === 0) {
+          const kbPaths = context.kbIds.map(id => db.kb.get(id)?.path).filter(Boolean).join(', ');
+          kbFallback.text = `📚 笔记库「${kbNames}」中未找到相关内容。请在笔记库目录中搜索：${kbPaths}`;
+          return `笔记库「${kbNames}」的 RAG 索引未命中。请在以下目录中用 grep/find 搜索文件：${kbPaths}\n\n用户问题：${context.cleanText}`;
+        }
+        const contextText = top.map((d, i) => `【结果${i + 1}】${d.text}`).join('\n\n');
+        kbFallback.hasResults = true;
+        kbFallback.text = top.map((d, i) => `📄 **相关文档 ${i + 1}**\n${d.text}`).join('\n\n---\n\n');
+        return `以下是知识库「${kbNames}」中与问题相关的内容：\n\n${contextText}\n\n请基于以上知识库内容回答用户问题，如果知识库内容不足以回答，请说明。\n\n用户问题：${context.cleanText}`;
+      } catch (e) {
+        logger.error('[Feishu] KB search error: %s', e.message);
+        return context.cleanText;
+      }
     };
 
-    let reply = await feishuRouter.route({
-      sender: msg.sender,
-      text: msg.text,
-      chatId: msg.chatId,
-      messageId: msg.messageId,
-    }, deps);
-
-    const matchProject = extractProjectFromText(msg.text);
-    const projectDir = matchProject?.dir || '';
-
-    if (reply === null) {
-      const session = await orchestrator.createSession(projectDir);
-      reply = '';
-      await orchestrator.chat(session, msg.text,
+    const setMode = (mode) => { try { db.chat.updateSessionMode(sessionId, mode); } catch {} };
+    const questionText = await buildKBInjectedPrompt();
+    const replyOrchestrator = async (cwd) => {
+      const session = await orchestrator.createSession(cwd);
+      let reply = '';
+      const sendReply = (text) => {
+        if (text) {
+          db.chat.addMessage(sessionId, 'assistant', text, 'general', 'feishu');
+          feishu.replyMessage(msg, text);
+        }
+      };
+      await orchestrator.chat(session, questionText,
         (d) => { reply += d; },
         () => {},
         () => {
           logger.info('[Feishu] Sending reply: "%s"', reply.slice(0, 200));
-          if (reply) {
-            db.chat.addMessage(sessionId, 'assistant', reply, 'general', 'feishu');
-            feishu.sendMessage(msg.sender, reply);
-          }
+          if (reply) { sendReply(reply); }
+          else if (kbFallback.text) { sendReply(kbFallback.text); }
         },
         (e) => {
           logger.error('[Feishu] Chat error: %s', e);
-          feishu.sendMessage(msg.sender, `处理出错: ${e}`);
+          if (kbFallback.text) { sendReply(kbFallback.text); }
+          else { sendReply(`处理出错: ${e}`); }
         }
       );
+    };
+
+    if (context.projectDir) {
+      setMode('code');
+      await replyOrchestrator(context.projectDir);
+    } else if (context.kbIds.length > 0) {
+      setMode('kb');
+      const kbCwd = db.kb.get(context.kbIds[0])?.path || '';
+      await replyOrchestrator(kbCwd);
     } else {
-      db.chat.addMessage(sessionId, 'assistant', reply, 'general', 'feishu');
-      feishu.sendMessage(msg.sender, reply);
+      const feishuRouter = require('./services/feishu-router');
+      const deps = {
+        db,
+        kb: require('./services/knowledge-base'),
+        project: db.project,
+        feishu,
+        orchestrator,
+      };
+
+      const intent = feishuRouter.classify(context.cleanText);
+      let reply = await feishuRouter.route({
+        sender: msg.sender,
+        text: context.cleanText,
+        chatId: msg.chatId,
+        messageId: msg.messageId,
+      }, deps);
+
+      if (reply === null) {
+        setMode('general');
+        await replyOrchestrator('');
+      } else {
+        const modeMap = { QUERY_INFO: 'query', RECORD_LOG: 'record', CREATE_BUG: 'bug', UPDATE_BUG: 'bug', CODE_INVESTIGATE: 'code', DAILY_REPORT: 'report' };
+        setMode(modeMap[intent] || 'general');
+        db.chat.addMessage(sessionId, 'assistant', reply, 'general', 'feishu');
+        feishu.replyMessage(msg, reply);
+      }
     }
   } catch (e) {
     logger.error('[Feishu] Handler exception: %s', e.message);
-    feishu.sendMessage(msg.sender, `处理出错: ${e.message}`);
+    feishu.replyMessage(msg, `处理出错: ${e.message}`);
   }
 };
 
@@ -232,21 +334,6 @@ function startFeishu(configData) {
   db.configSet('feishuAppSecret', configData.app_secret || '');
   feishu.start(configData, feishuMessageHandler);
   updateTrayMenu(getServicesStatus());
-}
-
-function extractProjectFromText(text) {
-  try {
-    const projects = db.project.list();
-    for (const p of projects) {
-      if (text.includes(p.name)) return { id: p.id, name: p.name, dir: p.dir };
-    }
-    const match = text.match(/项目[：:]\s*(\S+)/);
-    if (match) {
-      const found = projects.find(p => p.name.includes(match[1]));
-      if (found) return { id: found.id, name: found.name, dir: found.dir };
-    }
-  } catch {}
-  return null;
 }
 
 // ========== IPC Handlers ==========
@@ -290,6 +377,8 @@ ipcMain.handle('kb:scan', async (_, { id }) => {
     return { error: e.message };
   }
 });
+ipcMain.handle('kb:setDefault', (_, { id }) => db.kb.setDefault(id));
+ipcMain.handle('kb:getDefault', () => db.kb.getDefault());
 ipcMain.handle('kb:search', async (_, { id, query }) => {
   try {
     const rag = require('./services/rag');
@@ -357,6 +446,7 @@ ipcMain.handle('chat:session:create', (_, { id, title, mode, source }) => {
   return db.chat.createSession(sid, title, mode || 'general', source || 'ui');
 });
 ipcMain.handle('chat:session:list', () => db.chat.sessions());
+ipcMain.handle('chat:session:listBySource', (_, { source }) => db.chat.sessionsBySource(source));
 ipcMain.handle('chat:session:messages', (_, { sessionId }) => db.chat.messages(sessionId));
 ipcMain.handle('chat:session:delete', (_, { sessionId }) => db.chat.deleteSession(sessionId));
 ipcMain.handle('chat:session:updateTitle', (_, { sessionId, title }) => db.chat.updateSessionTitle(sessionId, title));

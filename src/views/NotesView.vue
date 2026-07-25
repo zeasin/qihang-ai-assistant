@@ -5,8 +5,14 @@
       <div class="header-actions">
         <div class="kb-select-group">
           <select class="form-control" v-model="selectedKbId" @change="onKbChange">
-            <option v-for="kb in kbList" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
+            <option v-for="kb in kbList" :key="kb.id" :value="kb.id">
+              {{ kb.name }}{{ kb.is_default ? ' ★' : '' }}
+            </option>
           </select>
+          <button class="btn btn-sm btn-secondary" @click="toggleDefaultKb" :disabled="!selectedKbId || isDefault(selectedKbId)" title="设为默认">
+            ★ 设为默认
+          </button>
+          <button class="btn btn-sm btn-warning" v-if="isDefault(selectedKbId)" @click="clearDefaultKb" title="取消默认">☆</button>
           <button class="btn btn-sm btn-secondary" @click="startAddKb" title="添加笔记库">+</button>
           <button class="btn btn-sm btn-danger" @click="removeKb" :disabled="!selectedKbId" title="删除笔记库">−</button>
         </div>
@@ -181,6 +187,22 @@ async function removeKb() {
   }
 }
 
+function isDefault(kbId: string) {
+  const kb = kbList.value.find((k: any) => k.id === kbId);
+  return kb?.is_default === 1 || kb?.is_default === true;
+}
+
+async function toggleDefaultKb() {
+  if (!selectedKbId.value) return;
+  await API.kb.setDefault(selectedKbId.value);
+  await loadKbList();
+}
+
+async function clearDefaultKb() {
+  await API.kb.setDefault(null);
+  await loadKbList();
+}
+
 const onKbChange = async () => {
   selectedFile.value = null;
   fileContent.value = '';
@@ -236,6 +258,7 @@ onMounted(() => {
 .btn-secondary { background: #f5f5f7; }
 .btn-danger { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
 .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-warning { background: #fffbeb; border-color: #fde68a; color: #b45309; }
 
 /* Modal */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }

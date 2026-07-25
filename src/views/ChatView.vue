@@ -15,8 +15,7 @@
             @click="loadSession(s.id)"
           >
             <div class="session-title">
-              <span v-if="s.source === 'feishu'" class="source-badge feishu">飞</span>
-              <span v-else class="source-badge ui">Web</span>
+              <span class="source-badge ui">Web</span>
               {{ s.title || '新对话' }}
             </div>
             <div class="session-meta">
@@ -284,7 +283,8 @@ const formatDate = (d: string) => {
 
 const loadSessions = async () => {
   try {
-    sessions.value = (await API.chat.getSessions()) || [];
+    const all = (await API.chat.getSessions()) || [];
+    sessions.value = all.filter((s: any) => s.source !== 'feishu');
   } catch {
     sessions.value = [];
   }
