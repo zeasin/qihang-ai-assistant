@@ -192,10 +192,27 @@ function initSchema() {
       url TEXT,
       cron_expression TEXT,
       enabled INTEGER DEFAULT 1,
+      notify_feishu INTEGER DEFAULT 1,
       dataset_id TEXT,
       params_json TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS reminders (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      message TEXT DEFAULT '',
+      type TEXT NOT NULL,
+      time TEXT DEFAULT '09:00',
+      date TEXT DEFAULT '',
+      day_of_week INTEGER DEFAULT 0,
+      day_of_month INTEGER DEFAULT 1,
+      month_day TEXT DEFAULT '',
+      enabled INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL,
+      last_triggered TEXT DEFAULT '',
+      kb_id INTEGER DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS documents (
@@ -211,6 +228,18 @@ function initSchema() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       doc_id INTEGER NOT NULL REFERENCES documents(id),
       content TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS todos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      priority TEXT DEFAULT 'mid',
+      due_date TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending',
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
     );
   `);
   saveDb();
@@ -326,6 +355,9 @@ function migrate() {
   // If old documents table had TEXT kb_id referencing old kb, it still works
   // Just add missing columns if needed
   try { db.run("ALTER TABLE documents ADD COLUMN kb_id INTEGER"); } catch {}
+
+  // 9) Add notify_feishu column to existing collector_tasks
+  try { db.run("ALTER TABLE collector_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
   }
 
   if (version < 2) {
@@ -518,17 +550,85 @@ const project = {
 // ========== Collector Tasks ==========
 const task = {
   list: () => q('SELECT * FROM collector_tasks ORDER BY created_at DESC'),
-  add: (id, name, cronExpr, taskType, configJson) => {
-    run('INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json) VALUES (?, ?, ?, ?, ?)', id, name, cronExpr, taskType, configJson || '{}');
-    return { id };
+  get: (id) => qOne('SELECT * FROM collector_tasks WHERE id = ?', id),
+  add: (name, cronExpr, taskType, params) => {
+    const taskId = 't_' + Date.now();
+    run('INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, dataset_id, prompt_key, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      taskId, name, cronExpr, taskType, JSON.stringify(params || {}), (params && params.dataset_id) || '', (params && params.prompt_key) || '', (params && params.url) || '');
+    const r = qOne('SELECT id FROM collector_tasks WHERE task_id = ?', taskId);
+    return { id: r.id, task_id: taskId };
+  },
+  update: (id, data) => {
+    const fields = []; const params = [];
+    if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
+    if (data.cron_expression !== undefined) { fields.push('cron_expression = ?'); params.push(data.cron_expression); }
+    if (data.task_type !== undefined) { fields.push('task_type = ?'); params.push(data.task_type); }
+    if (data.enabled !== undefined) { fields.push('enabled = ?'); params.push(data.enabled ? 1 : 0); }
+    if (data.notify_feishu !== undefined) { fields.push('notify_feishu = ?'); params.push(data.notify_feishu ? 1 : 0); }
+    if (data.params_json !== undefined) { fields.push('params_json = ?'); params.push(typeof data.params_json === 'string' ? data.params_json : JSON.stringify(data.params_json)); }
+    if (data.dataset_id !== undefined) { fields.push('dataset_id = ?'); params.push(data.dataset_id); }
+    if (data.prompt_key !== undefined) { fields.push('prompt_key = ?'); params.push(data.prompt_key); }
+    if (data.url !== undefined) { fields.push('url = ?'); params.push(data.url); }
+    if (fields.length) { fields.push("updated_at = datetime('now')"); params.push(id); run(`UPDATE collector_tasks SET ${fields.join(', ')} WHERE id = ?`, ...params); }
   },
   remove: (id) => run('DELETE FROM collector_tasks WHERE id = ?', id),
-  setEnabled: (id, enabled) => run('UPDATE collector_tasks SET enabled = ? WHERE id = ?', enabled ? 1 : 0, id),
+  setEnabled: (id, enabled) => run('UPDATE collector_tasks SET enabled = ?, updated_at = datetime(\'now\') WHERE id = ?', enabled ? 1 : 0, id),
   getActive: () => q("SELECT * FROM collector_tasks WHERE enabled = 1"),
+};
+
+// ========== Reminders ==========
+const reminder = {
+  list: () => q('SELECT * FROM reminders ORDER BY created_at DESC'),
+  get: (id) => qOne('SELECT * FROM reminders WHERE id = ?', id),
+  add: (data) => {
+    const id = data.id || 'R' + Date.now();
+    run('INSERT OR IGNORE INTO reminders (id, name, message, type, time, date, day_of_week, day_of_month, month_day, enabled, created_at, last_triggered, kb_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      id, data.name, data.message || '', data.type, data.time || '09:00', data.date || '',
+      data.day_of_week || 0, data.day_of_month || 1, data.month_day || '',
+      data.enabled !== undefined ? (data.enabled ? 1 : 0) : 1,
+      data.created_at || new Date().toISOString().slice(0, 19).replace('T', ' '),
+      data.last_triggered || '', data.kb_id || null);
+    return { id };
+  },
+  update: (id, data) => {
+    const fields = []; const params = [];
+    if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
+    if (data.message !== undefined) { fields.push('message = ?'); params.push(data.message); }
+    if (data.type !== undefined) { fields.push('type = ?'); params.push(data.type); }
+    if (data.time !== undefined) { fields.push('time = ?'); params.push(data.time); }
+    if (data.enabled !== undefined) { fields.push('enabled = ?'); params.push(data.enabled ? 1 : 0); }
+    if (fields.length) { params.push(id); run(`UPDATE reminders SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+  },
+  remove: (id) => run('DELETE FROM reminders WHERE id = ?', id),
+  setEnabled: (id, enabled) => run('UPDATE reminders SET enabled = ? WHERE id = ?', enabled ? 1 : 0, id),
+  getActive: () => q("SELECT * FROM reminders WHERE enabled = 1"),
+};
+
+// ========== Todos ==========
+const todo = {
+  list: () => q('SELECT * FROM todos ORDER BY sort_order ASC, created_at DESC'),
+  get: (id) => qOne('SELECT * FROM todos WHERE id = ?', id),
+  add: (data) => {
+    run('INSERT INTO todos (title, description, priority, due_date, status) VALUES (?, ?, ?, ?, ?)',
+      data.title, data.description || '', data.priority || 'mid', data.due_date || '', data.status || 'pending');
+    const r = qOne('SELECT id FROM todos WHERE title = ? ORDER BY id DESC', data.title);
+    return { id: r.id };
+  },
+  update: (id, data) => {
+    const fields = []; const params = [];
+    if (data.title !== undefined) { fields.push('title = ?'); params.push(data.title); }
+    if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
+    if (data.priority !== undefined) { fields.push('priority = ?'); params.push(data.priority); }
+    if (data.due_date !== undefined) { fields.push('due_date = ?'); params.push(data.due_date); }
+    if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
+    if (data.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(data.sort_order); }
+    if (fields.length) { fields.push("updated_at = datetime('now')"); params.push(id); run(`UPDATE todos SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+  },
+  remove: (id) => run('DELETE FROM todos WHERE id = ?', id),
 };
 
 function close() {
   if (db) { saveDb(); db.close(); db = null; }
 }
 
-module.exports = { getDb, close, configGet, configSet, kb, dm, ds, chat, task, project };
+module.exports = { getDb, close, configGet, configSet, kb, dm, ds, chat, task, reminder, todo, project };

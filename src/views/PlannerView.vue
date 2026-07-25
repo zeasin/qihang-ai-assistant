@@ -1,14 +1,14 @@
 <template>
   <div class="planner-view">
     <div class="content-header">
-      <h1 class="content-title">任务提醒</h1>
+      <h1 class="content-title">提醒</h1>
     </div>
     
     <div class="content-body">
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">任务看板</h3>
-          <button class="btn btn-primary btn-sm" @click="createTask">新建任务</button>
+          <h3 class="card-title">待办</h3>
+          <button class="btn btn-primary btn-sm" @click="createTask">新建待办</button>
         </div>
         
         <div class="task-board">
@@ -73,7 +73,7 @@
       
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">定时提醒</h3>
+          <h3 class="card-title">提醒</h3>
           <button class="btn btn-primary btn-sm" @click="createReminder">新建提醒</button>
         </div>
         
@@ -93,7 +93,7 @@
               ></div>
             </div>
             <div class="reminder-message">{{ reminder.message }}</div>
-            <div class="reminder-schedule">⏰ {{ reminder.schedule || getScheduleText(reminder) }}</div>
+            <div class="reminder-schedule">⏰ {{ getScheduleText(reminder) }}</div>
           </div>
         </div>
       </div>
@@ -179,14 +179,14 @@
             </div>
             <div class="form-group" v-if="editingReminder.type === 'weekly'">
               <label>星期几</label>
-              <select class="form-control" v-model="editingReminder.dayOfWeek">
-                <option value="1">周一</option>
-                <option value="2">周二</option>
-                <option value="3">周三</option>
-                <option value="4">周四</option>
-                <option value="5">周五</option>
-                <option value="6">周六</option>
-                <option value="7">周日</option>
+              <select class="form-control" v-model.number="editingReminder.day_of_week">
+                <option :value="1">周一</option>
+                <option :value="2">周二</option>
+                <option :value="3">周三</option>
+                <option :value="4">周四</option>
+                <option :value="5">周五</option>
+                <option :value="6">周六</option>
+                <option :value="7">周日</option>
               </select>
             </div>
             <div class="form-group" v-if="editingReminder.type === 'once'">
@@ -195,7 +195,7 @@
             </div>
             <div class="form-group" v-if="editingReminder.type === 'monthly'">
               <label>几号</label>
-              <input type="number" class="form-control" v-model="editingReminder.dayOfMonth" min="1" max="31" placeholder="1-31">
+              <input type="number" class="form-control" v-model.number="editingReminder.day_of_month" min="1" max="31" placeholder="1-31">
             </div>
           </div>
         </div>
@@ -229,6 +229,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 
+const API = window.electronAPI;
+
 interface Task {
   id: number;
   title: string;
@@ -239,17 +241,17 @@ interface Task {
 }
 
 interface Reminder {
-  id: number;
+  id: string;
   name: string;
   message: string;
-  schedule: string;
   type: string;
   time: string;
   date: string;
-  dayOfWeek: string;
-  dayOfMonth: string;
-  monthDay: string;
+  day_of_week: number;
+  day_of_month: number;
+  month_day: string;
   enabled: boolean;
+  created_at: string;
 }
 
 const tasks = ref<Task[]>([]);
@@ -269,16 +271,26 @@ const editingTask = ref<Task>({
 const showReminderModal = ref(false);
 const isEditingReminder = ref(false);
 const editingReminder = ref<Reminder>({
-  id: 0, name: '', message: '', type: 'daily', time: '09:00',
-  date: '', dayOfWeek: '1', dayOfMonth: '',
-  monthDay: '', schedule: '', enabled: true
+  id: '', name: '', message: '', type: 'daily', time: '09:00',
+  date: '', day_of_week: 1, day_of_month: 1,
+  month_day: '', enabled: true, created_at: ''
 });
 
 const showDeleteModal = ref(false);
-const deleteId = ref(0);
+const deleteId = ref('');
 const deleteType = ref('');
 
-// ========== 任务 CRUD ==========
+// ========== 待办 CRUD ==========
+async function loadTodos() {
+  try {
+    const list = await API.todo.list();
+    tasks.value = list.map((t: any) => ({
+      id: t.id, title: t.title, description: t.description || '',
+      priority: t.priority || 'mid', dueDate: t.due_date || '', status: t.status || 'pending'
+    }));
+  } catch { tasks.value = []; }
+}
+
 function createTask() {
   isEditingTask.value = false;
   editingTask.value = { id: 0, title: '', description: '', priority: 'mid', dueDate: '', status: 'pending' };
@@ -296,16 +308,39 @@ async function saveTask() {
     alert('请输入任务标题');
     return;
   }
-  showTaskModal.value = false;
+  const data = {
+    title: editingTask.value.title,
+    description: editingTask.value.description,
+    priority: editingTask.value.priority,
+    due_date: editingTask.value.dueDate,
+    status: editingTask.value.status,
+  };
+  try {
+    if (isEditingTask.value) {
+      await API.todo.update(editingTask.value.id, data);
+    } else {
+      await API.todo.add(data);
+    }
+    showTaskModal.value = false;
+    await loadTodos();
+  } catch (e: any) { alert('操作失败: ' + (e.message || e)); }
+}
+
+async function deleteTodo(id: number) {
+  try { await API.todo.remove(id); await loadTodos(); } catch {}
 }
 
 // ========== 提醒 CRUD ==========
+async function loadReminders() {
+  try { reminders.value = await API.reminder.list(); } catch { reminders.value = []; }
+}
+
 function createReminder() {
   isEditingReminder.value = false;
   editingReminder.value = {
-    id: 0, name: '', message: '', type: 'daily', time: '09:00',
-    date: '', dayOfWeek: '1', dayOfMonth: '',
-    monthDay: '', schedule: '', enabled: true
+    id: '', name: '', message: '', type: 'daily', time: '09:00',
+    date: '', day_of_week: 1, day_of_month: 1,
+    month_day: '', enabled: true, created_at: ''
   };
   showReminderModal.value = true;
 }
@@ -321,21 +356,50 @@ async function saveReminder() {
     alert('请输入提醒名称');
     return;
   }
-  showReminderModal.value = false;
+  const data = {
+    name: editingReminder.value.name,
+    message: editingReminder.value.message,
+    type: editingReminder.value.type,
+    time: editingReminder.value.time,
+    day_of_week: editingReminder.value.type === 'weekly' ? editingReminder.value.day_of_week : 0,
+    day_of_month: editingReminder.value.type === 'monthly' ? editingReminder.value.day_of_month : 1,
+    month_day: editingReminder.value.type === 'yearly' ? editingReminder.value.month_day : '',
+  };
+  try {
+    if (isEditingReminder.value) {
+      await API.reminder.update(editingReminder.value.id, data);
+    } else {
+      await API.reminder.add(data);
+    }
+    showReminderModal.value = false;
+    await loadReminders();
+  } catch (e: any) { alert('操作失败: ' + (e.message || e)); }
 }
 
 async function toggleReminder(reminder: Reminder) {
-  reminder.enabled = !reminder.enabled;
+  try {
+    await API.reminder.setEnabled(reminder.id, !reminder.enabled);
+    reminder.enabled = !reminder.enabled;
+  } catch {}
 }
 
 // ========== 删除确认 ==========
-function openDeleteModal(id: number, type: string) {
-  deleteId.value = id;
+function openDeleteModal(id: string | number, type: string) {
+  deleteId.value = String(id);
   deleteType.value = type;
   showDeleteModal.value = true;
 }
 
 async function confirmDelete() {
+  try {
+    if (deleteType.value === 'reminder') {
+      await API.reminder.remove(deleteId.value);
+      await loadReminders();
+    } else if (deleteType.value === 'task') {
+      await API.todo.remove(parseInt(deleteId.value));
+      await loadTodos();
+    }
+  } catch {}
   showDeleteModal.value = false;
 }
 
@@ -347,14 +411,16 @@ function getScheduleText(reminder: Reminder): string {
     case 'once': return '一次 ' + (reminder.date || '') + ' ' + time;
     case 'weekly':
       const days = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-      return '每周' + (days[parseInt(reminder.dayOfWeek) || 1]) + ' ' + time;
-    case 'monthly': return '每月' + (reminder.dayOfMonth || 1) + '号 ' + time;
-    case 'yearly': return '每年 ' + (reminder.monthDay || '1月1日') + ' ' + time;
+      return '每周' + (days[reminder.day_of_week] || '周一') + ' ' + time;
+    case 'monthly': return '每月' + (reminder.day_of_month || 1) + '号 ' + time;
+    case 'yearly': return '每年 ' + (reminder.month_day || '1月1日') + ' ' + time;
     default: return time;
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadTodos();
+  await loadReminders();
 });
 </script>
 

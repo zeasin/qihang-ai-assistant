@@ -89,9 +89,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stopFeishu: () => ipcRenderer.invoke('service:stopFeishu'),
     startScheduler: () => ipcRenderer.invoke('service:startScheduler'),
     stopScheduler: () => ipcRenderer.invoke('service:stopScheduler'),
+    reloadScheduler: () => ipcRenderer.invoke('service:reloadScheduler'),
     startIndexer: () => ipcRenderer.invoke('service:startIndexer'),
     stopIndexer: () => ipcRenderer.invoke('service:stopIndexer'),
     indexAll: () => ipcRenderer.invoke('service:indexAll'),
+  },
+
+  // Tasks
+  task: {
+    list: () => ipcRenderer.invoke('task:list'),
+    add: (data) => ipcRenderer.invoke('task:add', data),
+    update: (id, data) => ipcRenderer.invoke('task:update', id, data),
+    remove: (id) => ipcRenderer.invoke('task:remove', id),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('task:setEnabled', id, enabled),
+  },
+
+  // Reminders
+  reminder: {
+    list: () => ipcRenderer.invoke('reminder:list'),
+    add: (data) => ipcRenderer.invoke('reminder:add', data),
+    update: (id, data) => ipcRenderer.invoke('reminder:update', id, data),
+    remove: (id) => ipcRenderer.invoke('reminder:remove', id),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('reminder:setEnabled', id, enabled),
+  },
+
+  // Todos
+  todo: {
+    list: () => ipcRenderer.invoke('todo:list'),
+    add: (data) => ipcRenderer.invoke('todo:add', data),
+    update: (id, data) => ipcRenderer.invoke('todo:update', id, data),
+    remove: (id) => ipcRenderer.invoke('todo:remove', id),
   },
 
   // Config

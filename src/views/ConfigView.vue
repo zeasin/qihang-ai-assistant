@@ -5,6 +5,31 @@
     </div>
 
     <div class="content-body">
+
+      <!-- Scheduled Tasks -->
+      <div class="card">
+        <h2>⏰ 定时任务</h2>
+        <div class="text-muted mb-2">管理系统内置的定时任务，可开启/关闭及设置是否发送飞书通知。</div>
+        <div class="task-controls">
+          <span v-if="schedulerRunning" class="badge badge-success">● 调度器运行中</span>
+          <span v-else class="badge badge-gray">○ 调度器已停止</span>
+        </div>
+        <table v-if="tasks.length" class="config-table">
+          <thead><tr><th style="width:30px">#</th><th>名称</th><th>类型</th><th>Cron</th><th style="width:60px">启用</th><th style="width:80px">飞书通知</th></tr></thead>
+          <tbody>
+            <tr v-for="(t, i) in tasks" :key="t.id">
+              <td><code>{{ i + 1 }}</code></td>
+              <td>{{ t.name }}</td>
+              <td><span class="badge badge-gray">{{ t.task_type }}</span></td>
+              <td><code>{{ t.cron_expression }}</code></td>
+              <td><label class="toggle"><input type="checkbox" :checked="t.enabled" @change="toggleTask(t)"><span class="slider"></span></label></td>
+              <td><label class="toggle"><input type="checkbox" :checked="t.notify_feishu" @change="toggleFeishu(t)"><span class="slider"></span></label></td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="text-muted" style="padding:12px 0;">暂无定时任务。</div>
+      </div>
+
       <!-- Agent Status -->
       <div class="card">
         <div class="card-title-row">
@@ -159,6 +184,30 @@ const labels = reactive<Record<string, string>>({});
 const newLabel = reactive({ key: '', value: '' });
 const labelsStatus = ref('');
 
+// Scheduled tasks
+const schedulerRunning = ref(false);
+const tasks = ref<any[]>([]);
+
+async function loadTasks() {
+  try { tasks.value = await API.task.list(); } catch { tasks.value = []; }
+}
+async function loadSchedulerStatus() {
+  try { const s = await API.service.status(); schedulerRunning.value = s.scheduler; } catch {}
+}
+
+async function toggleTask(t: any) {
+  try {
+    await API.task.setEnabled(t.id, !t.enabled);
+    await loadTasks();
+  } catch {}
+}
+async function toggleFeishu(t: any) {
+  try {
+    await API.task.update(t.id, { notify_feishu: !t.notify_feishu });
+    t.notify_feishu = !t.notify_feishu;
+  } catch {}
+}
+
 async function checkAgentStatus() {
   try {
     const s = await API.agent.status();
@@ -250,6 +299,8 @@ async function loadConfig() {
 onMounted(async () => {
   await loadConfig();
   checkAgentStatus();
+  await loadTasks();
+  await loadSchedulerStatus();
   try {
     const svc = await API.service.status();
     feishuRunning.value = svc.feishu;
@@ -311,4 +362,14 @@ onBeforeUnmount(() => {});
 .btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
 .btn-secondary { background: #f5f5f7; }
 .btn-danger { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
+
+/* Toggle switch */
+.toggle { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle .slider { position: absolute; inset: 0; background: #d1d5db; border-radius: 20px; transition: 0.2s; }
+.toggle .slider::before { content: ''; position: absolute; height: 16px; width: 16px; left: 2px; bottom: 2px; background: white; border-radius: 50%; transition: 0.2s; }
+.toggle input:checked + .slider { background: var(--primary); }
+.toggle input:checked + .slider::before { transform: translateX(16px); }
+
+.task-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 </style>

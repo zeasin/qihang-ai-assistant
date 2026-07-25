@@ -37,7 +37,7 @@ java -jar target/ai-assistant-1.0.0.jar
           <tr><td>📝 笔记</td><td>笔记管理，支持 Markdown 编辑、目录浏览、文件操作</td></tr>
           <tr><td>🗂️ 数据中心</td><td>多数据集管理、Schema 定义、Excel/JSON 导入导出</td></tr>
           <tr><td>📊 洞察</td><td>数据洞察分析、AI 分析报告</td></tr>
-          <tr><td>📋 任务提醒</td><td>任务看板 + 定时提醒统一管理</td></tr>
+          <tr><td>📋 提醒</td><td>待办 + 提醒统一管理</td></tr>
           <tr><td>🔧 工具箱</td><td>图片识别、识题、数据导入等工具集合</td></tr>
           <tr><td>⚙️ 设置</td><td>系统配置：多 LLM 模型、语义向量模型、飞书、字段标签等</td></tr>
           <tr><td>📝 日志</td><td>操作日志查看</td></tr>

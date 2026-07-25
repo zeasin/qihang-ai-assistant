@@ -506,6 +506,62 @@ ipcMain.handle('service:stopScheduler', () => {
   updateTrayMenu(getServicesStatus());
   return true;
 });
+ipcMain.handle('service:reloadScheduler', () => {
+  scheduler.reload();
+  return true;
+});
+ipcMain.handle('task:list', () => db.task.list());
+ipcMain.handle('task:add', (_, data) => {
+  const r = db.task.add(data.name, data.cron_expression, data.task_type, data);
+  const task = db.task.get(r.id);
+  if (task && task.enabled) scheduler.addTask(task);
+  return r;
+});
+ipcMain.handle('task:update', (_, id, data) => {
+  db.task.update(id, data);
+  scheduler.removeTask(id);
+  const task = db.task.get(id);
+  if (task && task.enabled) scheduler.addTask(task);
+  return true;
+});
+ipcMain.handle('task:remove', (_, id) => {
+  db.task.remove(id);
+  scheduler.removeTask(id);
+  return true;
+});
+ipcMain.handle('task:setEnabled', (_, id, enabled) => {
+  db.task.setEnabled(id, enabled);
+  scheduler.reload();
+  return true;
+});
+ipcMain.handle('reminder:list', () => db.reminder.list());
+ipcMain.handle('reminder:add', (_, data) => {
+  const r = db.reminder.add(data);
+  const rem = db.reminder.get(r.id);
+  if (rem && rem.enabled) scheduler.addReminder(rem);
+  return r;
+});
+ipcMain.handle('reminder:update', (_, id, data) => {
+  db.reminder.update(id, data);
+  scheduler.removeReminder(id);
+  const rem = db.reminder.get(id);
+  if (rem && rem.enabled) scheduler.addReminder(rem);
+  return true;
+});
+ipcMain.handle('reminder:remove', (_, id) => {
+  db.reminder.remove(id);
+  scheduler.removeReminder(id);
+  return true;
+});
+ipcMain.handle('reminder:setEnabled', (_, id, enabled) => {
+  db.reminder.setEnabled(id, enabled);
+  scheduler.reload();
+  return true;
+});
+ipcMain.handle('todo:list', () => db.todo.list());
+ipcMain.handle('todo:add', (_, data) => db.todo.add(data));
+ipcMain.handle('todo:update', (_, id, data) => { db.todo.update(id, data); return true; });
+ipcMain.handle('todo:remove', (_, id) => { db.todo.remove(id); return true; });
 ipcMain.handle('service:startIndexer', () => {
   indexer.start();
   updateTrayMenu(getServicesStatus());
@@ -619,6 +675,10 @@ app.whenReady().then(async () => {
   const port = parseInt(db.configGet('httpPort') || '15173', 10);
   httpserver.start(port, db);
   logger.info('[HttpServer] Started on port %d', port);
+
+  scheduler.start();
+  logger.info('[Scheduler] auto-started');
+
   updateTrayMenu(getServicesStatus());
 
   backgroundReady = true;

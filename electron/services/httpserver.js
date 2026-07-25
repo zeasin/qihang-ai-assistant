@@ -150,7 +150,7 @@ function remoteIndex() {
 <div class="nav">
   <a href="/web/notes">📝 笔记浏览</a>
   <a href="/web/datacenter">🗂️ 数据中心</a>
-  <a href="/web/planner">📋 任务提醒</a>
+  <a href="/web/planner">📋 提醒</a>
   <a href="/web/status">⚡ 服务状态</a>
 </div>
 <div class="card"><p style="font-size:14px;color:#64748b">选择上方功能查看数据。</p></div>
@@ -495,10 +495,10 @@ init()
 }
 
 function plannerPage() {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>任务提醒 - 笔灵 AI</title><style>${LAYOUT_CSS}</style></head><body>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>提醒 - 笔灵 AI</title><style>${LAYOUT_CSS}</style></head><body>
 <div class="container">
 <a class="back" href="/web">← 返回</a>
-<h1>📋 任务提醒</h1>
+<h1>📋 提醒</h1>
 <div id="tasks">加载中...</div>
 <div id="reminders" style="margin-top:12px">加载中...</div>
 </div>
@@ -565,11 +565,31 @@ async function handleRequest(req, res) {
     try { return json(res, { ok: true, content: fs.readFileSync(params.path, 'utf-8') }); }
     catch (e) { return json(res, { error: e.message }, 500); }
   }
-  if (pathname === '/api/tasks') {
+  if (pathname === '/api/tasks' && req.method === 'GET') {
     try { return json(res, dbRef.task.list()); } catch { return json(res, []); }
   }
-  if (pathname === '/api/reminders') {
-    try { return json(res, dbRef.task.list()); } catch { return json(res, []); }
+  if (pathname === '/api/tasks' && req.method === 'POST') {
+    try { const body = JSON.parse(await decodeBody(req)); const r = dbRef.task.add(body.name, body.cron_expression, body.task_type, body); return json(res, r); } catch (e) { return json(res, { error: e.message }, 400); }
+  }
+  const taskMatch = pathname.match(/^\/api\/tasks\/(\d+)$/);
+  if (taskMatch && req.method === 'PUT') {
+    try { const body = JSON.parse(await decodeBody(req)); dbRef.task.update(parseInt(taskMatch[1]), body); return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); }
+  }
+  if (taskMatch && req.method === 'DELETE') {
+    try { dbRef.task.remove(parseInt(taskMatch[1])); try { require('./scheduler').removeTask(parseInt(taskMatch[1])); } catch {} return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); }
+  }
+  if (pathname === '/api/reminders' && req.method === 'GET') {
+    try { return json(res, dbRef.reminder.list()); } catch { return json(res, []); }
+  }
+  if (pathname === '/api/reminders' && req.method === 'POST') {
+    try { const body = JSON.parse(await decodeBody(req)); const r = dbRef.reminder.add(body); return json(res, r); } catch (e) { return json(res, { error: e.message }, 400); }
+  }
+  const remMatch = pathname.match(/^\/api\/reminders\/(.+)$/);
+  if (remMatch && req.method === 'PUT') {
+    try { const body = JSON.parse(await decodeBody(req)); dbRef.reminder.update(remMatch[1], body); return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); }
+  }
+  if (remMatch && req.method === 'DELETE') {
+    try { dbRef.reminder.remove(remMatch[1]); try { require('./scheduler').removeReminder(remMatch[1]); } catch {} return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); }
   }
   if (pathname === '/api/status') {
     let s = false, i = false;

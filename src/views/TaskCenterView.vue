@@ -2,7 +2,7 @@
   <div class="task-center">
     <div class="content-body">
       <div class="task-list-header">
-        <span class="task-list-title">任务中心</span>
+        <span class="task-list-title">待办</span>
         <button class="btn btn-sm btn-secondary" @click="loadTasks">刷新</button>
       </div>
       <div v-if="!tasks.length" class="empty-state">
