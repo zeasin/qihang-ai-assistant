@@ -514,6 +514,7 @@ init()
 
 function statusPage() {
   let f = false, s = false, i = false;
+  try { const x = require('./feishu'); f = x.isRunning(); } catch {}
   try { const x = require('./scheduler'); s = x.isRunning(); } catch {}
   try { const x = require('./indexer'); i = x.isRunning(); } catch {}
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务状态 - 笔灵 AI</title><style>${LAYOUT_CSS}</style></head><body>
@@ -592,10 +593,11 @@ async function handleRequest(req, res) {
     try { dbRef.reminder.remove(remMatch[1]); try { require('./scheduler').removeReminder(remMatch[1]); } catch {} return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); }
   }
   if (pathname === '/api/status') {
-    let s = false, i = false;
+    let s = false, i = false, f = false;
     try { s = require('./scheduler').isRunning(); } catch {}
     try { i = require('./indexer').isRunning(); } catch {}
-    return json(res, { httpserver: true, feishu: false, scheduler: s, indexer: i, version: '0.1.0', port: serverPort });
+    try { f = require('./feishu').isRunning(); } catch {}
+    return json(res, { httpserver: true, feishu: f, scheduler: s, indexer: i, version: '0.1.0', port: serverPort });
   }
 
   // Module CRUD
@@ -669,9 +671,9 @@ async function handleRequest(req, res) {
 function start(port, db) {
   dbRef = db;
   serverPort = port;
+  running = true;
   server = http.createServer(handleRequest);
   server.listen(port, '0.0.0.0', () => {
-    running = true;
     console.log('[HttpServer] Running on http://0.0.0.0:' + port);
     console.log('[HttpServer] Vue SPA: http://localhost:' + port);
     console.log('[HttpServer] Remote admin: http://localhost:' + port + '/web');
