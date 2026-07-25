@@ -26,6 +26,11 @@ const routes = [
     component: () => import('@/views/DataModuleView.vue')
   },
   {
+    path: '/projects',
+    name: 'Projects',
+    component: () => import('@/views/ProjectView.vue')
+  },
+  {
     path: '/insights',
     name: 'Insights',
     component: () => import('@/views/InsightsView.vue')

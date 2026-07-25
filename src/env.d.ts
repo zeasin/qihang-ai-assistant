@@ -51,11 +51,19 @@ interface ElectronAPI {
     remove: (datasetId: string) => Promise<void>;
   };
   chat: {
-    send: (question: string, sessionId?: string, projectDir?: string, kbIds?: string[]) => Promise<void>;
-    createSession: (title?: string, agentType?: string) => Promise<any>;
+    send: (question: string, sessionId?: string, projectDir?: string, kbIds?: string[], images?: any[]) => Promise<void>;
+    createSession: (sessionId?: string, title?: string, mode?: string, source?: string) => Promise<any>;
     getSessions: () => Promise<any[]>;
     getMessages: (sessionId: string) => Promise<any[]>;
     deleteSession: (sessionId: string) => Promise<void>;
+    updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  };
+  project: {
+    list: () => Promise<any[]>;
+    get: (id: string) => Promise<any>;
+    add: (name: string, dir?: string, description?: string, defaultBranch?: string) => Promise<any>;
+    update: (id: string, data: any) => Promise<void>;
+    delete: (id: string) => Promise<void>;
   };
   agent: {
     status: () => Promise<{ pi: any }>;

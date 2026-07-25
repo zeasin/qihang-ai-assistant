@@ -14,7 +14,11 @@
             :class="{ active: s.id === currentSessionId }"
             @click="loadSession(s.id)"
           >
-            <div class="session-title">{{ s.title || '新对话' }}</div>
+            <div class="session-title">
+              <span v-if="s.source === 'feishu'" class="source-badge feishu">飞</span>
+              <span v-else class="source-badge ui">Web</span>
+              {{ s.title || '新对话' }}
+            </div>
             <div class="session-meta">
               <span class="session-date">{{ formatDate(s.updated_at) }}</span>
               <span class="session-delete" @click.stop="deleteSession(s.id)" title="删除">×</span>
@@ -63,12 +67,16 @@
           <div class="chat-input-area">
             <div class="input-wrapper">
               <div class="textarea-wrapper">
-                <div v-if="mentionedKbs.length" class="mention-chips-inline">
-                  <span v-for="kb in mentionedKbs" :key="kb.id" class="chip">
-                    📚 {{ kb.name }}
-                    <span class="chip-remove" @click="removeMention(kb.id)">×</span>
-                  </span>
-                </div>
+              <div v-if="mentionedKbs.length || selectedProject" class="mention-chips-inline">
+                <span v-if="selectedProject" class="chip chip-project">
+                  📁 {{ selectedProject.name }}
+                  <span class="chip-remove" @click="clearProject">×</span>
+                </span>
+                <span v-for="kb in mentionedKbs" :key="kb.id" class="chip">
+                  📚 {{ kb.name }}
+                  <span class="chip-remove" @click="removeMention(kb.id)">×</span>
+                </span>
+              </div>
                 <textarea
                   v-model="inputText"
                   class="chat-input"
@@ -125,6 +133,33 @@
                           <span v-if="mentionedKbs.some(m => m.id === kb.id)" class="check-mark">✓</span>
                         </div>
                         <div v-if="kbList.length === 0" class="agent-popup-item disabled">暂无笔记库</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="toolbar-btn-wrapper">
+                    <button class="toolbar-btn" :class="{ active: selectedProject }" @click.stop="toggleProjectPopup" title="关联项目">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                      </svg>
+                      <span v-if="selectedProject" class="active-indicator" style="position:absolute;top:-2px;right:-2px;width:8px;height:8px;border-radius:50%;background:#6366f1;"></span>
+                    </button>
+                    <div v-if="showProjectPopup" class="agent-popup" @click.stop>
+                      <div class="agent-popup-header">关联项目</div>
+                      <div class="agent-popup-list">
+                        <div
+                          v-for="(p, i) in projectList"
+                          :key="p.id"
+                          class="agent-popup-item"
+                          :class="{ active: selectedProject?.id === p.id }"
+                          @click="selectProject(p)"
+                        >
+                          📁 {{ p.name }}
+                          <span v-if="selectedProject?.id === p.id" class="check-mark">✓</span>
+                        </div>
+                        <div v-if="selectedProject" class="agent-popup-item" style="color:#ef4444;" @click="clearProject">
+                          ✕ 清除项目关联
+                        </div>
+                        <div v-if="projectList.length === 0" class="agent-popup-item disabled">暂无项目</div>
                       </div>
                     </div>
                   </div>
@@ -205,9 +240,12 @@ const composing = ref(false);
 const showMention = ref(false);
 const showMentionPopup = ref(false);
 const showAgentMenu = ref(false);
+const showProjectPopup = ref(false);
 const mentionIndex = ref(0);
 const mentionQuery = ref('');
 const mentionedKbs = ref<any[]>([]);
+const projectList = ref<any[]>([]);
+const selectedProject = ref<any>(null);
 const thinkingContent = ref('');
 const pendingImages = ref<{ data: string; mimeType: string }[]>([]);
 
@@ -275,9 +313,10 @@ const newSession = async () => {
   currentSessionId.value = id;
   messages.value = [];
   mentionedKbs.value = [];
+  selectedProject.value = null;
   thinkingContent.value = '';
   pendingImages.value = [];
-  await API.chat.createSession(id, '新对话', 'pi');
+  await API.chat.createSession(id, '新对话', 'general', 'ui');
   await loadSessions();
 };
 
@@ -422,6 +461,30 @@ function removeImage(index: number) {
   pendingImages.value.splice(index, 1);
 }
 
+function toggleProjectPopup() {
+  showProjectPopup.value = !showProjectPopup.value;
+  showAgentMenu.value = false;
+  showMentionPopup.value = false;
+}
+
+function selectProject(p: any) {
+  selectedProject.value = p;
+  showProjectPopup.value = false;
+}
+
+function clearProject() {
+  selectedProject.value = null;
+  showProjectPopup.value = false;
+}
+
+async function loadProjects() {
+  try {
+    projectList.value = await API.project.list();
+  } catch {
+    projectList.value = [];
+  }
+}
+
 const sendMessage = async () => {
   const text = inputText.value.trim();
   const images = pendingImages.value.map(img => ({ data: img.data, mimeType: img.mimeType }));
@@ -512,7 +575,8 @@ const sendMessage = async () => {
 
   try {
     const kbIds = mentionedKbs.value.map(k => k.id);
-    await API.chat.send(fullText, currentSessionId.value, '', kbIds, images);
+    const projectDir = selectedProject.value?.dir || '';
+    await API.chat.send(fullText, currentSessionId.value, projectDir, kbIds, images);
   } catch (err: any) {
     isStreaming.value = false;
     messages.value[msgIdx].content = '❌ ' + (err.message || '发送失败');
@@ -529,6 +593,7 @@ const loadKbList = async () => {
 
 onMounted(async () => {
   await loadKbList();
+  await loadProjects();
   await loadSessions();
   if (sessions.value.length > 0) {
     await loadSession(sessions.value[0].id);
@@ -548,6 +613,7 @@ onBeforeUnmount(() => {
 function closePopups() {
   showAgentMenu.value = false;
   showMentionPopup.value = false;
+  showProjectPopup.value = false;
 }
 </script>
 
@@ -568,6 +634,9 @@ function closePopups() {
 .session-item:hover .session-delete { visibility: visible; }
 .session-delete:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
 .sidebar-empty { padding: 20px; text-align: center; font-size: 13px; color: #94a3b8; }
+.source-badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-right: 4px; flex-shrink: 0; }
+.source-badge.feishu { background: #3370ff; color: white; }
+.source-badge.ui { background: #e2e8f0; color: #64748b; }
 .chat-main { flex: 1; display: flex; background: #f5f5f5; overflow: hidden; }
 .content-header { padding: 12px 24px; border-bottom: 1px solid var(--border); display: none; align-items: center; justify-content: space-between; flex-shrink: 0; background: white; }
 .content-title { font-size: 18px; font-weight: 600; color: var(--text-primary); }
@@ -617,6 +686,7 @@ function closePopups() {
 .toolbar-btn-wrapper { position: relative; display: flex; align-items: center; }
 .toolbar-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; border-radius: 6px; background: transparent; color: #64748b; cursor: pointer; transition: all 0.2s; }
 .toolbar-btn:hover { background: #f1f5f9; color: #6366f1; }
+.toolbar-btn.active { color: #6366f1; }
 .toolbar-btn-agent { width: auto; padding: 0 8px; gap: 4px; font-size: 12px; }
 .image-preview-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px; border-top: 1px solid #f1f5f9; }
 .image-preview-item { position: relative; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; flex-shrink: 0; }
@@ -634,6 +704,7 @@ function closePopups() {
 .agent-popup-item.disabled { color: #94a3b8; cursor: default; }
 .check-mark { margin-left: auto; color: #6366f1; font-weight: 600; }
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: rgba(99,102,241,0.1); color: var(--primary); border-radius: 12px; font-size: 12px; }
+.chip-project { background: rgba(245,158,11,0.12); color: #b45309; }
 .chip-remove { cursor: pointer; font-weight: 700; font-size: 14px; line-height: 1; margin-left: 2px; }
 .chip-remove:hover { color: #ef4444; }
 .send-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 12px; cursor: pointer; background: #6366f1; color: white; transition: all 0.2s; border: none; flex-shrink: 0; }

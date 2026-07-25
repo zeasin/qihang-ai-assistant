@@ -172,30 +172,55 @@ const feishuMessageHandler = async (msg) => {
   logger.info(' SessionId: %s', sessionId);
   logger.info('═══════════════════════════════════════');
 
-  db.chat.createSession(sessionId, '飞书-' + msg.chatId.slice(0, 8), 'pi');
-  db.chat.addMessage(sessionId, 'user', msg.text);
+  db.chat.createSession(sessionId, '飞书-' + msg.chatId.slice(0, 8), 'general', 'feishu');
+  db.chat.addMessage(sessionId, 'user', msg.text, 'general', 'feishu');
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('feishu:message', msg);
   }
+
   try {
-    const session = await orchestrator.createSession('');
-    let reply = '';
-    await orchestrator.chat(session, msg.text,
-      (d) => { reply += d; },
-      () => {},
-      () => {
-        logger.info('[Feishu] Sending reply: "%s"', reply.slice(0, 200));
-        if (reply) {
-          db.chat.addMessage(sessionId, 'assistant', reply);
-          feishu.sendMessage(msg.sender, reply);
+    const feishuRouter = require('./services/feishu-router');
+    const deps = {
+      db,
+      kb: require('./services/knowledge-base'),
+      project: db.project,
+      feishu,
+      orchestrator,
+    };
+
+    let reply = await feishuRouter.route({
+      sender: msg.sender,
+      text: msg.text,
+      chatId: msg.chatId,
+      messageId: msg.messageId,
+    }, deps);
+
+    const matchProject = extractProjectFromText(msg.text);
+    const projectDir = matchProject?.dir || '';
+
+    if (reply === null) {
+      const session = await orchestrator.createSession(projectDir);
+      reply = '';
+      await orchestrator.chat(session, msg.text,
+        (d) => { reply += d; },
+        () => {},
+        () => {
+          logger.info('[Feishu] Sending reply: "%s"', reply.slice(0, 200));
+          if (reply) {
+            db.chat.addMessage(sessionId, 'assistant', reply, 'general', 'feishu');
+            feishu.sendMessage(msg.sender, reply);
+          }
+        },
+        (e) => {
+          logger.error('[Feishu] Chat error: %s', e);
+          feishu.sendMessage(msg.sender, `处理出错: ${e}`);
         }
-      },
-      (e) => {
-        logger.error('[Feishu] Chat error: %s', e);
-        feishu.sendMessage(msg.sender, `处理出错: ${e}`);
-      }
-    );
+      );
+    } else {
+      db.chat.addMessage(sessionId, 'assistant', reply, 'general', 'feishu');
+      feishu.sendMessage(msg.sender, reply);
+    }
   } catch (e) {
     logger.error('[Feishu] Handler exception: %s', e.message);
     feishu.sendMessage(msg.sender, `处理出错: ${e.message}`);
@@ -207,6 +232,21 @@ function startFeishu(configData) {
   db.configSet('feishuAppSecret', configData.app_secret || '');
   feishu.start(configData, feishuMessageHandler);
   updateTrayMenu(getServicesStatus());
+}
+
+function extractProjectFromText(text) {
+  try {
+    const projects = db.project.list();
+    for (const p of projects) {
+      if (text.includes(p.name)) return { id: p.id, name: p.name, dir: p.dir };
+    }
+    const match = text.match(/项目[：:]\s*(\S+)/);
+    if (match) {
+      const found = projects.find(p => p.name.includes(match[1]));
+      if (found) return { id: found.id, name: found.name, dir: found.dir };
+    }
+  } catch {}
+  return null;
 }
 
 // ========== IPC Handlers ==========
@@ -238,8 +278,7 @@ ipcMain.handle('notes:read', (_, { kbId, filePath }) => {
   }
 });
 ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
-  const id = 'kb_' + Date.now();
-  return db.kb.add(id, name, dirPath);
+  return db.kb.add(name, dirPath);
 });
 ipcMain.handle('kb:remove', (_, { id }) => db.kb.remove(id));
 ipcMain.handle('kb:scan', async (_, { id }) => {
@@ -268,8 +307,7 @@ ipcMain.handle('kb:status', (_, { id }) => {
 ipcMain.handle('ds:list', () => db.ds.list());
 ipcMain.handle('ds:query', (_, { datasetId, conditions }) => db.ds.query(datasetId, conditions));
 ipcMain.handle('ds:add', (_, { name, schemaJson }) => {
-  const id = 'ds_' + Date.now();
-  return db.ds.add(id, name, schemaJson);
+  return db.ds.add(name, schemaJson);
 });
 ipcMain.handle('ds:insert', (_, { datasetId, data }) => db.ds.insert(datasetId, data));
 ipcMain.handle('ds:update', (_, { id, data }) => db.ds.update(id, data));
@@ -280,9 +318,9 @@ ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
 ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbIds, images }) => {
   const sid = sessionId || 'session_' + Date.now();
   try {
-    db.chat.createSession(sid, null, 'pi');
+    db.chat.createSession(sid, null, 'pi', 'ui');
 
-    const existing = await db.chat.messages(sid);
+    const existing = db.chat.messages(sid);
     if (existing.length === 0) {
       const title = question.length > 30 ? question.slice(0, 30) + '...' : question;
       db.chat.updateSessionTitle(sid, title);
@@ -295,7 +333,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
       ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.kb.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
       : question;
 
-    db.chat.addMessage(sid, 'user', question);
+    db.chat.addMessage(sid, 'user', question, 'pi', 'ui');
     let reply = '';
     await orchestrator.chat(session, augmentedQuestion,
       (delta) => {
@@ -304,7 +342,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
       },
       (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent }),
       () => {
-        if (reply) db.chat.addMessage(sid, 'assistant', reply);
+        if (reply) db.chat.addMessage(sid, 'assistant', reply, 'pi', 'ui');
         sendToRenderer('chat:done', { sessionId: sid });
       },
       (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
@@ -314,14 +352,23 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
     sendToRenderer('chat:error', { sessionId: sid, text: err.message });
   }
 });
-ipcMain.handle('chat:session:create', (_, { id, title, agentType }) => {
+ipcMain.handle('chat:session:create', (_, { id, title, mode, source }) => {
   const sid = id || 'chat_' + Date.now();
-  return db.chat.createSession(sid, title, agentType);
+  return db.chat.createSession(sid, title, mode || 'general', source || 'ui');
 });
 ipcMain.handle('chat:session:list', () => db.chat.sessions());
 ipcMain.handle('chat:session:messages', (_, { sessionId }) => db.chat.messages(sessionId));
 ipcMain.handle('chat:session:delete', (_, { sessionId }) => db.chat.deleteSession(sessionId));
 ipcMain.handle('chat:session:updateTitle', (_, { sessionId, title }) => db.chat.updateSessionTitle(sessionId, title));
+
+// --- Projects ---
+ipcMain.handle('project:list', () => db.project.list());
+ipcMain.handle('project:get', (_, { id }) => db.project.get(id));
+ipcMain.handle('project:add', (_, { name, dir, description, defaultBranch }) => {
+  return db.project.add(name, dir, description, defaultBranch);
+});
+ipcMain.handle('project:update', (_, { id, data }) => db.project.update(id, data));
+ipcMain.handle('project:delete', (_, { id }) => db.project.delete(id));
 
 // --- Agent Status ---
 ipcMain.handle('agent:status', async () => {
