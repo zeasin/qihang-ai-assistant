@@ -22,8 +22,7 @@ const routes = [
   },
   {
     path: '/data-module',
-    name: 'DataModule',
-    component: () => import('@/views/DataModuleView.vue')
+    redirect: '/data'
   },
   {
     path: '/projects',

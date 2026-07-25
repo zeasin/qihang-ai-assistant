@@ -405,26 +405,71 @@ const kb = {
   },
 };
 
-// ========== Datasets ==========
-const ds = {
-  list: () => q('SELECT * FROM data_center_datasets ORDER BY created_at DESC'),
-  get: (id) => qOne('SELECT * FROM data_center_datasets WHERE id = ?', id),
-  add: (name, schemaJson) => {
-    const id = 'ds_' + Date.now();
-    run('INSERT INTO data_center_datasets (dataset_id, name, schema_json) VALUES (?, ?, ?)', id, name, schemaJson);
+// ========== Modules ==========
+const dm = {
+  list: () => q('SELECT * FROM data_center_modules ORDER BY sort_order ASC, created_at DESC'),
+  get: (id) => qOne('SELECT * FROM data_center_modules WHERE id = ? OR module_id = ?', id, id),
+  add: (name, description, icon) => {
+    const id = 'm_' + Date.now();
+    run('INSERT INTO data_center_modules (module_id, name, description, icon) VALUES (?, ?, ?, ?)', id, name, description || '', icon || '📁');
     return { id };
   },
-  remove: (id) => { run('DELETE FROM data_center_records WHERE dataset_id = ?', id); run('DELETE FROM data_center_datasets WHERE id = ?', id); },
+  update: (id, data) => {
+    const fields = []; const params = [];
+    if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
+    if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
+    if (data.icon !== undefined) { fields.push('icon = ?'); params.push(data.icon); }
+    if (data.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(data.sort_order); }
+    if (fields.length) { fields.push("updated_at = datetime('now')"); params.push(id); run(`UPDATE data_center_modules SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+  },
+  remove: (id) => {
+    const dsList = q('SELECT dataset_id FROM data_center_datasets WHERE module_id = ?', id);
+    for (const d of dsList) { run('DELETE FROM data_center_records WHERE dataset_id = ?', d.dataset_id); }
+    run('DELETE FROM data_center_datasets WHERE module_id = ?', id);
+    run('DELETE FROM data_center_modules WHERE id = ?', id);
+  },
+};
+
+// ========== Datasets ==========
+const ds = {
+  list: () => {
+    const rows = q('SELECT d.*, (SELECT COUNT(*) FROM data_center_records WHERE dataset_id = d.dataset_id) as record_count FROM data_center_datasets d ORDER BY d.created_at DESC');
+    return rows.map(r => ({ ...r, recordCount: r.record_count, schema: r.schema_json ? JSON.parse(r.schema_json) : null }));
+  },
+  get: (id) => {
+    const r = qOne('SELECT d.*, (SELECT COUNT(*) FROM data_center_records WHERE dataset_id = d.dataset_id) as record_count FROM data_center_datasets d WHERE d.id = ? OR d.dataset_id = ?', id, id);
+    return r ? { ...r, recordCount: r.record_count, schema: r.schema_json ? JSON.parse(r.schema_json) : null } : null;
+  },
+  add: (params) => {
+    const id = params.dataset_id || 'ds_' + Date.now();
+    run('INSERT INTO data_center_datasets (dataset_id, name, description, type, status, schema_json, module_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      id, params.name, params.description || '', params.type || '', params.status || '', params.schemaJson || '{}', params.module_id || '');
+    return { id };
+  },
+  updateMeta: (id, data) => {
+    const fields = []; const params = [];
+    if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
+    if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
+    if (data.type !== undefined) { fields.push('type = ?'); params.push(data.type); }
+    if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
+    if (data.schema_json !== undefined) { fields.push('schema_json = ?'); params.push(data.schema_json); }
+    if (fields.length) { fields.push("updated_at = datetime('now')"); params.push(id); run(`UPDATE data_center_datasets SET ${fields.join(', ')} WHERE id = ? OR dataset_id = ?`, ...params, id); }
+  },
+  remove: (id) => {
+    const dsRow = qOne('SELECT dataset_id FROM data_center_datasets WHERE id = ? OR dataset_id = ?', id, id);
+    if (dsRow) { run('DELETE FROM data_center_records WHERE dataset_id = ?', dsRow.dataset_id); }
+    run('DELETE FROM data_center_datasets WHERE id = ? OR dataset_id = ?', id, id);
+  },
   query: (datasetId, conditions) => {
     let sql = "SELECT * FROM data_center_records WHERE dataset_id = ?";
     const params = [datasetId];
     if (conditions) { sql += ' AND data_json LIKE ?'; params.push(`%${conditions}%`); }
     sql += ' ORDER BY created_at DESC LIMIT 50';
-    return q(sql, ...params).map(r => ({ id: r.id, ...JSON.parse(r.data_json), _created_at: r.created_at }));
+    return q(sql, ...params).map(r => ({ id: r.id, ...JSON.parse(r.data_json || '{}'), _created_at: r.created_at }));
   },
   insert: (datasetId, dataObj) => run("INSERT INTO data_center_records (dataset_id, data_json) VALUES (?, ?)", datasetId, JSON.stringify(dataObj)),
-  update: (id, dataObj) => run('UPDATE data_center_records SET data_json = ? WHERE id = ?', JSON.stringify(dataObj), id),
-  delete: (id) => run('DELETE FROM data_center_records WHERE id = ?', id),
+  updateRecord: (id, dataObj) => run('UPDATE data_center_records SET data_json = ? WHERE id = ?', JSON.stringify(dataObj), id),
+  deleteRecord: (id) => run('DELETE FROM data_center_records WHERE id = ?', id),
 };
 
 // ========== Sessions & Messages ==========
@@ -486,4 +531,4 @@ function close() {
   if (db) { saveDb(); db.close(); db = null; }
 }
 
-module.exports = { getDb, close, configGet, configSet, kb, ds, chat, task, project };
+module.exports = { getDb, close, configGet, configSet, kb, dm, ds, chat, task, project };

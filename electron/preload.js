@@ -32,15 +32,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDefault: () => ipcRenderer.invoke('kb:getDefault'),
   },
 
+  // Module
+  dm: {
+    list: () => ipcRenderer.invoke('module:list'),
+    get: (id) => ipcRenderer.invoke('module:get', { id }),
+    add: (name, description, icon) => ipcRenderer.invoke('module:add', { name, description, icon }),
+    update: (id, data) => ipcRenderer.invoke('module:update', { id, data }),
+    remove: (id) => ipcRenderer.invoke('module:remove', { id }),
+  },
+
   // Dataset
   ds: {
     list: () => ipcRenderer.invoke('ds:list'),
+    get: (id) => ipcRenderer.invoke('ds:get', { id }),
     query: (datasetId, conditions) => ipcRenderer.invoke('ds:query', { datasetId, conditions }),
-    add: (name, schemaJson) => ipcRenderer.invoke('ds:add', { name, schemaJson }),
+    add: (params) => ipcRenderer.invoke('ds:add', params),
+    updateMeta: (id, data) => ipcRenderer.invoke('ds:updateMeta', { id, data }),
     insert: (datasetId, data) => ipcRenderer.invoke('ds:insert', { datasetId, data }),
-    update: (id, data) => ipcRenderer.invoke('ds:update', { id, data }),
-    delete: (id) => ipcRenderer.invoke('ds:delete', { id }),
-    remove: (datasetId) => ipcRenderer.invoke('ds:remove', { datasetId }),
+    updateRecord: (id, data) => ipcRenderer.invoke('ds:updateRecord', { id, data }),
+    deleteRecord: (id) => ipcRenderer.invoke('ds:deleteRecord', { id }),
+    remove: (id) => ipcRenderer.invoke('ds:remove', { datasetId: id }),
   },
 
   // Chat

@@ -15,6 +15,7 @@ const feishu = require('./services/feishu');
 const scheduler = require('./services/scheduler');
 const indexer = require('./services/indexer');
 const logger = require('./services/logger');
+const httpserver = require('./services/httpserver');
 const { createTrayIcon } = require('./icon');
 
 let mainWindow = null;
@@ -50,6 +51,10 @@ function updateTrayMenu(servicesStatus) {
     {
       label: `自动索引: ${s.indexer ? '● 运行中' : '○ 已停止'}`,
       click: () => mainWindow?.webContents.send('service:toggle', 'indexer'),
+    },
+    {
+      label: `远程访问: ${s.httpserver ? '● 运行中' : '○ 已停止'}`,
+      enabled: false,
     },
     { type: 'separator' },
     {
@@ -104,7 +109,7 @@ function createWindow() {
 
   const isDev = process.argv.includes('--dev');
   if (isDev) {
-    mainWindow.loadURL('http://localhost:15173');
+    mainWindow.loadURL('http://localhost:15174');
     mainWindow.webContents.once('did-finish-load', () => {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     });
@@ -126,6 +131,7 @@ function stopAllServices() {
   feishu.stop();
   scheduler.stop();
   indexer.stop();
+  httpserver.stop();
 }
 
 function getServicesStatus() {
@@ -133,6 +139,7 @@ function getServicesStatus() {
     feishu: feishu.isRunning(),
     scheduler: scheduler.isRunning(),
     indexer: indexer.isRunning(),
+    httpserver: httpserver.isRunning(),
   };
 }
 
@@ -392,15 +399,22 @@ ipcMain.handle('kb:status', (_, { id }) => {
   return rag.getIndexStatus(id);
 });
 
+// --- Module ---
+ipcMain.handle('module:list', () => db.dm.list());
+ipcMain.handle('module:get', (_, { id }) => db.dm.get(id));
+ipcMain.handle('module:add', (_, { name, description, icon }) => db.dm.add(name, description, icon));
+ipcMain.handle('module:update', (_, { id, data }) => db.dm.update(id, data));
+ipcMain.handle('module:remove', (_, { id }) => db.dm.remove(id));
+
 // --- Dataset ---
 ipcMain.handle('ds:list', () => db.ds.list());
+ipcMain.handle('ds:get', (_, { id }) => db.ds.get(id));
 ipcMain.handle('ds:query', (_, { datasetId, conditions }) => db.ds.query(datasetId, conditions));
-ipcMain.handle('ds:add', (_, { name, schemaJson }) => {
-  return db.ds.add(name, schemaJson);
-});
+ipcMain.handle('ds:add', (_, params) => db.ds.add(params));
+ipcMain.handle('ds:updateMeta', (_, { id, data }) => db.ds.updateMeta(id, data));
 ipcMain.handle('ds:insert', (_, { datasetId, data }) => db.ds.insert(datasetId, data));
-ipcMain.handle('ds:update', (_, { id, data }) => db.ds.update(id, data));
-ipcMain.handle('ds:delete', (_, { id }) => db.ds.delete(id));
+ipcMain.handle('ds:updateRecord', (_, { id, data }) => db.ds.updateRecord(id, data));
+ipcMain.handle('ds:deleteRecord', (_, { id }) => db.ds.deleteRecord(id));
 ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
 
 // --- Chat / Orchestrator ---
@@ -601,6 +615,11 @@ app.whenReady().then(async () => {
     logger.info('Auto-starting Feishu bot from saved config...');
     startFeishu({ app_id: savedAppId, app_secret: savedAppSecret });
   }
+
+  const port = parseInt(db.configGet('httpPort') || '15173', 10);
+  httpserver.start(port, db);
+  logger.info('[HttpServer] Started on port %d', port);
+  updateTrayMenu(getServicesStatus());
 
   backgroundReady = true;
 });
