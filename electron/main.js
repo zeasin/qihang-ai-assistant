@@ -1,6 +1,14 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+
+// Polyfill for Electron: undici v6 (bundled with pi-agent) expects worker_threads.markAsUncloneable
+try {
+  const wt = require('worker_threads');
+  if (typeof wt.markAsUncloneable !== 'function') {
+    wt.markAsUncloneable = () => {};
+  }
+} catch {} // worker_threads not available
 const db = require('./services/database');
 const orchestrator = require('./services/orchestrator');
 const feishu = require('./services/feishu');
@@ -220,20 +228,25 @@ ipcMain.handle('ds:delete', (_, { id }) => db.ds.delete(id));
 ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
 
 // --- Chat / Orchestrator ---
-ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir }) => {
+ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbIds, images }) => {
   const sid = sessionId || 'session_' + Date.now();
   try {
     const session = await orchestrator.createSession(projectDir || '');
     sendToRenderer('chat:status', { sessionId: sid, text: 'AI 正在分析问题...' });
 
-    await orchestrator.chat(session, question,
+    const augmentedQuestion = kbIds?.length
+      ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.kb.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
+      : question;
+
+    await orchestrator.chat(session, augmentedQuestion,
       (delta) => sendToRenderer('chat:delta', { sessionId: sid, text: delta }),
       (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent }),
       () => {
         sendToRenderer('chat:done', { sessionId: sid });
         db.chat.addMessage(sid, 'user', question);
       },
-      (err) => sendToRenderer('chat:error', { sessionId: sid, text: err })
+      (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
+      images
     );
   } catch (err) {
     sendToRenderer('chat:error', { sessionId: sid, text: err.message });

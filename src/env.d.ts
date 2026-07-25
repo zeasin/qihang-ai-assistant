@@ -50,7 +50,7 @@ interface ElectronAPI {
     remove: (datasetId: string) => Promise<void>;
   };
   chat: {
-    send: (question: string, sessionId?: string, projectDir?: string) => Promise<void>;
+    send: (question: string, sessionId?: string, projectDir?: string, kbIds?: string[]) => Promise<void>;
     createSession: (title?: string, agentType?: string) => Promise<any>;
     getSessions: () => Promise<any[]>;
     getMessages: (sessionId: string) => Promise<any[]>;

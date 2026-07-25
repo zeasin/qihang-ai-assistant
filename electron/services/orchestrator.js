@@ -64,9 +64,16 @@ async function setupModelRuntime() {
 
 // ========== Custom Tool Definitions ==========
 
-function createTools(dbRef) {
+let TypeBox = null;
+async function ensureTypeBox() {
+  if (!TypeBox) TypeBox = await import('typebox');
+  return TypeBox;
+}
+
+async function createTools(dbRef) {
   const sdk = piSdk;
-  const { Type } = require('typebox');
+  await ensureTypeBox();
+  const { Type } = TypeBox;
 
   const queryDataset = sdk.defineTool({
     name: 'query_dataset',
@@ -209,7 +216,7 @@ async function createSession(projectDir) {
   const mr = await setupModelRuntime();
 
   logger.info('[Orchestrator] Creating tools...');
-  const tools = createTools(db);
+  const tools = await createTools(db);
 
   const builtinTools = ['read', 'bash', 'grep', 'find', 'ls'];
   logger.info(`[Orchestrator] Built-in tools: ${builtinTools.join(', ')}`);
@@ -243,8 +250,8 @@ async function createSession(projectDir) {
   }
 }
 
-async function chat(session, text, onDelta, onTool, onDone, onError) {
-  logger.info(`[Orchestrator] chat() called, text length: ${text.length}`);
+async function chat(session, text, onDelta, onTool, onDone, onError, images) {
+  logger.info(`[Orchestrator] chat() called, text length: ${text.length}${images?.length ? `, images: ${images.length}` : ''}`);
 
   session.subscribe((event) => {
     logger.info(`[Orchestrator] Event: ${event.type}`);
@@ -292,7 +299,8 @@ async function chat(session, text, onDelta, onTool, onDone, onError) {
 
   try {
     logger.info('[Orchestrator] Calling session.prompt()...');
-    await session.prompt(text);
+    const promptOptions = images?.length ? { images } : undefined;
+    await session.prompt(text, promptOptions);
     logger.info('[Orchestrator] session.prompt() completed');
   } catch (e) {
     logger.error('[Orchestrator] session.prompt() FAILED:', e.message);
