@@ -430,7 +430,7 @@ const ds = {
 // ========== Sessions & Messages ==========
 const chat = {
   sessions: () => q("SELECT s.*, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s ORDER BY updated_at DESC"),
-  sessionsBySource: (source) => q("SELECT s.*, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE source = ? ORDER BY updated_at DESC", source),
+  sessionsBySource: (source) => q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE source = ? ORDER BY updated_at DESC`, source),
   createSession: (id, title, mode, source) => {
     run("INSERT OR IGNORE INTO sessions (id, source, title, mode) VALUES (?, ?, ?, ?)", id, source || 'ui', title || '新对话', mode || 'general');
     return { id };

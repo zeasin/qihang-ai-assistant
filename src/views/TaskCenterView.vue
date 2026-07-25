@@ -1,10 +1,10 @@
 <template>
   <div class="task-center">
-    <div class="content-header">
-      <h1 class="content-title">任务中心</h1>
-      <button class="btn btn-sm btn-secondary" @click="loadTasks">刷新</button>
-    </div>
     <div class="content-body">
+      <div class="task-list-header">
+        <span class="task-list-title">任务中心</span>
+        <button class="btn btn-sm btn-secondary" @click="loadTasks">刷新</button>
+      </div>
       <div v-if="!tasks.length" class="empty-state">
         <div class="empty-icon">📋</div>
         <div class="empty-title">暂无任务</div>
@@ -93,7 +93,8 @@ function truncate(text: string, len: number) {
 
 function formatDate(d: string) {
   if (!d) return '';
-  const date = new Date(d);
+  const date = new Date(d.replace(' ', 'T') + '+00:00');
+  date.setHours(date.getHours() + 8);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
@@ -103,14 +104,14 @@ onMounted(loadTasks);
 
 <style scoped>
 .task-center { display: flex; height: 100%; overflow: hidden; }
-.content-header { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: white; }
-.content-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0; }
 .content-body { width: 340px; overflow-y: auto; border-right: 1px solid var(--border); background: #fafafa; flex-shrink: 0; }
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 40px; color: var(--text-muted); }
 .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
 .empty-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; color: #1e293b; }
 .empty-desc { font-size: 13px; text-align: center; line-height: 1.5; }
 .task-list { padding: 4px 0; }
+.task-list-header { padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); background: white; }
+.task-list-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .task-card { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid #f0f0f0; transition: background 0.15s; }
 .task-card:hover { background: #f0f0f0; }
 .task-card.active { background: rgba(99,102,241,0.08); border-left: 3px solid #6366f1; }

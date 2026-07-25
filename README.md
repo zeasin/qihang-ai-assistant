@@ -1,51 +1,44 @@
 # 笔灵 AI - Electron 桌面应用
 
-基于 Vue 3 + Electron 的桌面应用，数据来源于 **assistant-v2 项目的 Java Spring Boot 后端接口**。
+基于 Vue 3 + Electron 的桌面应用，数据通过 Electron IPC 与主进程通信获取。
 
 ---
 
 ## 项目架构
 
 ```
-┌─────────────────────────────────────────────────┐
-│              biling-ai (Electron)               │
-│  ┌───────────────────────────────────────────┐  │
-│  │  Vue 3 SPA                                │  │
-│  │  - ChatView  NotesView  DataView ...      │  │
-│  │  └── fetch() ────┐                        │  │
-│  └──────────────────┼────────────────────────┘  │
-│                     │  HTTP (port 15173)                    │
-│  ┌──────────────────┼────────────────────────┐  │
-│  │  Vite Dev Server │ proxy                  │  │
-│  │  /api/* ────────►┼──── localhost:6790     │  │
-│  └──────────────────┼────────────────────────┘  │
-└─────────────────────┼───────────────────────────┘
-                      │
-         ┌────────────▼─────────────────┐
-         │  assistant-v2 (Java Backend)  │
-         │  Spring Boot :6790           │
-         │  - ChatController            │
-         │  - DataApiController         │
-         │  - AiOverviewApiController   │
-         │  - NotesApiController        │
-         │  - PlannerApiController      │
-         └──────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│           biling-ai (Electron)               │
+│  ┌────────────────────────────────────────┐  │
+│  │  Vue 3 SPA                            │  │
+│  │  - ChatView  NotesView  ...           │  │
+│  │  └── electronAPI (IPC) ────┐          │  │
+│  └────────────────────────────┼───────────┘  │
+│                               │              │
+│  ┌────────────────────────────▼───────────┐  │
+│  │  Electron Main Process                │  │
+│  │  - SQLite (database.js)               │  │
+│  │  - Scheduler (scheduler.js)           │  │
+│  │  - Indexer (indexer.js)              │  │
+│  │  - RAG (rag.js)                      │  │
+│  │  - Feishu Bot (feishu.js)            │  │
+│  └────────────────────────────────────────┘  │
+└──────────────────────────────────────────────┘
 ```
 
-前端通过 HTTP 请求调用 Java 后端接口获取数据，Vite 开发服务器自动将 `/api` 和 `/v3` 路径代理转发到后端 6790 端口。
+数据通过 Electron 的 IPC 机制在渲染进程和主进程之间通信，不依赖外部后端服务。部分页面（数据中心、洞察、任务提醒）的 API 数据源已移除，呈现实体为空状态。
 
 ## 前置条件
 
-需要同时运行 **Java 后端服务** 才能获取数据：
-
 ```bash
-# 启动后端 (assistant-v2 项目)
-cd D:\projects\assistant-v2
-mvn spring-boot:run    # 默认端口 6790
+# 安装依赖
+npm install
 
-# 启动前端 (本项目的 Electron 应用)
-cd D:\projects\biling-ai
-npm run electron:dev   # Vite 端口 15173
+# 启动 Electron 桌面应用
+npm run electron:dev
+
+# 仅启动前端开发服务器（浏览器调试用，数据不可用）
+npm run dev
 ```
 
 ## 项目结构
@@ -58,7 +51,7 @@ biling-ai/
 ├── src/
 │   ├── components/        # 公共组件
 │   │   └── AppSidebar.vue
-│   ├── views/             # 页面组件（数据均来自后端 API）
+│   ├── views/             # 页面组件
 │   │   ├── ChatView.vue      # 对话页面
 │   │   ├── NotesView.vue     # 笔记页面
 │   │   ├── DataView.vue      # 数据中心
@@ -75,37 +68,11 @@ biling-ai/
 │   └── api-endpoints.md   # 后端 API 接口清单
 ├── index.html             # HTML 入口
 ├── package.json           # 项目配置
-├── vite.config.ts         # Vite 配置（含 API 代理）
+├── vite.config.ts         # Vite 配置
 └── tsconfig.json          # TypeScript 配置
 ```
 
-## 后端接口
-
-所有页面数据来源于 Java 后端的 REST API，Vite 配置了代理转发（将 `/api` 和 `/v3` 请求转发到后端 6790 端口）：
-
-```ts
-// vite.config.ts
-server: {
-  port: 15173,
-  proxy: {
-    '/api': { target: 'http://localhost:6790', changeOrigin: true },
-    '/v3':  { target: 'http://localhost:6790', changeOrigin: true }
-  }
-}
-```
-
-完整接口清单见 [`docs/api-endpoints.md`](docs/api-endpoints.md)，涵盖：
-
-| 模块 | 接口数量 | 说明 |
-|------|---------|------|
-| 对话 | 5 个 | 笔记库列表、模型列表、对话历史、SSE 发送、清空 |
-| 数据中心 | 19 个 | 模块/数据集/记录 CRUD、数据导入、AI 分析 |
-| 洞察 | 7 个 | 统计、搜索、项目分析、标签、热力图、快捷操作 |
-| 笔记 | 2 个 | 文件树、文件读取 |
-| 任务提醒 | 9 个 | 任务/提醒 CRUD |
-| 工具箱 | 1 个 | 工具列表（可选） |
-
-> ⚠️ 后端必须先启动，前端才能正常加载数据。
+数据通过 Electron IPC 获取，不依赖外部后端服务。
 
 ## 页面功能
 
@@ -150,7 +117,7 @@ npm run electron:build
 - **状态管理**: Pinia
 - **路由**: Vue Router
 - **Markdown 渲染**: marked
-- **数据来源**: assistant-v2 Java Spring Boot 后端 (端口 6790)
+- **数据来源**: Electron IPC + SQLite
 
 ## 迁移说明
 
@@ -161,4 +128,3 @@ npm run electron:build
 3. 将 CSS 变量提取到全局样式
 4. 添加路由（Vue Router）和状态管理（Pinia）
 5. 集成 Electron 桌面框架
-6. 所有数据请求从服务端渲染改为 REST API 调用

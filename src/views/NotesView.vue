@@ -9,7 +9,7 @@
               {{ kb.name }}{{ kb.is_default ? ' ★' : '' }}
             </option>
           </select>
-          <button class="btn btn-sm btn-secondary" @click="toggleDefaultKb" :disabled="!selectedKbId || isDefault(selectedKbId)" title="设为默认">
+          <button class="btn btn-sm btn-default-kb" @click="toggleDefaultKb" :disabled="!selectedKbId || isDefault(selectedKbId)" title="设为默认">
             ★ 设为默认
           </button>
           <button class="btn btn-sm btn-warning" v-if="isDefault(selectedKbId)" @click="clearDefaultKb" title="取消默认">☆</button>
@@ -231,7 +231,7 @@ onMounted(() => {
 .content-header { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: white; }
 .content-title { font-size: 18px; font-weight: 600; color: var(--text-primary); }
 .header-actions { display: flex; align-items: center; gap: 8px; }
-.kb-select-group { display: flex; align-items: center; gap: 4px; }
+.kb-select-group { display: flex; align-items: center; gap: 8px; }
 .content-body { flex: 1; overflow: hidden; display: flex; justify-content: center; align-items: flex-start; }
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); padding: 40px; }
 .notes-container { display: flex; flex: 1; height: 100%; overflow: hidden; }
@@ -256,6 +256,9 @@ onMounted(() => {
 .btn-sm { padding: 2px 8px; font-size: 12px; }
 .btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
 .btn-secondary { background: #f5f5f7; }
+.btn-default-kb { background: #fffbeb; border-color: #fde68a; color: #b45309; padding: 2px 14px; white-space: nowrap; transition: all 0.15s ease; }
+.btn-default-kb:hover:not(:disabled) { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+.btn-default-kb:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.6); }
 .btn-danger { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
 .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-warning { background: #fffbeb; border-color: #fde68a; color: #b45309; }

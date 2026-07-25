@@ -74,8 +74,6 @@
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 
-const API_BASE = '/api/datacenter';
-
 interface Module {
   id: string;
   name: string;
@@ -86,34 +84,6 @@ interface Module {
 
 const modules = ref<Module[]>([]);
 const router = useRouter();
-
-// ========== 加载模块列表 ==========
-async function loadModules() {
-  try {
-    const [mRes, dRes] = await Promise.all([
-      fetch(`${API_BASE}/modules`),
-      fetch(`${API_BASE}/datasets`)
-    ]);
-    const md = await mRes.json();
-    const dd = await dRes.json();
-    const moduleList = md.ok ? (md.data || []) : [];
-    const datasetsList = dd.ok ? (dd.data || []) : [];
-
-    modules.value = moduleList.map((m: any) => {
-      const dsList = datasetsList.filter((d: any) => d.moduleId === m.id);
-      const recordCount = dsList.reduce((s: number, d: any) => s + (d.recordCount || 0), 0);
-      return {
-        id: m.id,
-        name: m.name,
-        description: m.description || '',
-        icon: m.icon || '📁',
-        count: recordCount
-      };
-    });
-  } catch (e) {
-    console.error('加载模块失败:', e);
-  }
-}
 
 // ========== 模块 CRUD ==========
 const showModuleModal = ref(false);
@@ -135,18 +105,6 @@ const editModule = (module: Module) => {
 };
 
 const deleteModule = async (module: Module) => {
-  if (!confirm(`确定要删除模块「${module.name}」吗？`)) return;
-  try {
-    const r = await fetch(`${API_BASE}/modules/${module.id}`, { method: 'DELETE' });
-    const d = await r.json();
-    if (d.ok) {
-      await loadModules();
-    } else {
-      alert(d.error || '删除失败');
-    }
-  } catch (e) {
-    console.error('删除模块失败:', e);
-  }
 };
 
 const createModule = () => {
@@ -160,33 +118,12 @@ const saveModule = async () => {
     alert('请输入模块名称');
     return;
   }
-  try {
-    const url = editingModule.value
-      ? `${API_BASE}/modules/${editingModule.value.id}`
-      : `${API_BASE}/modules`;
-    const method = editingModule.value ? 'PUT' : 'POST';
-
-    const r = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(moduleForm.value)
-    });
-    const d = await r.json();
-    if (d.ok) {
-      showModuleModal.value = false;
-      editingModule.value = null;
-      moduleForm.value = { name: '', description: '', icon: '📁' };
-      await loadModules();
-    } else {
-      alert(d.error || '保存失败');
-    }
-  } catch (e) {
-    console.error('保存模块失败:', e);
-  }
+  showModuleModal.value = false;
+  editingModule.value = null;
+  moduleForm.value = { name: '', description: '', icon: '📁' };
 };
 
 onMounted(() => {
-  loadModules();
 });
 </script>
 

@@ -204,8 +204,6 @@
 import { ref, onMounted } from 'vue';
 import { marked } from 'marked';
 
-const API_BASE = '/api/ai';
-
 const selectedKb = ref('');
 const kbList = ref<any[]>([]);
 const searchQuery = ref('');
@@ -266,91 +264,17 @@ function getHeatmapColor(count: number): string {
   return '#196127';
 }
 
-// ========== 加载数据 ==========
-async function loadKbList() {
-  try {
-    const r = await fetch('/api/chat/kbs');
-    const d = await r.json();
-    if (d.ok && d.data) {
-      kbList.value = d.data;
-      if (d.data.length > 0) {
-        selectedKb.value = d.data[0].id;
-        await loadAllData();
-      }
-    }
-  } catch (e) {
-    console.error('加载笔记库列表失败:', e);
-  }
-}
-
-async function loadAllData() {
-  if (!selectedKb.value) return;
-  try {
-    const [statsRes, projectsRes, tagsRes, heatmapRes, messagesRes] = await Promise.all([
-      fetch(`${API_BASE}/kb-stats?kbId=${selectedKb.value}`),
-      fetch(`${API_BASE}/projects?kbId=${selectedKb.value}`),
-      fetch(`${API_BASE}/tags?kbId=${selectedKb.value}`),
-      fetch(`${API_BASE}/heatmap?kbId=${selectedKb.value}`),
-      fetch(`/api/chat/messages?kbId=${selectedKb.value}&limit=1`)
-    ]);
-
-    const [statsData, projectsData, tagsData, heatmapData, messagesData] = await Promise.all([
-      statsRes.json(),
-      projectsRes.json(),
-      tagsRes.json(),
-      heatmapRes.json(),
-      messagesRes.json()
-    ]);
-
-    if (statsData.ok) {
-      stats.value = {
-        fileCount: statsData.fileCount || 0,
-        chunkCount: statsData.chunkCount || 0,
-        todayModified: statsData.todayModified || 0,
-        totalChats: messagesData.ok ? (messagesData.total || 0) : 0
-      };
-    }
-
-    projects.value = projectsData.ok ? (projectsData.projects || []) : [];
-    tags.value = tagsData.ok ? (tagsData.tags || []) : [];
-    heatmap.value = heatmapData.ok ? (heatmapData.heatmap || {}) : {};
-  } catch (e) {
-    console.error('加载数据失败:', e);
-  }
-}
-
 // ========== 搜索 ==========
 const performSearch = async () => {
-  if (!searchQuery.value.trim() || !selectedKb.value) return;
-  try {
-    const r = await fetch(`${API_BASE}/search?kbId=${selectedKb.value}&query=${encodeURIComponent(searchQuery.value)}`);
-    const d = await r.json();
-    if (d.ok && d.results) {
-      searchResults.value = d.results.map((res: any) => ({
-        id: res.id,
-        title: res.filePath || res.title,
-        path: res.pathContext || '',
-        preview: res.content || '',
-        score: res.score ? Math.round(res.score * 100) + '%' : ''
-      }));
-    } else {
-      searchResults.value = [];
-    }
-  } catch (e) {
-    console.error('搜索失败:', e);
-    searchResults.value = [];
-  }
 };
 
 const openResult = (result: any) => {
-  console.log('Open result:', result);
 };
 
 // ========== 笔记库切换 ==========
 const onKbChange = async () => {
   searchResults.value = [];
   expandedProject.value = null;
-  await loadAllData();
 };
 
 // ========== 项目折叠/展开 ==========
@@ -360,41 +284,14 @@ function toggleProject(index: number) {
 
 // ========== AI 分析项目 ==========
 async function analyzeProject(projectName: string) {
-  if (!selectedKb.value) return;
-  try {
-    const r = await fetch(`${API_BASE}/analyze-project?kbId=${selectedKb.value}&projectName=${encodeURIComponent(projectName)}`, {
-      method: 'POST'
-    });
-    const d = await r.json();
-    if (d.ok) {
-      await loadAllData();
-    }
-  } catch (e) {
-    console.error('分析失败:', e);
-  }
 }
 
 // ========== AI 快速操作 ==========
 async function runQuickAction(action: string) {
-  if (!selectedKb.value) return;
-  try {
-    quickActionResult.value[action] = '处理中...';
-    const r = await fetch(`${API_BASE}/quick-action?kbId=${selectedKb.value}&action=${action}`, {
-      method: 'POST'
-    });
-    const d = await r.json();
-    if (d.ok) {
-      quickActionResult.value[action] = d.result || d.reply || '完成';
-    } else {
-      quickActionResult.value[action] = '操作失败: ' + (d.error || '未知错误');
-    }
-  } catch (e) {
-    quickActionResult.value[action] = '操作失败，请稍后重试';
-  }
+  quickActionResult.value[action] = '功能不可用（后端未连接）';
 }
 
 onMounted(() => {
-  loadKbList();
 });
 </script>
 

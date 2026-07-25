@@ -229,8 +229,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 
-const API_BASE = '/api';
-
 interface Task {
   id: number;
   title: string;
@@ -280,29 +278,6 @@ const showDeleteModal = ref(false);
 const deleteId = ref(0);
 const deleteType = ref('');
 
-// ========== 加载数据 ==========
-async function loadTasks() {
-  try {
-    const r = await fetch(`${API_BASE}/tasks`);
-    const d = await r.json();
-    if (d.ok && d.tasks) {
-      tasks.value = d.tasks;
-    }
-  } catch (e) {
-    console.error('加载任务失败:', e);
-  }
-}
-
-async function loadReminders() {
-  try {
-    const r = await fetch(`${API_BASE}/reminders`);
-    const d = await r.json();
-    reminders.value = d || [];
-  } catch (e) {
-    console.error('加载提醒失败:', e);
-  }
-}
-
 // ========== 任务 CRUD ==========
 function createTask() {
   isEditingTask.value = false;
@@ -321,26 +296,7 @@ async function saveTask() {
     alert('请输入任务标题');
     return;
   }
-  try {
-    const url = editingTask.value.id ? `${API_BASE}/tasks/update` : `${API_BASE}/tasks/add`;
-    const formData = new FormData();
-    formData.append('title', editingTask.value.title);
-    formData.append('description', editingTask.value.description || '');
-    formData.append('priority', editingTask.value.priority);
-    formData.append('dueDate', editingTask.value.dueDate || '');
-    if (editingTask.value.id) {
-      formData.append('id', String(editingTask.value.id));
-      formData.append('status', editingTask.value.status);
-    }
-    const r = await fetch(url, { method: 'POST', body: formData });
-    const d = await r.json();
-    if (d.ok) {
-      showTaskModal.value = false;
-      await loadTasks();
-    }
-  } catch (e) {
-    console.error('保存任务失败:', e);
-  }
+  showTaskModal.value = false;
 }
 
 // ========== 提醒 CRUD ==========
@@ -365,43 +321,11 @@ async function saveReminder() {
     alert('请输入提醒名称');
     return;
   }
-  try {
-    const url = editingReminder.value.id ? `${API_BASE}/reminders/update` : `${API_BASE}/reminders/add`;
-    const formData = new FormData();
-    formData.append('name', editingReminder.value.name);
-    formData.append('message', editingReminder.value.message || '');
-    formData.append('type', editingReminder.value.type);
-    formData.append('time', editingReminder.value.time);
-    formData.append('date', editingReminder.value.date || '');
-    formData.append('dayOfWeek', editingReminder.value.dayOfWeek);
-    formData.append('dayOfMonth', editingReminder.value.dayOfMonth || '');
-    formData.append('monthDay', editingReminder.value.monthDay || '');
-    if (editingReminder.value.id) {
-      formData.append('id', String(editingReminder.value.id));
-    }
-    const r = await fetch(url, { method: 'POST', body: formData });
-    const d = await r.json();
-    if (d.ok) {
-      showReminderModal.value = false;
-      await loadReminders();
-    }
-  } catch (e) {
-    console.error('保存提醒失败:', e);
-  }
+  showReminderModal.value = false;
 }
 
 async function toggleReminder(reminder: Reminder) {
   reminder.enabled = !reminder.enabled;
-  try {
-    const r = await fetch(`${API_BASE}/reminders/toggle?id=${reminder.id}`, { method: 'POST' });
-    const d = await r.json();
-    if (d.ok) {
-      await loadReminders();
-    }
-  } catch (e) {
-    reminder.enabled = !reminder.enabled;
-    console.error('切换提醒状态失败:', e);
-  }
 }
 
 // ========== 删除确认 ==========
@@ -412,20 +336,7 @@ function openDeleteModal(id: number, type: string) {
 }
 
 async function confirmDelete() {
-  const url = deleteType.value === 'reminder'
-    ? `${API_BASE}/reminders/delete?id=${deleteId.value}`
-    : `${API_BASE}/tasks/delete?id=${deleteId.value}`;
-  try {
-    const r = await fetch(url, { method: 'POST' });
-    const d = await r.json();
-    if (d.ok) {
-      showDeleteModal.value = false;
-      if (deleteType.value === 'reminder') await loadReminders();
-      else await loadTasks();
-    }
-  } catch (e) {
-    console.error('删除失败:', e);
-  }
+  showDeleteModal.value = false;
 }
 
 // ========== 工具函数 ==========
@@ -444,8 +355,6 @@ function getScheduleText(reminder: Reminder): string {
 }
 
 onMounted(() => {
-  loadTasks();
-  loadReminders();
 });
 </script>
 

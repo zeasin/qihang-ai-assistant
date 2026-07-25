@@ -32,11 +32,9 @@ interface Tool {
   action: string;
 }
 
-const API_BASE = '/api';
-
 const tools = ref<Tool[]>([]);
 
-// ========== 默认工具列表（作为后备） ==========
+// ========== 默认工具列表 ==========
 const defaultTools: Tool[] = [
   { id: 1, name: '通用识别', description: '上传图片，AI 自动识别内容并分析。支持多种场景。', icon: '🖼️', action: 'image/general' },
   { id: 2, name: '识题', description: '拍照上传题目，AI 给出详细解答过程和答案。', icon: '❓', action: 'image/solve' },
@@ -48,18 +46,7 @@ const defaultTools: Tool[] = [
 
 // ========== 加载工具列表 ==========
 async function loadTools() {
-  try {
-    const r = await fetch(`${API_BASE}/tools`);
-    const d = await r.json();
-    if (d.ok && d.tools) {
-      tools.value = d.tools;
-    } else {
-      tools.value = defaultTools;
-    }
-  } catch (e) {
-    console.warn('加载工具列表失败，使用默认列表:', e);
-    tools.value = defaultTools;
-  }
+  tools.value = defaultTools;
 }
 
 // ========== 打开工具 ==========

@@ -25,8 +25,7 @@
 mvn package -q
 # 2. 启动
 java -jar target/ai-assistant-1.0.0.jar
-# 3. 打开浏览器访问 http://localhost:6790
-# 4. 在设置页面配置 LLM API Key + 笔记库路径</pre>
+# 3. 在设置页面配置 LLM API Key + 笔记库路径</pre>
         <p class="tip">提示：先配 API Key 和笔记库路径，否则 AI 功能和文件操作不可用。支持多 LLM 模型同时配置，可在对话页切换。</p>
       </div>
 

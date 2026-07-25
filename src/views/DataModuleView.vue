@@ -254,8 +254,6 @@
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-const API_BASE = '/api/datacenter';
-
 const route = useRoute();
 const router = useRouter();
 
@@ -303,27 +301,7 @@ const importUrl = ref('');
 async function loadModuleData() {
   moduleId.value = route.query.id as string || '';
   moduleName.value = (route.query.name as string) || '数据模块';
-
   if (!moduleId.value) return;
-
-  try {
-    const [mRes, dRes] = await Promise.all([
-      fetch(`${API_BASE}/modules/${moduleId.value}`),
-      fetch(`${API_BASE}/modules/${moduleId.value}/datasets`)
-    ]);
-    const md = await mRes.json();
-    const dd = await dRes.json();
-
-    if (md.ok && md.data) {
-      moduleName.value = md.data.name || moduleName.value;
-      moduleIcon.value = md.data.icon || '📁';
-      moduleDesc.value = md.data.description || '';
-    }
-    datasets.value = dd.ok ? dd.data : [];
-    totalRecords.value = datasets.value.reduce((s: number, d: any) => s + (d.recordCount || 0), 0);
-  } catch (e) {
-    console.error('加载模块数据失败:', e);
-  }
 }
 
 // ========== 切换标签页 ==========
@@ -331,7 +309,6 @@ function switchTab(tabId: string) {
   activeTab.value = tabId;
   if (tabId !== 'overview') {
     currentDs.value = datasets.value.find((d: any) => d.id === tabId);
-    loadRecords(0);
   }
 }
 
@@ -339,62 +316,19 @@ function switchTab(tabId: string) {
 async function loadRecords(page: number) {
   if (!currentDs.value) return;
   currentPage.value = page;
-
-  let url = `${API_BASE}/datasets/${currentDs.value.id}/records?page=${page}&size=${pageSize}`;
-  if (searchKeyword.value) {
-    url += '&keyword=' + encodeURIComponent(searchKeyword.value);
-  }
-
-  try {
-    const r = await fetch(url);
-    const d = await r.json();
-    if (d.ok) {
-      records.value = d.data || [];
-      recordColumns.value = buildRecordColumns(currentDs.value, records.value);
-    } else {
-      records.value = [];
-    }
-  } catch (e) {
-    console.error('加载记录失败:', e);
-    records.value = [];
-  }
+  records.value = [];
+  recordColumns.value = [];
 }
 
 function buildRecordColumns(ds: any, recs: any[]): string[] {
-  const schemaFields = (ds.schema && ds.schema.fields) ? ds.schema.fields.map((f: any) => f.name || f.displayName) : [];
-  const cols = new Set<string>();
-  schemaFields.forEach((f: string) => {
-    if (f !== 'status' && f !== 'id') cols.add(f);
-  });
-  recs.forEach((r: any) => {
-    Object.keys(r).forEach((k: string) => {
-      if (k !== 'status' && k !== 'id' && k !== '_id' && !k.startsWith('_')) {
-        cols.add(k);
-      }
-    });
-  });
-  return Array.from(cols).slice(0, 5);
+  return [];
 }
 
 // ========== AI 分析 ==========
 const analysisContent = ref('点击生成分析按钮，让 AI 帮您分析数据');
 
 async function generateAnalysis() {
-  if (!moduleId.value) return;
-  analysisContent.value = '分析中...';
-  try {
-    const r = await fetch(`${API_BASE}/modules/${moduleId.value}/analysis`);
-    const d = await r.json();
-    if (d.ok && d.reply) {
-      analysisContent.value = d.reply;
-    } else if (d.ok && d.data) {
-      analysisContent.value = d.data;
-    } else {
-      analysisContent.value = d.error || '分析失败';
-    }
-  } catch (e) {
-    analysisContent.value = '分析失败，请稍后重试';
-  }
+  analysisContent.value = '分析功能不可用（后端未连接）';
 }
 
 // ========== 数据集 CRUD ==========
@@ -424,60 +358,10 @@ async function saveDataset() {
     alert('请输入数据集名称');
     return;
   }
-  const fields = dsForm.value.schema.split('\n').filter(s => s.trim()).map(s => ({ name: s.trim(), type: 'text' }));
-  const schema = {
-    fields,
-    typeOptions: dsForm.value.typeOptions.split('\n').filter(s => s.trim()),
-    statusOptions: dsForm.value.statusOptions.split('\n').filter(s => s.trim())
-  };
-  const body = {
-    moduleId: moduleId.value,
-    name: dsForm.value.name,
-    description: dsForm.value.description,
-    type: dsForm.value.type,
-    status: dsForm.value.status,
-    schema
-  };
-
-  try {
-    const url = editingDsId.value ? `${API_BASE}/datasets/${editingDsId.value}` : `${API_BASE}/datasets`;
-    const method = editingDsId.value ? 'PUT' : 'POST';
-    const r = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    const d = await r.json();
-    if (d.ok) {
-      showDsModal.value = false;
-      await loadModuleData();
-      if (activeTab.value !== 'overview') {
-        switchTab(activeTab.value);
-      }
-    } else {
-      alert(d.error || '保存失败');
-    }
-  } catch (e) {
-    console.error('保存数据集失败:', e);
-  }
+  showDsModal.value = false;
 }
 
 async function deleteDataset(ds: any) {
-  if (!ds || !confirm(`确定要删除数据集「${ds.name}」及所有数据吗？`)) return;
-  try {
-    const r = await fetch(`${API_BASE}/datasets/${ds.id}`, { method: 'DELETE' });
-    const d = await r.json();
-    if (d.ok) {
-      activeTab.value = 'overview';
-      currentDs.value = null;
-      records.value = [];
-      await loadModuleData();
-    } else {
-      alert(d.error || '删除失败');
-    }
-  } catch (e) {
-    console.error('删除数据集失败:', e);
-  }
 }
 
 // ========== 记录 CRUD ==========
@@ -511,55 +395,10 @@ function editRecord(rec: any) {
 
 async function saveRecord() {
   if (!currentDs.value) return;
-  const record: any = { status: recordForm.value.status };
-  recordFormFields.value.forEach((f: string) => { record[f] = recordForm.value[f] || ''; });
-
-  try {
-    let url = `${API_BASE}/datasets/${currentDs.value.id}/records`;
-    let method = 'POST';
-    let body: string;
-
-    if (editingRecordId.value) {
-      url += '/' + editingRecordId.value;
-      method = 'PUT';
-      body = JSON.stringify(record);
-    } else {
-      body = JSON.stringify({ data: record, useAi: false });
-    }
-
-    const r = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body
-    });
-    const d = await r.json();
-    if (d.ok) {
-      showRecordModal.value = false;
-      await loadRecords(currentPage.value);
-      await loadModuleData();
-    } else {
-      alert(d.error || '保存失败');
-    }
-  } catch (e) {
-    console.error('保存记录失败:', e);
-  }
+  showRecordModal.value = false;
 }
 
 async function deleteRecord(rec: any) {
-  if (!currentDs.value || !confirm('确定要删除这条记录吗？')) return;
-  const rid = rec._id || rec.id;
-  try {
-    const r = await fetch(`${API_BASE}/datasets/${currentDs.value.id}/records/${rid}`, { method: 'DELETE' });
-    const d = await r.json();
-    if (d.ok) {
-      await loadRecords(currentPage.value);
-      await loadModuleData();
-    } else {
-      alert(d.error || '删除失败');
-    }
-  } catch (e) {
-    console.error('删除记录失败:', e);
-  }
 }
 
 // ========== 详情查看 ==========
@@ -595,47 +434,7 @@ async function doImport() {
     alert('请先选择数据集');
     return;
   }
-  try {
-    let r: Response;
-    if (importType.value === 'json') {
-      if (!importJsonData.value.trim()) {
-        alert('请输入JSON数据');
-        return;
-      }
-      try { JSON.parse(importJsonData.value); } catch (e) {
-        alert('JSON格式错误');
-        return;
-      }
-      r = await fetch(`${API_BASE}/datasets/${currentDs.value.id}/import/json`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: JSON.parse(importJsonData.value), useAi: false })
-      });
-    } else {
-      if (!importUrl.value.trim()) {
-        alert('请输入URL');
-        return;
-      }
-      r = await fetch(`${API_BASE}/datasets/${currentDs.value.id}/import/url`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: importUrl.value.trim() })
-      });
-    }
-
-    const d = await r.json();
-    if (d.ok) {
-      showImportModalFlag.value = false;
-      alert(`导入成功，共 ${d.count || 0} 条记录`);
-      await loadRecords(0);
-      await loadModuleData();
-    } else {
-      alert(d.error || '导入失败');
-    }
-  } catch (e) {
-    console.error('导入失败:', e);
-    alert('导入失败');
-  }
+  showImportModalFlag.value = false;
 }
 
 // ========== 导航 ==========
