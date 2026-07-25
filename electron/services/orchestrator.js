@@ -32,20 +32,6 @@ async function setupModelRuntime() {
     }
   }
 
-  // Set API keys from config
-  const apiKey = db.configGet('apiKey');
-  const apiProvider = db.configGet('apiProvider') || 'anthropic';
-  if (apiKey) {
-    logger.info(`[Orchestrator] Setting API key for provider: ${apiProvider}`);
-    try {
-      modelRuntime.setRuntimeApiKey(apiProvider, apiKey);
-    } catch (e) {
-      logger.error(`[Orchestrator] Failed to set API key: ${e.message}`);
-    }
-  } else {
-    logger.info('[Orchestrator] No API key configured, will try env vars and existing auth');
-  }
-
   // Check available models
   try {
     const available = await modelRuntime.getAvailable();
@@ -335,7 +321,6 @@ async function checkStatus() {
       version: '0.82.0',
       modelsAvailable: availableCount,
       firstModel,
-      hasApiKey: !!db.configGet('apiKey'),
     };
   } catch (e) {
     return { installed: false, version: null, modelsAvailable: 0, firstModel: null, hasApiKey: false, error: e.message };

@@ -37,9 +37,23 @@ async function prompt(context, question, onDelta, onDone) {
 async function checkStatus() {
   try {
     const sdk = await ensureSdk();
-    return { installed: true, version: '1.18.5' };
+    let providers = [];
+    let totalModels = 0;
+    try {
+      const client = await ensureClient();
+      const cfg = await client.config.get();
+      const providerMap = cfg?.data?.provider;
+      if (providerMap) {
+        providers = Object.entries(providerMap).map(([key, p]) => ({
+          name: p.name || key,
+          models: p.models ? Object.keys(p.models).length : 0,
+        }));
+        totalModels = providers.reduce((s, p) => s + p.models, 0);
+      }
+    } catch {}
+    return { installed: true, version: '1.18.5', providers, totalModels };
   } catch {
-    return { installed: false, version: null };
+    return { installed: false, version: null, providers: [], totalModels: 0 };
   }
 }
 

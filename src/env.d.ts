@@ -31,6 +31,7 @@ interface ElectronAPI {
     setWebhook: (url: string) => Promise<{ ok: boolean }>;
     testWebhook: (url: string) => Promise<{ ok: boolean; error?: string }>;
     send: (message: string) => Promise<{ ok: boolean; error?: string }>;
+    testBot: (appId: string, appSecret: string) => Promise<{ ok: boolean; botName?: string; error?: string }>;
   };
   kb: {
     list: () => Promise<any[]>;

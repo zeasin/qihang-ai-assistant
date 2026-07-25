@@ -160,6 +160,47 @@ function sendToRenderer(channel, data) {
   }
 }
 
+// ========== Feishu message handler (shared) ==========
+
+const feishuMessageHandler = async (msg) => {
+  logger.info('═══════════════════════════════════════');
+  logger.info(' 飞书消息已接收');
+  logger.info(' 发送者: %s', msg.sender);
+  logger.info(' 内容: %s', msg.text);
+  logger.info(' ChatId: %s', msg.chatId);
+  logger.info('═══════════════════════════════════════');
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('feishu:message', msg);
+  }
+  try {
+    const session = await orchestrator.createSession('');
+    let reply = '';
+    await orchestrator.chat(session, msg.text,
+      (d) => { reply += d; },
+      () => {},
+      () => {
+        logger.info('[Feishu] Sending reply: "%s"', reply.slice(0, 200));
+        if (reply) feishu.sendMessage(msg.sender, reply);
+      },
+      (e) => {
+        logger.error('[Feishu] Chat error: %s', e);
+        feishu.sendMessage(msg.sender, `处理出错: ${e}`);
+      }
+    );
+  } catch (e) {
+    logger.error('[Feishu] Handler exception: %s', e.message);
+    feishu.sendMessage(msg.sender, `处理出错: ${e.message}`);
+  }
+};
+
+function startFeishu(configData) {
+  db.configSet('feishuAppId', configData.app_id || '');
+  db.configSet('feishuAppSecret', configData.app_secret || '');
+  feishu.start(configData, feishuMessageHandler);
+  updateTrayMenu(getServicesStatus());
+}
+
 // ========== IPC Handlers ==========
 
 // --- Knowledge Base ---
@@ -263,33 +304,18 @@ ipcMain.handle('chat:session:delete', (_, { sessionId }) => db.chat.deleteSessio
 // --- Agent Status ---
 ipcMain.handle('agent:status', async () => {
   const piStatus = await orchestrator.checkStatus();
-  return { pi: piStatus };
+  let opencodeStatus = { installed: false, version: null };
+  try {
+    const oc = require('./services/opencode');
+    opencodeStatus = await oc.checkStatus();
+  } catch {}
+  return { pi: piStatus, opencode: opencodeStatus };
 });
 
 // --- Service Management ---
 ipcMain.handle('service:status', () => getServicesStatus());
 ipcMain.handle('service:startFeishu', async (_, configData) => {
-  feishu.start(configData, async (msg) => {
-    // Handle incoming feishu message via orchestrator
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('feishu:message', msg);
-    }
-    try {
-      const session = await orchestrator.createSession('');
-      let reply = '';
-      await orchestrator.chat(session, msg.text,
-        (d) => { reply += d; },
-        () => {},
-        () => {
-          if (reply) feishu.sendMessage(msg.sender, reply);
-        },
-        (e) => feishu.sendMessage(msg.sender, `处理出错: ${e}`)
-      );
-    } catch (e) {
-      feishu.sendMessage(msg.sender, `处理出错: ${e.message}`);
-    }
-  });
-  updateTrayMenu(getServicesStatus());
+  startFeishu(configData);
   return true;
 });
 ipcMain.handle('service:stopFeishu', () => {
@@ -332,6 +358,22 @@ ipcMain.handle('dialog:openDirectory', async () => {
 });
 
 // --- Feishu ---
+ipcMain.handle('feishu:testBot', async (_, { app_id, app_secret }) => {
+  try {
+    const res = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_id, app_secret }),
+    });
+    const data = await res.json();
+    if (data.code === 0 && data.tenant_access_token) {
+      return { ok: true, botName: '' };
+    }
+    return { ok: false, error: data.msg || '获取 token 失败' };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
 ipcMain.handle('feishu:webhook:set', (_, { url }) => {
   feishu.setWebhook(url);
   db.configSet('feishuWebhookUrl', url);
@@ -371,15 +413,13 @@ ipcMain.handle('config:get', () => {
     ollamaHost: db.configGet('ollamaHost') || 'http://127.0.0.1:11434',
     embedModel: db.configGet('embedModel') || 'nomic-embed-text',
     feishuWebhookUrl: db.configGet('feishuWebhookUrl') || '',
-    apiProvider: db.configGet('apiProvider') || 'anthropic',
-    apiKey: db.configGet('apiKey') ? '***' : '',
+    feishuAppId: db.configGet('feishuAppId') || '',
+    feishuAppSecret: db.configGet('feishuAppSecret') || '',
     labels,
   };
 });
 ipcMain.handle('config:set', (_, cfg) => {
-  const safeCfg = { ...cfg };
-  if (safeCfg.apiKey === '***') delete safeCfg.apiKey;
-  Object.entries(safeCfg).forEach(([k, v]) => db.configSet(k, String(v)));
+  Object.entries(cfg).forEach(([k, v]) => db.configSet(k, String(v)));
   return true;
 });
 
@@ -395,6 +435,14 @@ app.whenReady().then(async () => {
   }
   createTray();
   createWindow();
+
+  const savedAppId = db.configGet('feishuAppId');
+  const savedAppSecret = db.configGet('feishuAppSecret');
+  if (savedAppId && savedAppSecret) {
+    logger.info('Auto-starting Feishu bot from saved config...');
+    startFeishu({ app_id: savedAppId, app_secret: savedAppSecret });
+  }
+
   backgroundReady = true;
 });
 

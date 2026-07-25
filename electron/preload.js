@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setWebhook: (url) => ipcRenderer.invoke('feishu:webhook:set', { url }),
     testWebhook: (url) => ipcRenderer.invoke('feishu:webhook:test', { url }),
     send: (message) => ipcRenderer.invoke('feishu:send', { message }),
+    testBot: (app_id, app_secret) => ipcRenderer.invoke('feishu:testBot', { app_id, app_secret }),
   },
   kb: {
     list: () => ipcRenderer.invoke('kb:list'),

@@ -5,38 +5,50 @@
     </div>
 
     <div class="content-body">
+      <!-- Agent Status -->
       <div class="card">
-        <h2>🔑 AI API Key</h2>
-        <div class="text-muted mb-2">配置 AI 模型的 API Key。pi agent 需要有效的 API Key 才能工作。</div>
-        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
-          <div class="form-group" style="flex:1;min-width:160px;">
-            <label style="font-size:12px;">供应商</label>
-            <select v-model="apiProvider" class="form-control">
-              <option value="anthropic">Anthropic (Claude)</option>
-              <option value="openai">OpenAI (GPT)</option>
-            </select>
-          </div>
-          <div class="form-group" style="flex:3;min-width:280px;">
-            <label style="font-size:12px;">API Key</label>
-            <div class="flex" style="gap:8px;">
-              <input v-model="apiKeyInput" :type="showKey ? 'text' : 'password'" class="form-control" placeholder="sk-...">
-              <button class="btn btn-sm btn-secondary" @click="showKey = !showKey">{{ showKey ? '隐藏' : '显示' }}</button>
+        <div class="card-title-row">
+          <h2>🤖 Agent 状态</h2>
+          <button class="btn btn-sm btn-secondary" @click="showHelp = true">帮助</button>
+        </div>
+        <div class="agent-grid">
+          <div class="agent-card" :class="agentStatus.pi.installed ? 'installed' : 'missing'">
+            <div class="agent-icon">🧠</div>
+            <div class="agent-info">
+              <div class="agent-name">pi agent</div>
+              <div class="agent-version" v-if="agentStatus.pi.installed">v{{ agentStatus.pi.version }}</div>
+              <div class="agent-version" v-else>未安装</div>
+              <div class="agent-meta" v-if="agentStatus.pi.installed">
+                <span v-if="agentStatus.pi.modelsAvailable > 0" class="badge badge-primary">{{ agentStatus.pi.modelsAvailable }} 模型</span>
+                <span v-else class="badge badge-warning">未配置 API Key</span>
+                <span v-if="agentStatus.pi.firstModel" class="badge badge-gray">{{ agentStatus.pi.firstModel }}</span>
+              </div>
             </div>
           </div>
-          <button class="btn btn-primary" @click="saveApiKey" style="margin-bottom:12px;">保存</button>
+          <div class="agent-card" :class="agentStatus.opencode.installed ? 'installed' : 'missing'">
+            <div class="agent-icon">🔧</div>
+            <div class="agent-info">
+              <div class="agent-name">opencode</div>
+              <div class="agent-version" v-if="agentStatus.opencode.installed">v{{ agentStatus.opencode.version }}</div>
+              <div class="agent-version" v-else>未安装</div>
+              <div class="agent-meta" v-if="agentStatus.opencode.installed">
+                <span class="badge badge-primary">{{ agentStatus.opencode.totalModels || 0 }} 模型</span>
+                <span v-for="p in agentStatus.opencode.providers || []" :key="p.name" class="badge badge-gray">{{ p.name }}({{ p.models }})</span>
+              </div>
+              <div class="agent-meta" v-else>
+                <span class="badge badge-gray">需要 npm install</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <div v-if="agentInfo" class="agent-info">
-          <span v-if="agentInfo.installed" class="badge badge-success">pi agent ✓ {{ agentInfo.version }}</span>
-          <span v-if="agentInfo.modelsAvailable > 0" class="badge badge-primary">{{ agentInfo.modelsAvailable }} 个模型可用</span>
-          <span v-else class="badge badge-warning">无可用模型 — 请配置 API Key</span>
-          <span v-if="agentInfo.firstModel" class="badge badge-gray">默认: {{ agentInfo.firstModel }}</span>
-        </div>
-        <span v-if="apiStatus" class="text-muted" :style="{ color: apiStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ apiStatus }}</span>
       </div>
 
+
+
+      <!-- Feishu Webhook -->
       <div class="card">
         <h2>🔗 飞书 Webhook 配置</h2>
-        <div class="text-muted mb-2">用于发送通知消息到飞书群（如日报、提醒等）。仅支持发送，不支持接收消息。</div>
+        <div class="text-muted mb-2">用于发送通知消息到飞书群（如日报、提醒等）。仅支持发送。</div>
         <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
           <div class="form-group" style="flex:1;min-width:300px;">
             <label style="font-size:12px;">Webhook URL</label>
@@ -48,9 +60,10 @@
         <span v-if="webhookStatus" class="text-muted" :style="{ color: webhookStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ webhookStatus }}</span>
       </div>
 
+      <!-- Feishu Bot -->
       <div class="card">
         <h2>📩 飞书 Bot 配置（App ID + Secret）</h2>
-        <div class="text-muted mb-2">配置飞书自建应用的凭据。AI 助理将连接到飞书事件订阅，实时接收和回复消息。</div>
+        <div class="text-muted mb-2">配置飞书自建应用凭据，连接到飞书事件订阅，实时接收和回复消息。</div>
         <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
           <div class="form-group" style="flex:1;min-width:200px;">
             <label style="font-size:12px;">App ID</label>
@@ -64,16 +77,18 @@
         <div class="flex" style="gap:8px;margin-top:8px;">
           <button class="btn btn-primary" @click="startFeishuBot">{{ feishuRunning ? '重启 Bot' : '启动 Bot' }}</button>
           <button v-if="feishuRunning" class="btn btn-danger" @click="stopFeishuBot">停止 Bot</button>
+          <button class="btn btn-secondary" @click="testFeishuBot">测试</button>
           <span v-if="feishuRunning" class="badge badge-success">● 运行中</span>
           <span v-else class="badge badge-gray">○ 已停止</span>
         </div>
         <span v-if="feishuStatus" class="text-muted" :style="{ color: feishuStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ feishuStatus }}</span>
       </div>
 
+      <!-- Labels -->
       <div class="card">
         <h2>🏷️ 字段标签配置</h2>
         <div class="text-muted mb-2">自定义数据表格中英文 key 显示为中文标签。</div>
-        <div id="labels-container" style="margin-bottom:12px;">
+        <div style="margin-bottom:12px;">
           <div v-if="Object.keys(labels).length === 0" class="text-muted" style="font-size:13px;padding:12px 0;">暂无自定义标签。</div>
           <table v-else class="config-table">
             <thead><tr><th>Key</th><th>标签</th><th>操作</th></tr></thead>
@@ -95,6 +110,32 @@
         <span v-if="labelsStatus" class="text-muted" :style="{ color: labelsStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ labelsStatus }}</span>
       </div>
     </div>
+
+    <!-- Help Modal -->
+    <div v-if="showHelp" class="modal-overlay" @click.self="showHelp = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>🤖 Agent 安装帮助</h3>
+        </div>
+        <div class="modal-body">
+          <div class="help-section">
+            <h4>🧠 pi agent</h4>
+            <p>AI 代码编排 agent，负责工具调用和任务编排。</p>
+            <div class="help-code">npm install @earendil-works/pi-coding-agent</div>
+            <p class="text-muted" style="margin-top:8px;">已内置于项目依赖中。需要配置 API Key 才能使用。</p>
+          </div>
+          <div class="help-section">
+            <h4>🔧 opencode</h4>
+            <p>通用 AI agent SDK，适合通用对话任务。</p>
+            <div class="help-code">npm install @opencode-ai/sdk</div>
+            <p class="text-muted" style="margin-top:8px;">已内置于项目依赖中。使用 opencode 账号登录后即可使用。</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" @click="showHelp = false">知道了</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -103,11 +144,8 @@ import { ref, reactive, onMounted, onBeforeUnmount } from 'vue';
 
 const API = window.electronAPI;
 
-const apiProvider = ref('anthropic');
-const apiKeyInput = ref('');
-const showKey = ref(false);
-const apiStatus = ref('');
-const agentInfo = ref<any>(null);
+const agentStatus = ref({ pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null }, opencode: { installed: false, version: null, providers: [], totalModels: 0 } });
+const showHelp = ref(false);
 
 const webhookUrl = ref('');
 const webhookStatus = ref('');
@@ -121,73 +159,42 @@ const labels = reactive<Record<string, string>>({});
 const newLabel = reactive({ key: '', value: '' });
 const labelsStatus = ref('');
 
-async function saveApiKey() {
-  const key = apiKeyInput.value.trim();
-  if (!key) {
-    apiStatus.value = '❌ 请输入 API Key';
-    return;
-  }
-  try {
-    await API.config.set({ apiKey: key, apiProvider: apiProvider.value });
-    apiStatus.value = '✅ 已保存';
-    checkAgentStatus();
-    setTimeout(() => apiStatus.value = '', 3000);
-  } catch (e: any) {
-    apiStatus.value = '❌ ' + (e.message || '保存失败');
-  }
-}
-
 async function checkAgentStatus() {
   try {
     const s = await API.agent.status();
-    agentInfo.value = s.pi;
-  } catch { agentInfo.value = null; }
+    agentStatus.value = s;
+  } catch { agentStatus.value = { pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null }, opencode: { installed: false, version: null, providers: [], totalModels: 0 } }; }
 }
 
 async function saveWebhook() {
   const url = webhookUrl.value.trim();
-  if (!url.startsWith('https://')) {
-    webhookStatus.value = '❌ URL 必须以 https:// 开头';
-    return;
-  }
+  if (!url.startsWith('https://')) { webhookStatus.value = '❌ URL 必须以 https:// 开头'; return; }
   try {
     await API.feishu.setWebhook(url);
     webhookStatus.value = '✅ 已保存';
     setTimeout(() => webhookStatus.value = '', 3000);
-  } catch (e: any) {
-    webhookStatus.value = '❌ ' + (e.message || '保存失败');
-  }
+  } catch (e: any) { webhookStatus.value = '❌ ' + (e.message || '保存失败'); }
 }
 
 async function testWebhook() {
   const url = webhookUrl.value.trim();
-  if (!url) {
-    webhookStatus.value = '❌ 请先输入 Webhook URL';
-    return;
-  }
+  if (!url) { webhookStatus.value = '❌ 请先输入 Webhook URL'; return; }
   try {
     const result = await API.feishu.testWebhook(url);
     webhookStatus.value = result.ok ? '✅ 测试消息已发送，请查看飞书！' : '❌ ' + (result.error || '发送失败');
-  } catch (e: any) {
-    webhookStatus.value = '❌ ' + (e.message || '请求失败');
-  }
+  } catch (e: any) { webhookStatus.value = '❌ ' + (e.message || '请求失败'); }
   setTimeout(() => webhookStatus.value = '', 5000);
 }
 
 async function startFeishuBot() {
-  if (!feishuAppId.value || !feishuAppSecret.value) {
-    feishuStatus.value = '❌ 请先填写 App ID 和 App Secret';
-    return;
-  }
+  if (!feishuAppId.value || !feishuAppSecret.value) { feishuStatus.value = '❌ 请先填写 App ID 和 App Secret'; return; }
   try {
     const ok = await API.service.startFeishu({ app_id: feishuAppId.value, app_secret: feishuAppSecret.value });
     feishuRunning.value = true;
     feishuStatus.value = ok ? '✅ Bot 已启动' : '❌ 启动失败，请检查配置';
     if (!ok) feishuRunning.value = false;
     setTimeout(() => feishuStatus.value = '', 5000);
-  } catch (e: any) {
-    feishuStatus.value = '❌ ' + (e.message || '启动失败');
-  }
+  } catch (e: any) { feishuStatus.value = '❌ ' + (e.message || '启动失败'); }
 }
 
 async function stopFeishuBot() {
@@ -196,9 +203,21 @@ async function stopFeishuBot() {
     feishuRunning.value = false;
     feishuStatus.value = '✅ Bot 已停止';
     setTimeout(() => feishuStatus.value = '', 3000);
-  } catch (e: any) {
-    feishuStatus.value = '❌ ' + (e.message || '停止失败');
-  }
+  } catch (e: any) { feishuStatus.value = '❌ ' + (e.message || '停止失败'); }
+}
+
+async function testFeishuBot() {
+  if (!feishuAppId.value || !feishuAppSecret.value) { feishuStatus.value = '❌ 请先填写 App ID 和 App Secret'; return; }
+  feishuStatus.value = '⏳ 正在验证...';
+  try {
+    const result = await API.feishu.testBot(feishuAppId.value, feishuAppSecret.value);
+    if (result.ok) {
+      feishuStatus.value = result.botName ? `✅ 验证成功，Bot: ${result.botName}` : '✅ 验证成功';
+    } else {
+      feishuStatus.value = '❌ ' + (result.error || '验证失败');
+    }
+  } catch (e: any) { feishuStatus.value = '❌ ' + (e.message || '请求失败'); }
+  setTimeout(() => { if (feishuStatus.value.startsWith('⏳')) feishuStatus.value = ''; }, 5000);
 }
 
 function addLabel() {
@@ -222,8 +241,9 @@ async function saveLabels() {
 async function loadConfig() {
   try {
     const cfg = await API.config.get();
-    apiProvider.value = cfg.apiProvider || 'anthropic';
     webhookUrl.value = cfg.feishuWebhookUrl || '';
+    feishuAppId.value = cfg.feishuAppId || '';
+    feishuAppSecret.value = cfg.feishuAppSecret || '';
   } catch { console.warn('加载配置失败'); }
 }
 
@@ -246,6 +266,8 @@ onBeforeUnmount(() => {});
 .content-body { flex: 1; overflow-y: auto; padding: 24px; }
 .card { background: white; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 20px; margin-bottom: 16px; }
 .card h2 { font-size: 16px; font-weight: 600; margin: 0 0 8px; color: var(--text-primary); }
+.card-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.card-title-row h2 { margin: 0; }
 .form-group { margin-bottom: 12px; }
 .form-group label { display: block; font-size: 13px; font-weight: 500; color: #5c5f66; margin-bottom: 4px; }
 .form-row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -261,5 +283,32 @@ onBeforeUnmount(() => {});
 .badge-primary { background: rgba(99, 102, 241, 0.1); color: var(--primary); }
 .badge-success { background: rgba(34, 197, 94, 0.1); color: var(--success); }
 .badge-warning { background: rgba(251, 146, 60, 0.1); color: var(--warning); }
-.agent-info { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding: 12px; background: #f8fafc; border-radius: 8px; }
+
+/* Agent grid */
+.agent-grid { display: flex; gap: 12px; }
+.agent-card { flex: 1; display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: 10px; border: 1px solid var(--border); }
+.agent-card.installed { background: #f0fdf4; border-color: #bbf7d0; }
+.agent-card.missing { background: #fef2f2; border-color: #fecaca; }
+.agent-icon { font-size: 28px; }
+.agent-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.agent-version { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.agent-meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal { background: white; border-radius: 12px; width: 520px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.15); max-height: 80vh; display: flex; flex-direction: column; }
+.modal-header { padding: 20px 24px 0; }
+.modal-header h3 { font-size: 16px; font-weight: 600; margin: 0; }
+.modal-body { padding: 16px 24px; overflow-y: auto; }
+.modal-footer { padding: 12px 24px 20px; display: flex; gap: 8px; justify-content: flex-end; }
+.help-section { margin-bottom: 20px; }
+.help-section h4 { font-size: 14px; font-weight: 600; margin: 0 0 6px; color: var(--text-primary); }
+.help-section p { font-size: 13px; color: var(--text-muted); margin: 0 0 8px; line-height: 1.5; }
+.help-code { background: #1e293b; color: #e2e8f0; padding: 10px 14px; border-radius: 8px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 13px; }
+
+.btn { padding: 4px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; background: white; color: var(--text-primary); }
+.btn-sm { padding: 2px 8px; font-size: 12px; }
+.btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
+.btn-secondary { background: #f5f5f7; }
+.btn-danger { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
 </style>
