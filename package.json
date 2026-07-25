@@ -15,6 +15,7 @@
     "@electron/rebuild": "^4.2.0",
     "@larksuiteoapi/node-sdk": "^1.71.1",
     "@opencode-ai/sdk": "^1.18.5",
+    "@rollup/rollup-win32-x64-msvc": "^4.62.2",
     "katex": "^0.17.0",
     "marked": "^15.0.0",
     "node-cron": "^4.6.0",

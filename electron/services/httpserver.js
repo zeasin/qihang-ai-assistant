@@ -339,7 +339,7 @@ function renderRight(){
   if(!state.currentDs){el.innerHTML='<div class="empty-right"><div class="eicon">📋</div><div class="etitle">从左侧选择一个数据集</div></div>';return}
   const ds=state.currentDs
   let h='<div class="toolbar">'
-  h+='<div class="search-box"><input id="searchInput" placeholder="搜索记录..." onkeyup="if(event.key===\'Enter\')loadRecs()"></div>'
+  h+='<div class="search-box"><input id="searchInput" placeholder="搜索记录..." onkeyup="if(event.key===\\'Enter\\')loadRecs()"></div>'
   h+='<button class="btn btn-sm btn-secondary" onclick="loadRecs()">搜索</button>'
   h+='<button class="btn btn-sm btn-primary" onclick="showRecModal()">+ 新增</button>'
   h+='<button class="btn btn-sm btn-secondary" onclick="showDsModal(\\''+ds.dataset_id+'\\')">✏️ 编辑</button>'
@@ -360,7 +360,7 @@ async function loadRecs(){
     data.records.forEach((rec,i)=>{
       h+='<tr><td><span class="badge badge-gray">'+(rec.status||'无')+'</span></td>'
       cols.forEach(c=>h+='<td>'+(rec[c]||'')+'</td>')
-      h+='<td class="action-cell"><button class="action-btn" onclick="viewRec(\\''+rec.id+'\\',\''+encodeURIComponent(JSON.stringify(rec))+'\\')">👁️</button> <button class="action-btn" onclick="editRec(\\''+rec.id+'\\',\''+encodeURIComponent(JSON.stringify(rec))+'\\')">✏️</button> <button class="action-btn danger" onclick="deleteRec(\\''+rec.id+'\\')">🗑️</button></td></tr>'
+      h+='<td class="action-cell"><button class="action-btn" onclick="viewRec(\\''+rec.id+'\\',\\''+encodeURIComponent(JSON.stringify(rec))+'\\')">👁️</button> <button class="action-btn" onclick="editRec(\\''+rec.id+'\\',\\''+encodeURIComponent(JSON.stringify(rec))+'\\')">✏️</button> <button class="action-btn danger" onclick="deleteRec(\\''+rec.id+'\\')">🗑️</button></td></tr>'
     })
     h+='</tbody></table>'
     el.innerHTML=h
@@ -480,7 +480,7 @@ function viewRec(id,recStr){
   let h='<div class="detail-row"><span class="dl">状态</span><span class="dv"><span class="badge badge-gray">'+(rec.status||'无')+'</span></span></div>'
   cols.forEach(c=>{h+='<div class="detail-row"><span class="dl">'+c+'</span><span class="dv">'+(rec[c]||'')+'</span></div>'})
   document.getElementById('detailBody').innerHTML=h
-  document.getElementById('detailActions').innerHTML='<button class="btn btn-danger" onclick="closeDetail();deleteRec(\\''+rec.id+'\\')">🗑️ 删除</button><button class="btn btn-primary" onclick="closeDetail();editRec(\\''+rec.id+'\\',\''+recStr+'\\')">✏️ 编辑</button><button class="btn btn-secondary" onclick="closeDetail()">关闭</button>'
+  document.getElementById('detailActions').innerHTML='<button class="btn btn-danger" onclick="closeDetail();deleteRec(\\''+rec.id+'\\')">🗑️ 删除</button><button class="btn btn-primary" onclick="closeDetail();editRec(\\''+rec.id+'\\',\\''+recStr+'\\')">✏️ 编辑</button><button class="btn btn-secondary" onclick="closeDetail()">关闭</button>'
   document.getElementById('detailModal').classList.add('show')
 }
 function closeDetail(){document.getElementById('detailModal').classList.remove('show')}
