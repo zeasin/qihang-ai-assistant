@@ -43,10 +43,8 @@
               <div class="agent-name">pi agent</div>
               <div class="agent-version" v-if="agentStatus.pi.installed">v{{ agentStatus.pi.version }}</div>
               <div class="agent-version" v-else>未安装</div>
-              <div class="agent-meta" v-if="agentStatus.pi.installed">
-                <span v-if="agentStatus.pi.modelsAvailable > 0" class="badge badge-primary">{{ agentStatus.pi.modelsAvailable }} 模型</span>
-                <span v-else class="badge badge-warning">未配置 API Key</span>
-                <span v-if="agentStatus.pi.firstModel" class="badge badge-gray">{{ agentStatus.pi.firstModel }}</span>
+              <div class="agent-meta" v-if="agentStatus.pi.installed && agentStatus.pi.modelsAvailable > 0">
+                <span class="badge badge-primary">{{ agentStatus.pi.modelsAvailable }} 模型</span>
               </div>
             </div>
           </div>
@@ -109,32 +107,7 @@
         <span v-if="feishuStatus" class="text-muted" :style="{ color: feishuStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ feishuStatus }}</span>
       </div>
 
-      <!-- Labels -->
-      <div class="card">
-        <h2>🏷️ 字段标签配置</h2>
-        <div class="text-muted mb-2">自定义数据表格中英文 key 显示为中文标签。</div>
-        <div style="margin-bottom:12px;">
-          <div v-if="Object.keys(labels).length === 0" class="text-muted" style="font-size:13px;padding:12px 0;">暂无自定义标签。</div>
-          <table v-else class="config-table">
-            <thead><tr><th>Key</th><th>标签</th><th>操作</th></tr></thead>
-            <tbody>
-              <tr v-for="(value, key) in labels" :key="key">
-                <td><code>{{ key }}</code></td>
-                <td><input v-model="labels[key]" type="text" class="form-control" style="padding:6px 8px;font-size:13px;"></td>
-                <td><button class="btn btn-sm btn-danger" @click="deleteLabel(key)">删除</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="form-row" style="gap:8px;align-items:end;">
-          <div class="form-group" style="flex:1;"><label style="font-size:12px;">Key</label><input v-model="newLabel.key" type="text" class="form-control" placeholder="如 fans"></div>
-          <div class="form-group" style="flex:1;"><label style="font-size:12px;">标签</label><input v-model="newLabel.value" type="text" class="form-control" placeholder="如 粉丝数"></div>
-          <button class="btn btn-secondary" @click="addLabel" style="margin-bottom:12px;">+ 添加</button>
-          <button class="btn btn-primary" @click="saveLabels" style="margin-bottom:12px;">保存</button>
-        </div>
-        <span v-if="labelsStatus" class="text-muted" :style="{ color: labelsStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ labelsStatus }}</span>
       </div>
-    </div>
 
     <!-- Help Modal -->
     <div v-if="showHelp" class="modal-overlay" @click.self="showHelp = false">
@@ -179,10 +152,6 @@ const feishuAppId = ref('');
 const feishuAppSecret = ref('');
 const feishuRunning = ref(false);
 const feishuStatus = ref('');
-
-const labels = reactive<Record<string, string>>({});
-const newLabel = reactive({ key: '', value: '' });
-const labelsStatus = ref('');
 
 // Scheduled tasks
 const schedulerRunning = ref(false);
@@ -267,24 +236,6 @@ async function testFeishuBot() {
     }
   } catch (e: any) { feishuStatus.value = '❌ ' + (e.message || '请求失败'); }
   setTimeout(() => { if (feishuStatus.value.startsWith('⏳')) feishuStatus.value = ''; }, 5000);
-}
-
-function addLabel() {
-  const key = newLabel.key.trim();
-  if (!key) { labelsStatus.value = '❌ 请输入 Key'; return; }
-  labels[key] = newLabel.value.trim() || key;
-  newLabel.key = '';
-  newLabel.value = '';
-}
-
-function deleteLabel(key: string) { delete labels[key]; }
-
-async function saveLabels() {
-  try {
-    await API.config.set({ labels: JSON.stringify(labels) });
-    labelsStatus.value = '✅ 已保存';
-    setTimeout(() => labelsStatus.value = '', 3000);
-  } catch { labelsStatus.value = '❌ 保存失败'; }
 }
 
 async function loadConfig() {

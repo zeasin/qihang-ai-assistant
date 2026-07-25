@@ -365,6 +365,24 @@ function migrate() {
     setSchemaVersion(2);
   }
 
+  // Ensure notify_feishu column exists (for tables created before the column was added)
+  try { db.run("ALTER TABLE collector_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
+
+  // Seed default system tasks
+  try {
+    const existing = qOne("SELECT id FROM collector_tasks WHERE task_type = 'daily_report'");
+    if (!existing) {
+      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_daily_report', '综合日报', '0 9 * * *', 'daily_report', '{\"kb_id\":1}', 1, 1)");
+    }
+  } catch (e) { console.error('[DB] seed task error:', e); }
+
+  try {
+    const existing = qOne("SELECT id FROM collector_tasks WHERE task_type = 'auto_index'");
+    if (!existing) {
+      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_auto_index', '自动索引笔记库', '0 */2 * * *', 'auto_index', '{\"kb_id\":1}', 1, 0)");
+    }
+  } catch (e) { console.error('[DB] seed auto_index error:', e); }
+
   saveDb();
 }
 
