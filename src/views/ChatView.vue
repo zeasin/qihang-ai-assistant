@@ -1,162 +1,180 @@
 <template>
   <div class="chat-view">
-    <div class="content-header">
-      <h1 class="content-title">对话</h1>
-      <div class="content-actions">
-        <button class="btn btn-secondary btn-sm" @click="newSession">新对话</button>
-      </div>
-    </div>
-
-    <div class="content-body">
-      <div class="chat-wrapper">
-        <div class="chat-messages" ref="messagesContainer">
-          <div v-if="!messages.length" class="empty-state">
-            <div class="empty-icon">💬</div>
-            <div class="empty-title">开始对话</div>
-            <div class="empty-desc">输入问题并按 Enter 发送。<br>输入 <code>@</code> 可提及笔记库进行定向检索。</div>
-          </div>
-
-          <div v-for="(msg, idx) in messages" :key="idx" class="message" :class="msg.role">
-            <div class="message-avatar">
-              <span v-if="msg.role === 'user'">👤</span>
-              <span v-else-if="msg.role === 'tool'">🔧</span>
-              <span v-else>🤖</span>
-            </div>
-            <div class="message-content-wrapper">
-              <div class="message-header">
-                <span class="message-author">
-                  {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : selectedAgent === 'pi' ? 'pi agent' : 'opencode' }}
-                </span>
-                <span class="message-status" v-if="msg.status">{{ msg.status }}</span>
-              </div>
-              <div
-                class="message-content"
-                :class="{ 'markdown-body': msg.role === 'assistant' }"
-              >
-                <div v-if="msg.role === 'assistant' && thinkingContent && idx === messages.length - 1" class="thinking-status">{{ thinkingContent }}</div>
-                <div v-if="msg.images?.length" class="message-images">
-                  <img v-for="(img, i) in msg.images" :key="i" :src="`data:${img.mimeType};base64,${img.data}`" class="chat-image" />
-                </div>
-                <div v-html="msg.role === 'user' ? escHtml(msg.content) : renderMarkdown(msg.content)"></div>
-              </div>
-            </div>
-          </div>
+    <div class="chat-layout">
+      <div class="session-sidebar">
+        <div class="sidebar-header">
+          <h3 class="sidebar-title">历史对话</h3>
+          <button class="btn btn-sm btn-secondary" @click="newSession">+ 新对话</button>
         </div>
+        <div class="session-list">
+          <div
+            v-for="s in sessions"
+            :key="s.id"
+            class="session-item"
+            :class="{ active: s.id === currentSessionId }"
+            @click="loadSession(s.id)"
+          >
+            <div class="session-title">{{ s.title || '新对话' }}</div>
+            <div class="session-meta">
+              <span class="session-date">{{ formatDate(s.updated_at) }}</span>
+              <span class="session-delete" @click.stop="deleteSession(s.id)" title="删除">×</span>
+            </div>
+          </div>
+          <div v-if="!sessions.length" class="sidebar-empty">暂无历史对话</div>
+        </div>
+      </div>
 
-        <div class="chat-input-area">
-          <div class="input-wrapper">
-            <div class="textarea-wrapper">
-              <div v-if="mentionedKbs.length" class="mention-chips-inline">
-                <span v-for="kb in mentionedKbs" :key="kb.id" class="chip">
-                  📚 {{ kb.name }}
-                  <span class="chip-remove" @click="removeMention(kb.id)">×</span>
-                </span>
+      <div class="chat-main">
+        <div class="chat-wrapper">
+          <div class="chat-messages" ref="messagesContainer">
+            <div v-if="!messages.length" class="empty-state">
+              <div class="empty-icon">💬</div>
+              <div class="empty-title">开始对话</div>
+              <div class="empty-desc">输入问题并按 Enter 发送。<br>输入 <code>@</code> 可提及笔记库进行定向检索。</div>
+            </div>
+
+            <div v-for="(msg, idx) in messages" :key="idx" class="message" :class="msg.role">
+              <div class="message-avatar">
+                <span v-if="msg.role === 'user'">👤</span>
+                <span v-else-if="msg.role === 'tool'">🔧</span>
+                <span v-else>🤖</span>
               </div>
-              <textarea
-                v-model="inputText"
-                class="chat-input"
-                placeholder="输入问题，按 Enter 发送... 输入 @ 提及笔记库"
-                @keydown.enter.exact.prevent="sendMessage"
-                @keydown="handleKeydown"
-                @input="onInput"
-                @paste="handlePaste"
-                @compositionstart="composing = true"
-                @compositionend="composing = false"
-                ref="inputRef"
-                :disabled="isStreaming"
-              ></textarea>
-              <div v-if="showMention" class="mention-dropdown">
+              <div class="message-content-wrapper">
+                <div class="message-header">
+                  <span class="message-author">
+                    {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : selectedAgent === 'pi' ? 'pi agent' : 'opencode' }}
+                  </span>
+                  <span class="message-status" v-if="msg.status">{{ msg.status }}</span>
+                </div>
                 <div
-                  v-for="(kb, i) in mentionFiltered"
-                  :key="kb.id"
-                  class="mention-item"
-                  :class="{ active: mentionIndex === i }"
-                  @click="selectMention(kb)"
-                  @mouseenter="mentionIndex = i"
+                  class="message-content"
+                  :class="{ 'markdown-body': msg.role === 'assistant' }"
                 >
-                  📚 {{ kb.name }}
+                  <div v-if="msg.role === 'assistant' && thinkingContent && idx === messages.length - 1" class="thinking-status">{{ thinkingContent }}</div>
+                  <div v-if="msg.images?.length" class="message-images">
+                    <img v-for="(img, i) in msg.images" :key="i" :src="`data:${img.mimeType};base64,${img.data}`" class="chat-image" />
+                  </div>
+                  <div v-html="msg.role === 'user' ? escHtml(msg.content) : renderMarkdown(msg.content)"></div>
                 </div>
-                <div v-if="mentionFiltered.length === 0" class="mention-item disabled">无匹配笔记库</div>
               </div>
             </div>
-            <div v-if="pendingImages.length" class="image-preview-bar">
-              <div v-for="(img, i) in pendingImages" :key="i" class="image-preview-item">
-                <img :src="`data:${img.mimeType};base64,${img.data}`" class="image-preview-thumb" />
-                <button class="image-preview-remove" @click="removeImage(i)">×</button>
+          </div>
+
+          <div class="chat-input-area">
+            <div class="input-wrapper">
+              <div class="textarea-wrapper">
+                <div v-if="mentionedKbs.length" class="mention-chips-inline">
+                  <span v-for="kb in mentionedKbs" :key="kb.id" class="chip">
+                    📚 {{ kb.name }}
+                    <span class="chip-remove" @click="removeMention(kb.id)">×</span>
+                  </span>
+                </div>
+                <textarea
+                  v-model="inputText"
+                  class="chat-input"
+                  placeholder="输入问题，按 Enter 发送... 输入 @ 提及笔记库"
+                  @keydown.enter.exact.prevent="sendMessage"
+                  @keydown="handleKeydown"
+                  @input="onInput"
+                  @paste="handlePaste"
+                  @compositionstart="composing = true"
+                  @compositionend="composing = false"
+                  ref="inputRef"
+                  :disabled="isStreaming"
+                ></textarea>
+                <div v-if="showMention" class="mention-dropdown">
+                  <div
+                    v-for="(kb, i) in mentionFiltered"
+                    :key="kb.id"
+                    class="mention-item"
+                    :class="{ active: mentionIndex === i }"
+                    @click="selectMention(kb)"
+                    @mouseenter="mentionIndex = i"
+                  >
+                    📚 {{ kb.name }}
+                  </div>
+                  <div v-if="mentionFiltered.length === 0" class="mention-item disabled">无匹配笔记库</div>
+                </div>
               </div>
-            </div>
-            <div class="input-footer">
-              <div class="input-left">
-                <div class="toolbar-btn-wrapper">
-                  <button class="toolbar-btn" @click.stop="toggleMentionDropdown" title="提及笔记库">
+              <div v-if="pendingImages.length" class="image-preview-bar">
+                <div v-for="(img, i) in pendingImages" :key="i" class="image-preview-item">
+                  <img :src="`data:${img.mimeType};base64,${img.data}`" class="image-preview-thumb" />
+                  <button class="image-preview-remove" @click="removeImage(i)">×</button>
+                </div>
+              </div>
+              <div class="input-footer">
+                <div class="input-left">
+                  <div class="toolbar-btn-wrapper">
+                    <button class="toolbar-btn" @click.stop="toggleMentionDropdown" title="提及笔记库">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                        <circle cx="12" cy="12" r="4"/>
+                        <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"/>
+                      </svg>
+                    </button>
+                    <div v-if="showMentionPopup" class="agent-popup" @click.stop>
+                      <div class="agent-popup-header">选择笔记库</div>
+                      <div class="agent-popup-list">
+                        <div
+                          v-for="(kb, i) in kbList"
+                          :key="kb.id"
+                          class="agent-popup-item"
+                          :class="{ active: mentionedKbs.some(m => m.id === kb.id) }"
+                          @click="toggleKbMention(kb)"
+                        >
+                          📚 {{ kb.name }}
+                          <span v-if="mentionedKbs.some(m => m.id === kb.id)" class="check-mark">✓</span>
+                        </div>
+                        <div v-if="kbList.length === 0" class="agent-popup-item disabled">暂无笔记库</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="toolbar-btn-wrapper">
+                    <button class="toolbar-btn toolbar-btn-agent" @click.stop="toggleAgentMenu" title="切换 Agent">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                      </svg>
+                      <span class="agent-name">{{ selectedAgent === 'pi' ? 'pi agent' : 'opencode' }}</span>
+                    </button>
+                    <div v-if="showAgentMenu" class="agent-popup" @click.stop>
+                      <div class="agent-popup-header">切换 Agent</div>
+                      <div class="agent-popup-list">
+                        <div
+                          class="agent-popup-item"
+                          :class="{ active: selectedAgent === 'pi' }"
+                          @click="selectAgent('pi')"
+                        >
+                          🤖 pi agent
+                          <span v-if="selectedAgent === 'pi'" class="check-mark">✓</span>
+                        </div>
+                        <div
+                          class="agent-popup-item"
+                          :class="{ active: selectedAgent === 'opencode' }"
+                          @click="selectAgent('opencode')"
+                        >
+                          🔧 opencode
+                          <span v-if="selectedAgent === 'opencode'" class="check-mark">✓</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <button class="toolbar-btn" @click="handleImageClick" title="上传图片">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                      <circle cx="12" cy="12" r="4"/>
-                      <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"/>
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                      <circle cx="8.5" cy="8.5" r="1.5"/>
+                      <polyline points="21 15 16 10 5 21"/>
                     </svg>
                   </button>
-                  <div v-if="showMentionPopup" class="agent-popup" @click.stop>
-                    <div class="agent-popup-header">选择笔记库</div>
-                    <div class="agent-popup-list">
-                      <div
-                        v-for="(kb, i) in kbList"
-                        :key="kb.id"
-                        class="agent-popup-item"
-                        :class="{ active: mentionedKbs.some(m => m.id === kb.id) }"
-                        @click="toggleKbMention(kb)"
-                      >
-                        📚 {{ kb.name }}
-                        <span v-if="mentionedKbs.some(m => m.id === kb.id)" class="check-mark">✓</span>
-                      </div>
-                      <div v-if="kbList.length === 0" class="agent-popup-item disabled">暂无笔记库</div>
-                    </div>
-                  </div>
+                  <input ref="fileInputRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
                 </div>
-                <div class="toolbar-btn-wrapper">
-                  <button class="toolbar-btn toolbar-btn-agent" @click.stop="toggleAgentMenu" title="切换 Agent">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                <div class="input-right">
+                  <button class="send-btn" @click="sendMessage" :disabled="!inputText.trim() || isStreaming">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                      <line x1="22" y1="2" x2="11" y2="13"/>
+                      <polygon points="22 2 15 22 11 13 2 9 22 2"/>
                     </svg>
-                    <span class="agent-name">{{ selectedAgent === 'pi' ? 'pi agent' : 'opencode' }}</span>
                   </button>
-                  <div v-if="showAgentMenu" class="agent-popup" @click.stop>
-                    <div class="agent-popup-header">切换 Agent</div>
-                    <div class="agent-popup-list">
-                      <div
-                        class="agent-popup-item"
-                        :class="{ active: selectedAgent === 'pi' }"
-                        @click="selectAgent('pi')"
-                      >
-                        🤖 pi agent
-                        <span v-if="selectedAgent === 'pi'" class="check-mark">✓</span>
-                      </div>
-                      <div
-                        class="agent-popup-item"
-                        :class="{ active: selectedAgent === 'opencode' }"
-                        @click="selectAgent('opencode')"
-                      >
-                        🔧 opencode
-                        <span v-if="selectedAgent === 'opencode'" class="check-mark">✓</span>
-                      </div>
-                    </div>
-                  </div>
                 </div>
-                <button class="toolbar-btn" @click="handleImageClick" title="上传图片">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                    <circle cx="8.5" cy="8.5" r="1.5"/>
-                    <polyline points="21 15 16 10 5 21"/>
-                  </svg>
-                </button>
-                <input ref="fileInputRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
-              </div>
-              <div class="input-right">
-                <button class="send-btn" @click="sendMessage" :disabled="!inputText.trim() || isStreaming">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                    <line x1="22" y1="2" x2="11" y2="13"/>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                  </svg>
-                </button>
               </div>
             </div>
           </div>
@@ -174,6 +192,7 @@ const API = window.electronAPI;
 
 const inputText = ref('');
 const messages = ref<any[]>([]);
+const sessions = ref<any[]>([]);
 const kbList = ref<any[]>([]);
 const selectedAgent = ref('pi');
 const isStreaming = ref(false);
@@ -214,12 +233,61 @@ const autoResize = () => {
   }
 };
 
-const newSession = () => {
+const formatDate = (d: string) => {
+  if (!d) return '';
+  const date = new Date(d);
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (date.toDateString() === now.toDateString()) {
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const loadSessions = async () => {
+  try {
+    sessions.value = (await API.chat.getSessions()) || [];
+  } catch {
+    sessions.value = [];
+  }
+};
+
+const loadMessages = async (sessionId: string) => {
+  try {
+    const msgs = (await API.chat.getMessages(sessionId)) || [];
+    messages.value = msgs.map((m: any) => ({
+      role: m.role,
+      content: m.content,
+    }));
+  } catch {
+    messages.value = [];
+  }
+  scrollToBottom();
+};
+
+const loadSession = async (id: string) => {
+  currentSessionId.value = id;
+  await loadMessages(id);
+};
+
+const newSession = async () => {
+  const id = 'session_' + Date.now();
+  currentSessionId.value = id;
   messages.value = [];
-  currentSessionId.value = 'session_' + Date.now();
   mentionedKbs.value = [];
   thinkingContent.value = '';
   pendingImages.value = [];
+  await API.chat.createSession(id, '新对话', 'pi');
+  await loadSessions();
+};
+
+const deleteSession = async (id: string) => {
+  await API.chat.deleteSession(id);
+  if (currentSessionId.value === id) {
+    currentSessionId.value = '';
+    messages.value = [];
+  }
+  await loadSessions();
 };
 
 const scrollToBottom = () => {
@@ -360,8 +428,9 @@ const sendMessage = async () => {
   if (!text && !images.length) return;
   if (isStreaming.value) return;
 
-  const sessionId = currentSessionId.value || 'session_' + Date.now();
-  currentSessionId.value = sessionId;
+  if (!currentSessionId.value) {
+    currentSessionId.value = 'session_' + Date.now();
+  }
 
   const kbContext = mentionedKbs.value.length > 0
     ? mentionedKbs.value.map(k => `@${k.name}`).join(' ') + ' '
@@ -392,7 +461,7 @@ const sendMessage = async () => {
   scrollToBottom();
 
   const onDelta = (data: { sessionId: string; text: string }) => {
-    if (data.sessionId !== sessionId) return;
+    if (data.sessionId !== currentSessionId.value) return;
     const msg = messages.value[msgIdx];
     msg.content += data.text;
     msg.status = '';
@@ -400,14 +469,13 @@ const sendMessage = async () => {
   };
 
   const onStatus = (data: { sessionId: string; text: string }) => {
-    if (data.sessionId !== sessionId) return;
+    if (data.sessionId !== currentSessionId.value) return;
     const msg = messages.value[msgIdx];
     msg.status = data.text;
   };
 
   const onTool = (data: { sessionId: string; type: string; name: string; text?: string; error?: boolean }) => {
-    if (data.sessionId !== sessionId) return;
-
+    if (data.sessionId !== currentSessionId.value) return;
     if (data.type === 'thinking') {
       thinkingContent.value = `💭 ${data.text || ''}`;
     } else if (data.type === 'start') {
@@ -419,16 +487,17 @@ const sendMessage = async () => {
   };
 
   const onDone = (data: { sessionId: string }) => {
-    if (data.sessionId !== sessionId) return;
+    if (data.sessionId !== currentSessionId.value) return;
     isStreaming.value = false;
     const msg = messages.value[msgIdx];
     msg.status = '✓ 完成';
     thinkingContent.value = '';
+    loadSessions();
     scrollToBottom();
   };
 
   const onError = (data: { sessionId: string; text: string }) => {
-    if (data.sessionId !== sessionId) return;
+    if (data.sessionId !== currentSessionId.value) return;
     isStreaming.value = false;
     messages.value[msgIdx].content = '❌ ' + data.text;
     messages.value[msgIdx].status = '错误';
@@ -460,7 +529,10 @@ const loadKbList = async () => {
 
 onMounted(async () => {
   await loadKbList();
-  newSession();
+  await loadSessions();
+  if (sessions.value.length > 0) {
+    await loadSession(sessions.value[0].id);
+  }
   document.addEventListener('click', closePopups);
 });
 
@@ -481,7 +553,23 @@ function closePopups() {
 
 <style scoped>
 .chat-view { display: flex; flex-direction: column; height: 100%; }
-.content-header { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: white; }
+.chat-layout { display: flex; flex: 1; overflow: hidden; }
+.session-sidebar { width: 240px; border-right: 1px solid var(--border); background: #fafafa; display: flex; flex-direction: column; flex-shrink: 0; }
+.sidebar-header { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.sidebar-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0; }
+.session-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.session-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #f0f0f0; transition: background 0.15s; }
+.session-item:hover { background: #f0f0f0; }
+.session-item.active { background: rgba(99,102,241,0.08); border-left: 3px solid #6366f1; }
+.session-title { font-size: 13px; font-weight: 500; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; }
+.session-date { font-size: 11px; color: #94a3b8; }
+.session-delete { font-size: 14px; color: #94a3b8; cursor: pointer; visibility: hidden; width: 16px; text-align: center; border-radius: 4px; line-height: 1; }
+.session-item:hover .session-delete { visibility: visible; }
+.session-delete:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
+.sidebar-empty { padding: 20px; text-align: center; font-size: 13px; color: #94a3b8; }
+.chat-main { flex: 1; display: flex; background: #f5f5f5; overflow: hidden; }
+.content-header { padding: 12px 24px; border-bottom: 1px solid var(--border); display: none; align-items: center; justify-content: space-between; flex-shrink: 0; background: white; }
 .content-title { font-size: 18px; font-weight: 600; color: var(--text-primary); }
 .content-actions { display: flex; align-items: center; gap: 8px; }
 .content-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; background: #f5f5f5; }

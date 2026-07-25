@@ -115,7 +115,8 @@ const ds = {
 // ========== Chat Sessions ==========
 const chat = {
   sessions: () => q('SELECT s.*, (SELECT content FROM chat_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM chat_sessions s ORDER BY updated_at DESC'),
-  createSession: (id, title, agentType) => { run('INSERT INTO chat_sessions (id, title, agent_type) VALUES (?, ?, ?)', id, title || '新对话', agentType || 'pi'); return { id }; },
+  createSession: (id, title, agentType) => { run('INSERT OR IGNORE INTO chat_sessions (id, title, agent_type) VALUES (?, ?, ?)', id, title || '新对话', agentType || 'pi'); return { id }; },
+  updateSessionTitle: (id, title) => { run("UPDATE chat_sessions SET title = ?, updated_at = datetime('now') WHERE id = ?", title, id); },
   addMessage: (sessionId, role, content) => { run('INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)', sessionId, role, content); run("UPDATE chat_sessions SET updated_at = datetime('now') WHERE id = ?", sessionId); },
   messages: (sessionId) => q('SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id', sessionId),
   deleteSession: (sessionId) => { run('DELETE FROM chat_messages WHERE session_id = ?', sessionId); run('DELETE FROM chat_sessions WHERE id = ?', sessionId); },

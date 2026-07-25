@@ -163,12 +163,17 @@ function sendToRenderer(channel, data) {
 // ========== Feishu message handler (shared) ==========
 
 const feishuMessageHandler = async (msg) => {
+  const sessionId = 'feishu_' + msg.chatId + '_' + new Date().toISOString().slice(0, 10);
   logger.info('═══════════════════════════════════════');
   logger.info(' 飞书消息已接收');
   logger.info(' 发送者: %s', msg.sender);
   logger.info(' 内容: %s', msg.text);
   logger.info(' ChatId: %s', msg.chatId);
+  logger.info(' SessionId: %s', sessionId);
   logger.info('═══════════════════════════════════════');
+
+  db.chat.createSession(sessionId, '飞书-' + msg.chatId.slice(0, 8), 'pi');
+  db.chat.addMessage(sessionId, 'user', msg.text);
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('feishu:message', msg);
@@ -181,7 +186,10 @@ const feishuMessageHandler = async (msg) => {
       () => {},
       () => {
         logger.info('[Feishu] Sending reply: "%s"', reply.slice(0, 200));
-        if (reply) feishu.sendMessage(msg.sender, reply);
+        if (reply) {
+          db.chat.addMessage(sessionId, 'assistant', reply);
+          feishu.sendMessage(msg.sender, reply);
+        }
       },
       (e) => {
         logger.error('[Feishu] Chat error: %s', e);
@@ -272,6 +280,14 @@ ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
 ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbIds, images }) => {
   const sid = sessionId || 'session_' + Date.now();
   try {
+    db.chat.createSession(sid, null, 'pi');
+
+    const existing = await db.chat.messages(sid);
+    if (existing.length === 0) {
+      const title = question.length > 30 ? question.slice(0, 30) + '...' : question;
+      db.chat.updateSessionTitle(sid, title);
+    }
+
     const session = await orchestrator.createSession(projectDir || '');
     sendToRenderer('chat:status', { sessionId: sid, text: 'AI 正在分析问题...' });
 
@@ -279,12 +295,17 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
       ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.kb.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
       : question;
 
+    db.chat.addMessage(sid, 'user', question);
+    let reply = '';
     await orchestrator.chat(session, augmentedQuestion,
-      (delta) => sendToRenderer('chat:delta', { sessionId: sid, text: delta }),
+      (delta) => {
+        reply += delta;
+        sendToRenderer('chat:delta', { sessionId: sid, text: delta });
+      },
       (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent }),
       () => {
+        if (reply) db.chat.addMessage(sid, 'assistant', reply);
         sendToRenderer('chat:done', { sessionId: sid });
-        db.chat.addMessage(sid, 'user', question);
       },
       (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
       images
@@ -293,13 +314,14 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
     sendToRenderer('chat:error', { sessionId: sid, text: err.message });
   }
 });
-ipcMain.handle('chat:session:create', (_, { title, agentType }) => {
-  const id = 'chat_' + Date.now();
-  return db.chat.createSession(id, title, agentType);
+ipcMain.handle('chat:session:create', (_, { id, title, agentType }) => {
+  const sid = id || 'chat_' + Date.now();
+  return db.chat.createSession(sid, title, agentType);
 });
 ipcMain.handle('chat:session:list', () => db.chat.sessions());
 ipcMain.handle('chat:session:messages', (_, { sessionId }) => db.chat.messages(sessionId));
 ipcMain.handle('chat:session:delete', (_, { sessionId }) => db.chat.deleteSession(sessionId));
+ipcMain.handle('chat:session:updateTitle', (_, { sessionId, title }) => db.chat.updateSessionTitle(sessionId, title));
 
 // --- Agent Status ---
 ipcMain.handle('agent:status', async () => {
