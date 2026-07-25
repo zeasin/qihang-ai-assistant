@@ -1,5 +1,11 @@
 /// <reference types="vite/client" />
 
+interface TreeNode {
+  name: string;
+  path: string;
+  type: 'file' | 'folder';
+}
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue';
   const component: DefineComponent<{}, {}, any>;
@@ -7,6 +13,14 @@ declare module '*.vue' {
 }
 
 interface ElectronAPI {
+  dialog: {
+    openDirectory: () => Promise<string | null>;
+  };
+  notes: {
+    tree: (kbId: string) => Promise<TreeNode[]>;
+    treeChildren: (dirPath: string) => Promise<TreeNode[]>;
+    read: (kbId: string, filePath: string) => Promise<{ ok: boolean; content?: string; error?: string; filePath?: string }>;
+  };
   log: {
     lines: (options?: { count?: number; tail?: boolean }) => Promise<string[]>;
     files: () => Promise<{ name: string; size: number; mtime: string }[]>;

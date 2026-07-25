@@ -1,6 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  dialog: {
+    openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
+  },
+  notes: {
+    tree: (kbId) => ipcRenderer.invoke('notes:tree', { kbId }),
+    treeChildren: (dirPath) => ipcRenderer.invoke('notes:treeChildren', { dirPath }),
+    read: (kbId, filePath) => ipcRenderer.invoke('notes:read', { kbId, filePath }),
+  },
   log: {
     lines: (options) => ipcRenderer.invoke('log:lines', options),
     files: () => ipcRenderer.invoke('log:files'),

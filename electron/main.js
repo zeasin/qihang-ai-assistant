@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const db = require('./services/database');
 const orchestrator = require('./services/orchestrator');
 const feishu = require('./services/feishu');
@@ -127,6 +128,24 @@ function getServicesStatus() {
   };
 }
 
+function listDir(dirPath) {
+  if (!fs.existsSync(dirPath)) return [];
+  const items = [];
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const full = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      items.push({ name: entry.name, path: full, type: 'folder' });
+    } else if (entry.name.endsWith('.md') || entry.name.endsWith('.txt') || entry.name.endsWith('.json')) {
+      items.push({ name: entry.name, path: full, type: 'file' });
+    }
+  }
+  items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return items;
+}
+
 function sendToRenderer(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, data);
@@ -139,6 +158,27 @@ function sendToRenderer(channel, data) {
 ipcMain.handle('kb:list', () => {
   const kbs = db.kb.list();
   return kbs.map(kb => ({ ...kb, totalDocs: db.kb.docCount(kb.id) }));
+});
+ipcMain.handle('notes:tree', (_, { kbId }) => {
+  const kb = db.kb.get(kbId);
+  if (!kb || !fs.existsSync(kb.path)) return [];
+  return listDir(kb.path);
+});
+ipcMain.handle('notes:treeChildren', (_, { dirPath }) => {
+  return listDir(dirPath);
+});
+ipcMain.handle('notes:read', (_, { kbId, filePath }) => {
+  const kb = db.kb.get(kbId);
+  if (!kb) return { ok: false, error: '笔记库不存在' };
+  const fullPath = path.isAbsolute(filePath) ? filePath : path.join(kb.path, filePath);
+  if (!fullPath.startsWith(kb.path)) return { ok: false, error: '路径越权' };
+  if (!fs.existsSync(fullPath)) return { ok: false, error: '文件不存在' };
+  try {
+    const content = fs.readFileSync(fullPath, 'utf-8');
+    return { ok: true, content, filePath: fullPath };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
   const id = 'kb_' + Date.now();
@@ -267,6 +307,15 @@ ipcMain.handle('service:stopIndexer', () => {
 ipcMain.handle('service:indexAll', async () => {
   await indexer.indexAll();
   return true;
+});
+
+// --- Dialog ---
+ipcMain.handle('dialog:openDirectory', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+  });
+  return result.canceled ? null : result.filePaths[0];
 });
 
 // --- Feishu ---
