@@ -259,12 +259,7 @@ async function chat(session, text, onDelta, onTool, onDone, onError, images) {
     const promptOptions = images?.length ? { images } : undefined;
     logger.info('[Orchestrator] prompt input length: %d, images: %d', text.length, images?.length || 0);
 
-    const timeoutMs = 30000;
-    const promptPromise = session.prompt(text, promptOptions);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`AI 响应超时（${timeoutMs / 1000}秒），请检查模型配置是否可用`)), timeoutMs)
-    );
-    await Promise.race([promptPromise, timeoutPromise]);
+    await session.prompt(text, promptOptions);
     const elapsed = Date.now() - startTime;
     logger.info('[Orchestrator] session.prompt() completed in %dms', elapsed);
   } catch (e) {

@@ -87,6 +87,7 @@ async function start(configData, onMessage) {
             const chatType = message.chat_type || 'p2p';
             const messageId = message.message_id || '';
             logger.info('[Feishu] Parsed message - text: "%s", openId: %s, chatId: %s, chatType: %s, messageId: %s', text.slice(0, 200), openId, chatId, chatType, messageId);
+            logger.info('[Feishu] Receive check: text=%s openId=%s chatType=%s hasHandler=%s', !!text, !!openId, chatType, !!messageHandler);
             if (text && openId && messageHandler) {
               const cleaned = text.replace(/@_user_\d+/g, '').trim();
               logger.info('[Feishu] Dispatching to messageHandler: "%s"', cleaned);
@@ -138,12 +139,19 @@ async function sendMessage(receiveId, receiveIdType, content, msgType = 'text') 
     logger.info('[Feishu] Message sent successfully');
   } catch (e) {
     logger.error('[Feishu] sendMessage error: %s', e.message);
+    if (e.response) logger.error('[Feishu] sendMessage response: %s', JSON.stringify(e.response).slice(0, 500));
   }
 }
 
 function replyMessage(msg, content, msgType) {
-  logger.info('[Feishu] replyMessage: chatId=%s chatType=%s sender=%s', msg.chatId, msg.chatType, msg.sender);
-  return sendMessage(msg.chatId, 'chat_id', content, msgType);
+  logger.info('[Feishu] replyMessage: chatId=%s chatType=%s sender=%s msgType=%s', msg.chatId, msg.chatType, msg.sender, msgType);
+  if (msg.chatType === 'group' && msg.chatId) {
+    return sendMessage(msg.chatId, 'chat_id', content, msgType);
+  }
+  if (msg.sender) {
+    return sendMessage(msg.sender, 'open_id', content, msgType);
+  }
+  logger.error('[Feishu] replyMessage: no valid target (sender=%s chatId=%s)', msg.sender, msg.chatId);
 }
 
 function stop() {
