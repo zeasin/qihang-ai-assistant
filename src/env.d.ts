@@ -17,9 +17,9 @@ interface ElectronAPI {
     openDirectory: () => Promise<string | null>;
   };
   notes: {
-    tree: (kbId: string) => Promise<TreeNode[]>;
+    tree: (projectId: number) => Promise<TreeNode[]>;
     treeChildren: (dirPath: string) => Promise<TreeNode[]>;
-    read: (kbId: string, filePath: string) => Promise<{ ok: boolean; content?: string; error?: string; filePath?: string }>;
+    read: (projectId: number, filePath: string) => Promise<{ ok: boolean; content?: string; error?: string; filePath?: string }>;
   };
   log: {
     lines: (options?: { count?: number; tail?: boolean }) => Promise<string[]>;
@@ -51,22 +51,24 @@ interface ElectronAPI {
     remove: (datasetId: string) => Promise<void>;
   };
   chat: {
-    send: (question: string, sessionId?: string, projectDir?: string, kbIds?: string[], images?: any[]) => Promise<void>;
-    createSession: (sessionId?: string, title?: string, mode?: string, source?: string) => Promise<any>;
-    getSessions: () => Promise<any[]>;
+    send: (question: string, sessionId?: string, projectDir?: string, kbIds?: string[], images?: any[], agent?: string) => Promise<void>;
+    createSession: (sessionId?: string, projectId?: number, title?: string, mode?: string, agent?: string, source?: string) => Promise<any>;
+    getSessions: (projectId?: number) => Promise<any[]>;
+    getSessionsBySource: (source: string, projectId?: number) => Promise<any[]>;
     getMessages: (sessionId: string) => Promise<any[]>;
     deleteSession: (sessionId: string) => Promise<void>;
     updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+    updateAgent: (sessionId: string, agent: string) => Promise<void>;
   };
   project: {
-    list: () => Promise<any[]>;
-    get: (id: string) => Promise<any>;
-    add: (name: string, dir?: string, description?: string, defaultBranch?: string) => Promise<any>;
-    update: (id: string, data: any) => Promise<void>;
-    delete: (id: string) => Promise<void>;
+    list: (type?: string) => Promise<any[]>;
+    get: (id: number) => Promise<any>;
+    add: (name: string, type?: string, dir?: string, description?: string, defaultBranch?: string) => Promise<any>;
+    update: (id: number, data: any) => Promise<void>;
+    delete: (id: number) => Promise<void>;
   };
   agent: {
-    status: () => Promise<{ pi: any }>;
+    status: () => Promise<{ pi: any; opencode: any; claude: any }>;
   };
   service: {
     status: () => Promise<{ feishu: boolean; scheduler: boolean; indexer: boolean }>;
@@ -85,7 +87,7 @@ interface ElectronAPI {
   on: (channel: string, callback: (...args: any[]) => void) => void;
   removeAllListeners: (channel: string) => void;
 
-  // Coding Workbench
+  // Coding Workbench (backward compat)
   coding: {
     createSession: (id: string, projectId: string, title?: string, agent?: string) => Promise<any>;
     listSessionsByProject: (projectId: string) => Promise<any[]>;

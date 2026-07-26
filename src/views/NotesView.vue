@@ -4,23 +4,19 @@
       <!-- 左侧面板：笔记库 + 文件树 -->
       <div class="left-panel" :class="{ collapsed: leftCollapsed }">
         <div class="panel-header">
-          <div class="panel-title">笔记库</div>
+          <div class="panel-title">文件浏览</div>
           <button class="btn-icon" @click="leftCollapsed = !leftCollapsed" title="收起/展开侧栏">
             {{ leftCollapsed ? '▶' : '◀' }}
           </button>
         </div>
-        <div class="panel-toolbar">
-          <select class="kb-select" v-model="selectedKbId" @change="onKbChange">
-            <option value="" disabled>选择笔记库</option>
-            <option v-for="kb in kbList" :key="kb.id" :value="kb.id">
-              {{ kb.name }}{{ kb.is_default ? ' ★' : '' }}
+        <div class="project-bar">
+          <select class="proj-select" v-model="selectedKbId" @change="onKbChange">
+            <option value="" disabled>选择项目</option>
+            <option v-for="p in kbList" :key="p.id" :value="p.id">
+              {{ p.name }}{{ p.is_default ? ' ★' : '' }}
             </option>
           </select>
-          <div class="toolbar-actions">
-            <button class="btn-icon" @click="startAddKb" title="添加笔记库">＋</button>
-            <button class="btn-icon" @click="refreshTree" title="刷新文件树">↻</button>
-            <button class="btn-icon" @click="removeKb" :disabled="!selectedKbId" title="删除笔记库">−</button>
-          </div>
+          <button class="btn-icon" @click="refreshTree" title="刷新文件树">↻</button>
         </div>
         <div class="tree-container">
           <div v-if="!selectedKbId" class="tree-placeholder">
@@ -60,32 +56,6 @@
       </div>
     </div>
 
-    <!-- 添加笔记库弹窗 -->
-    <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
-      <div class="modal">
-        <div class="modal-header">
-          <h3>{{ modalStep === 'folder' ? '选择文件夹' : '命名笔记库' }}</h3>
-        </div>
-        <div class="modal-body">
-          <template v-if="modalStep === 'folder'">
-            <p class="text-muted">选择一个包含 Markdown 文件的文件夹作为笔记库。</p>
-            <div class="folder-picker">
-              <input v-model="selectedPath" class="form-control" placeholder="文件夹路径" readonly>
-              <button class="btn btn-primary" @click="pickFolder">选择文件夹</button>
-            </div>
-          </template>
-          <template v-if="modalStep === 'name'">
-            <p class="text-muted">为笔记库起一个名字：</p>
-            <input v-model="newKbName" class="form-control" placeholder="例如：工作笔记、学习笔记..." @keyup.enter="confirmAddKb" autofocus>
-          </template>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" @click="closeModal">取消</button>
-          <button v-if="modalStep === 'folder'" class="btn btn-primary" :disabled="!selectedPath" @click="modalStep = 'name'">下一步</button>
-          <button v-if="modalStep === 'name'" class="btn btn-primary" :disabled="!newKbName.trim()" @click="confirmAddKb">确认添加</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -105,11 +75,6 @@ const treeData = ref<TreeNode[]>([]);
 const selectedFile = ref<any>(null);
 const fileContent = ref('');
 const leftCollapsed = ref(false);
-
-const showModal = ref(false);
-const modalStep = ref<'folder' | 'name'>('folder');
-const selectedPath = ref('');
-const newKbName = ref('');
 
 const renderedContent = computed(() => {
   if (!fileContent.value) {
@@ -143,7 +108,7 @@ watch(selectedKbId, (newId, oldId) => {
 
 async function loadKbList() {
   try {
-    const list = await API.kb.list();
+    const list = await API.project.list();
     kbList.value = list;
     // 优先使用 URL 中的 kbId
     const urlKbId = route.query.kbId as string;
@@ -186,49 +151,6 @@ async function selectFile(item: TreeNode) {
     }
   } catch (e: any) {
     fileContent.value = '⚠️ 读取失败: ' + e.message;
-  }
-}
-
-function startAddKb() {
-  showModal.value = true;
-  modalStep.value = 'folder';
-  selectedPath.value = '';
-  newKbName.value = '';
-}
-
-async function pickFolder() {
-  const dir = await API.dialog.openDirectory();
-  if (dir) selectedPath.value = dir;
-}
-
-async function confirmAddKb() {
-  if (!selectedPath.value || !newKbName.value.trim()) return;
-  try {
-    await API.kb.add(newKbName.value.trim(), selectedPath.value);
-    closeModal();
-    await loadKbList();
-  } catch (e: any) {
-    console.warn('添加失败:', e);
-  }
-}
-
-function closeModal() {
-  showModal.value = false;
-  modalStep.value = 'folder';
-  selectedPath.value = '';
-  newKbName.value = '';
-}
-
-async function removeKb() {
-  if (!selectedKbId.value) return;
-  try {
-    await API.kb.remove(selectedKbId.value);
-    selectedKbId.value = '';
-    selectedFile.value = null;
-    fileContent.value = '';
-    await loadKbList();
-  } catch (e: any) {
-    console.warn('删除失败:', e);
   }
 }
 
@@ -304,14 +226,17 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
-.panel-toolbar {
-  padding: 10px 14px;
+.project-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.kb-select {
-  width: 100%;
+.project-bar .proj-select {
+  flex: 1;
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -320,15 +245,9 @@ onMounted(() => {
   color: var(--text-primary);
   cursor: pointer;
   outline: none;
-  margin-bottom: 8px;
 }
-.kb-select:focus {
+.project-bar .proj-select:focus {
   border-color: var(--primary);
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 4px;
 }
 
 .btn-icon {

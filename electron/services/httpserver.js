@@ -22,9 +22,9 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-function getKbPath(kbId) {
-  const kb = dbRef.kb.get(kbId);
-  return kb ? kb.path : null;
+function getKbPath(projectId) {
+  const project = dbRef.project.get(projectId);
+  return project ? project.dir : null;
 }
 
 function listDir(dirPath) {
@@ -790,7 +790,7 @@ document.getElementById('content').innerHTML=h}catch(e){document.getElementById(
 async function saveNote(){const kb=document.querySelector('input[name="kb"]:checked');if(!kb)return alert('请选择笔记库')
 const title=document.getElementById('noteTitle').value.trim()||'随手记_'+new Date().toISOString().slice(0,10)
 const content=document.getElementById('noteContent').value;if(!content)return alert('请输入内容')
-try{const r=await(await fetch('/api/notes/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kb_id:parseInt(kb.value),title,content})})).json()
+try{const r=await(await fetch('/api/notes/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_id:parseInt(kb.value),title,content})})).json()
 if(r.ok){document.getElementById('result').innerHTML='<div class="card" style="background:#f0fdf4;border:1px solid #bbf7d0"><span style="color:#16a34a">✅ 已保存</span><div class="preview" style="margin-top:8px;font-size:12px">'+r.path+'</div></div>';document.getElementById('noteContent').value=''}else{document.getElementById('result').innerHTML='<div class="card" style="background:#fef2f2;border:1px solid #fecaca"><span style="color:#dc2626">❌ 保存失败: '+r.error+'</span></div>'}
 }catch(e){alert('保存失败: '+e.message)}}
 init()
@@ -840,7 +840,7 @@ async function handleRequest(req, res) {
 
   // API endpoints
   if (pathname === '/api/kbs') {
-    return json(res, dbRef.kb.list().map(k => ({ id: k.id, name: k.name, path: k.path || '' })));
+    return json(res, dbRef.project.list('note').map(p => ({ id: p.id, name: p.name, path: p.dir || '' })));
   }
   if (pathname === '/api/notes/tree') {
     const dirPath = params.dir || getKbPath(params.kbId);
@@ -898,10 +898,10 @@ async function handleRequest(req, res) {
     try { dbRef.todo.remove(parseInt(todoMatch[1])); return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); }
   }
   if (pathname === '/api/notes/write' && req.method === 'POST') {
-    try { const body = JSON.parse(await decodeBody(req)); const kbId = body.kb_id; const content = body.content; const title = body.title || '随手记_' + Date.now();
-      const kb = dbRef.kb.get(kbId); if (!kb) return json(res, { error: '笔记库不存在' }, 404);
-      const kbPath = kb.path || kb.notes_dir; if (!kbPath || !fs.existsSync(kbPath)) return json(res, { error: '笔记库路径不存在' }, 404);
-      const filePath = path.join(kbPath, title + '.md');
+    try { const body = JSON.parse(await decodeBody(req)); const projectId = body.project_id; const content = body.content; const title = body.title || '随手记_' + Date.now();
+      const project = dbRef.project.get(projectId); if (!project) return json(res, { error: '笔记库不存在' }, 404);
+      const projectDir = project.dir; if (!projectDir || !fs.existsSync(projectDir)) return json(res, { error: '笔记库路径不存在' }, 404);
+      const filePath = path.join(projectDir, title + '.md');
       fs.writeFileSync(filePath, content, 'utf-8');
       return json(res, { ok: true, path: filePath });
     } catch (e) { return json(res, { error: e.message }, 500); }

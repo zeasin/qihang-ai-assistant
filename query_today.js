@@ -113,15 +113,15 @@ async function main() {
     WHERE enabled = 1
   `);
   
-  // 11. 知识库信息
+  // 11. 项目/知识库信息
   const kb = db.exec(`
-    SELECT name, notes_dir FROM knowledge_bases WHERE id = 1
+    SELECT name, dir FROM projects WHERE id = 1 AND type = 'note'
   `);
   
   // 12. 文档索引统计
   const totalDocs = db.exec(`
     SELECT COUNT(*) as count FROM file_index_meta
-    WHERE kb_id = 1
+    WHERE project_id = 1
   `);
   
   // 13. 最近5条消息

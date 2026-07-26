@@ -5,9 +5,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   },
   notes: {
-    tree: (kbId) => ipcRenderer.invoke('notes:tree', { kbId }),
+    tree: (projectId) => ipcRenderer.invoke('notes:tree', { projectId }),
     treeChildren: (dirPath) => ipcRenderer.invoke('notes:treeChildren', { dirPath }),
-    read: (kbId, filePath) => ipcRenderer.invoke('notes:read', { kbId, filePath }),
+    read: (projectId, filePath) => ipcRenderer.invoke('notes:read', { projectId, filePath }),
   },
   log: {
     lines: (options) => ipcRenderer.invoke('log:lines', options),
@@ -54,25 +54,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     remove: (id) => ipcRenderer.invoke('ds:remove', { datasetId: id }),
   },
 
-  // Chat
+  // Chat (unified: general chat + coding workbench)
   chat: {
     send: (question, sessionId, projectDir, kbIds, images, agent) =>
       ipcRenderer.invoke('chat:send', { question, sessionId, projectDir, kbIds, images, agent }),
-    createSession: (sessionId, title, mode, source) =>
-      ipcRenderer.invoke('chat:session:create', { id: sessionId, title, mode, source }),
-    getSessions: () => ipcRenderer.invoke('chat:session:list'),
-    getSessionsBySource: (source) => ipcRenderer.invoke('chat:session:listBySource', { source }),
+    createSession: (sessionId, projectId, title, mode, agent, source) =>
+      ipcRenderer.invoke('chat:session:create', { id: sessionId, projectId, title, mode, source, agent }),
+    getSessions: (projectId) => projectId ? ipcRenderer.invoke('chat:session:listByProject', { projectId }) : ipcRenderer.invoke('chat:session:list'),
+    getSessionsBySource: (source, projectId) => ipcRenderer.invoke('chat:session:listBySource', { source, projectId }),
     getMessages: (sessionId) => ipcRenderer.invoke('chat:session:messages', { sessionId }),
     deleteSession: (sessionId) => ipcRenderer.invoke('chat:session:delete', { sessionId }),
     updateSessionTitle: (sessionId, title) => ipcRenderer.invoke('chat:session:updateTitle', { sessionId, title }),
+    updateAgent: (sessionId, agent) => ipcRenderer.invoke('chat:session:updateAgent', { sessionId, agent }),
   },
 
-  // Projects
+  // Projects (unified: note + code)
   project: {
-    list: () => ipcRenderer.invoke('project:list'),
+    list: (type) => ipcRenderer.invoke('project:list', { type }),
     get: (id) => ipcRenderer.invoke('project:get', { id }),
-    add: (name, dir, description, defaultBranch) =>
-      ipcRenderer.invoke('project:add', { name, dir, description, defaultBranch }),
+    add: (name, type, dir, description, defaultBranch) => {
+      if (type !== 'note' && type !== 'code' && type !== 'hybrid') {
+        return ipcRenderer.invoke('project:add', { name, type: 'code', dir: type || '', description: dir || '', defaultBranch: description });
+      }
+      return ipcRenderer.invoke('project:add', { name, type, dir, description, defaultBranch });
+    },
     update: (id, data) => ipcRenderer.invoke('project:update', { id, data }),
     delete: (id) => ipcRenderer.invoke('project:delete', { id }),
   },

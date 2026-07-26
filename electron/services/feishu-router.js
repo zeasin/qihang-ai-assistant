@@ -1,4 +1,5 @@
 const logger = require('./logger');
+const rag = require('./rag');
 
 /** 意图枚举 */
 const Intent = {
@@ -91,12 +92,12 @@ async function handleQuery(ctx, deps) {
   const projectName = extractProjectName(text, deps);
   let reply = '';
 
-  // search knowledge bases
-  const kbs = deps.db.kb.list();
-  for (const kb of kbs) {
-    const results = await deps.kb.search(kb.id, text);
+  // search knowledge base projects
+  const noteProjects = deps.db.project.list('note');
+  for (const p of noteProjects) {
+    const results = await rag.searchKnowledgeBase(p.id, text);
     if (results.length > 0) {
-      reply += `📚 **${kb.name}** 中找到以下内容：\n`;
+      reply += `📚 **${p.name}** 中找到以下内容：\n`;
       results.slice(0, 3).forEach(r => {
         reply += `- ${r.content?.slice(0, 200) || r}\n`;
       });

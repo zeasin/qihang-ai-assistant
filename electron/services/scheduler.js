@@ -562,13 +562,15 @@ const executors = {
   'auto_index': async (task) => {
     logger.info(`[Scheduler] auto-index triggered: ${task.name}`);
     const config = JSON.parse(task.params_json || '{}');
-    const kbId = config.kb_id;
-    if (kbId) {
-      try {
-        const indexer = require('./indexer');
-        await indexer.indexSingle(kbId);
-      } catch (e) {
-        logger.error(`[Scheduler] index error: ${e.message}`);
+    const projectIds = config.project_ids || (config.kb_id ? [config.kb_id] : []);
+    if (projectIds.length) {
+      for (const projectId of projectIds) {
+        try {
+          const indexer = require('./indexer');
+          await indexer.indexSingle(projectId);
+        } catch (e) {
+          logger.error(`[Scheduler] index error for ${projectId}: ${e.message}`);
+        }
       }
     }
   },
@@ -576,17 +578,19 @@ const executors = {
     logger.info(`[Scheduler] daily report: ${task.name}`);
     try {
       const config = JSON.parse(task.params_json || '{}');
-      let kbId = config.kb_id;
-      if (!kbId) {
-        const firstKb = db.qOne("SELECT id FROM knowledge_bases ORDER BY id ASC LIMIT 1");
-        if (firstKb) kbId = firstKb.id;
+      let projectIds = config.project_ids;
+      if (!projectIds || !projectIds.length) {
+        if (config.kb_id) {
+          projectIds = [config.kb_id];
+        } else {
+          const firstProject = db.qOne("SELECT id FROM projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
+          if (firstProject) projectIds = [firstProject.id];
+        }
       }
-      if (!kbId) { logger.warn('[Scheduler] daily_report: no kb available'); return; }
+      if (!projectIds || !projectIds.length) { logger.warn('[Scheduler] daily_report: no project available'); return; }
       const today = getChinaDate();
-      const kbName = kbId ? (db.qOne("SELECT name FROM knowledge_bases WHERE id = ?", kbId) || {}).name || '笔记库' : '笔记库';
-
-      // ========== System Prompt (hardcoded, not user-editable) ==========
-      const SYSTEM_PROMPT = '你是一个专业的智能办公助理，请基于本地数据生成一份今天的综合日报。\n\n## 可用工具\n- get_today_info(): 获取今天的日期、知识库名称等基本信息\n- query_todos(status, priority, date_from, date_to, limit): 查询待办事项\n  - status 可选: done(已完成) / in_progress(进行中) / pending(待办)\n  - priority 可选: high(高) / mid(中) / low(低)\n  - date 格式: YYYY-MM-DD\n- query_messages(date_from, date_to, role, limit): 查询对话记录\n  - role 可选: user(用户) / assistant(AI)\n- query_documents(kb_id, date_from, date_to, limit): 查询知识库文档更新\n- query_data_records(dataset_name, date_from, date_to, limit): 查询数据中心记录\n- query_reminders(): 查询所有已启用的提醒\n\n## 执行步骤\n1. 先调用 get_today_info() 获取今天的日期和知识库信息\n2. 调用 query_todos 查询今日完成的任务(status=done, date_from=today)\n3. 调用 query_todos 查询未完成的待办(status=in_progress 和 status=pending)\n4. 调用 query_messages 查询今日的用户对话(date_from=today, role=user)\n5. 调用 query_documents 查询今日更新的文档(date_from=today)\n6. 调用 query_data_records 查询今日新增的记录(date_from=today)\n7. 调用 query_reminders 查看今日提醒\n8. 根据获取到的所有数据，综合用户的要求，生成一份综合日报\n\n请严格按照用户要求的格式生成日报，不要偏离用户的格式要求。';
+      const projectNames = projectIds.map(id => (db.qOne("SELECT name FROM projects WHERE id = ?", id) || {}).name || '笔记库').join(', ');
+      const mainProjectId = projectIds[0];
 
       // ========== Default User Prompt (editable in config page) ==========
       const DEFAULT_USER_PROMPT = '请按以下格式生成日报：\n\n## 日报格式要求\n使用 Markdown 格式，包含以下板块：\n\n### 1️⃣ 今日概览\n- ✅ 完成任务数量、📋 待办数量、💬 对话次数、📝 笔记更新数、🗂️ 新增记录数\n\n### 2️⃣ 今日完成\n- 列出今日完成的任务，高优先级的用 ⭐ 标记\n\n### 3️⃣ 待办事项\n- 逾期的用 🔴 标记并注明逾期天数\n- 进行中的用 🔄 标记\n- 高优先级的用 🔴 标记\n\n### 4️⃣ 对话与沟通\n- 今日对话次数和简要摘要\n\n### 5️⃣ 笔记与记录\n- 更新的文档和新增的记录\n\n### 6️⃣ 今日提醒\n- 已启用的提醒（如有）\n\n### 7️⃣ 综合评估\n- 根据完成任务、待办处理、知识沉淀等维度给出今日效率评分（0-100分）\n- 给出具体的改进行动建议\n\n## 注意事项\n- 数据为空的部分可以略过，不要编造数据\n- 评分要合理，基于实际数据给出\n- 建议要具体、可执行\n- 语言简洁专业，使用中文';
@@ -599,12 +603,12 @@ const executors = {
 
       logger.info('[Scheduler] Calling AI to generate daily report...');
       const orchestrator = require('./orchestrator');
-      const r = await orchestrator.generateDailyReport(fullPrompt, kbId);
+      const r = await orchestrator.generateDailyReport(fullPrompt, mainProjectId);
       logger.info(`[Scheduler] AI report generated, length: ${r.length}`);
 
-      db.run("INSERT INTO ai_analysis (kb_id, type, content, prompt, report_date, created_at, updated_at) VALUES (?, 'daily_report', ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
-        kbId, r, fullPrompt, today);
-      logger.info(`[Scheduler] daily report saved for kb ${kbId}`);
+      db.run("INSERT INTO ai_analysis (project_id, type, content, prompt, report_date, created_at, updated_at) VALUES (?, 'daily_report', ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
+        mainProjectId, r, fullPrompt, today);
+      logger.info(`[Scheduler] daily report saved for project ${mainProjectId}`);
 
       // Cleanup: keep only last N days of reports
       const retentionDays = parseInt(db.configGet('daily_report_retention_days') || '30', 10);
@@ -625,7 +629,7 @@ const executors = {
         logger.info('[Scheduler] Falling back to template-based report...');
         const fallbackData = {
           today: getChinaDate(), yesterday: getChinaDate(-1),
-          greeting: '🌅 早上好', kbName: kbId ? (db.qOne("SELECT name FROM knowledge_bases WHERE id = ?", kbId) || {}).name || '笔记库' : '笔记库',
+          greeting: '🌅 早上好', kbName: mainProjectId ? (db.qOne("SELECT name FROM projects WHERE id = ?", mainProjectId) || {}).name || '笔记库' : '笔记库',
           doneToday: db.q("SELECT title, priority FROM todos WHERE status = 'done' AND updated_at >= ?", getChinaDate()),
           pendingTodos: [],
           overdueTodos: [],
@@ -635,8 +639,8 @@ const executors = {
           todos: [], allDatasets: [], dsNameMap: {},
         };
         const { text: fallbackText } = renderReport(fallbackData);
-        db.run("INSERT INTO ai_analysis (kb_id, type, content, report_date, created_at, updated_at) VALUES (?, 'daily_report', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
-          kbId, fallbackText, getChinaDate());
+        db.run("INSERT INTO ai_analysis (project_id, type, content, report_date, created_at, updated_at) VALUES (?, 'daily_report', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
+          mainProjectId, fallbackText, getChinaDate());
         logger.info('[Scheduler] Fallback report saved');
       } catch (fallbackErr) {
         logger.error(`[Scheduler] Fallback also failed: ${fallbackErr.message}`);
@@ -649,7 +653,7 @@ const executors = {
       const msg = task.name + (task.message ? '\n' + task.message : '');
       sendNotification('⏰ 提醒', msg);
       if (task.notify_feishu) await sendFeishu(`⏰ ${msg}`);
-      db.run("UPDATE collector_tasks SET updated_at = datetime('now') WHERE id = ?", task.id);
+      db.run("UPDATE collector_tasks SET updated_at = datetime('now', '+8 hours') WHERE id = ?", task.id);
     } catch (e) {
       logger.error(`[Scheduler] reminder error: ${e.message}`);
     }

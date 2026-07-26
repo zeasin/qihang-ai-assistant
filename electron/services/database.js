@@ -19,6 +19,7 @@ async function getDb() {
   }
   initSchema();
   migrate();
+  ensureColumns();
   return db;
 }
 
@@ -28,7 +29,6 @@ function saveDb() {
   fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
 
-/** Version tracking for migrations */
 function schemaVersion() {
   const r = qOne("SELECT value FROM config WHERE key = 'schema_version'");
   return r ? parseInt(r.value, 10) : 0;
@@ -48,8 +48,10 @@ function initSchema() {
       chat_id TEXT,
       chat_type TEXT,
       mode TEXT DEFAULT 'general',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      project_id INTEGER,
+      active_agent TEXT DEFAULT 'pi',
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -59,66 +61,67 @@ function initSchema() {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       mode TEXT DEFAULT 'general',
-      kb_id TEXT,
       images TEXT DEFAULT NULL,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
-    CREATE TABLE IF NOT EXISTS coding_sessions (
-      id TEXT PRIMARY KEY,
-      project_id INTEGER REFERENCES coding_projects(id) ON DELETE SET NULL,
-      title TEXT,
-      active_agent TEXT DEFAULT 'pi',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS coding_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES coding_sessions(id),
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      mode TEXT DEFAULT 'pi',
-      images TEXT DEFAULT NULL,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS knowledge_bases (
+    CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      notes_dir TEXT,
+      type TEXT NOT NULL DEFAULT 'note',
+      dir TEXT,
+      description TEXT DEFAULT '',
+      default_branch TEXT DEFAULT '',
       labels TEXT,
       sort_order INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
+      is_default INTEGER DEFAULT 0,
+      auto_report INTEGER DEFAULT 0,
+      feishu_push INTEGER DEFAULT 0,
       dir_settings TEXT,
       ignore_dirs TEXT,
       ignore_files TEXT,
-      auto_report INTEGER DEFAULT 0,
-      feishu_push INTEGER DEFAULT 0
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
-    CREATE TABLE IF NOT EXISTS file_index_meta (
+    CREATE TABLE IF NOT EXISTS documents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id),
-      file_path TEXT,
-      last_modified INTEGER,
-      file_size INTEGER,
-      content_hash TEXT,
-      last_indexed_at TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
+      project_id INTEGER NOT NULL REFERENCES projects(id),
+      path TEXT NOT NULL,
+      content TEXT NOT NULL,
+      indexed_at TEXT,
+      file_mtime INTEGER,
+      UNIQUE(project_id, path)
+    );
+
+    CREATE TABLE IF NOT EXISTS chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      doc_id INTEGER NOT NULL REFERENCES documents(id),
+      content TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS note_embeddings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kb_id INTEGER REFERENCES knowledge_bases(id),
+      project_id INTEGER REFERENCES projects(id),
       file_path TEXT,
       chunk_index INTEGER,
       path_context TEXT,
       content TEXT,
       embedding TEXT,
       content_hash TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
+    );
+
+    CREATE TABLE IF NOT EXISTS file_index_meta (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id),
+      file_path TEXT,
+      last_modified INTEGER,
+      file_size INTEGER,
+      content_hash TEXT,
+      last_indexed_at TEXT,
+      created_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
     CREATE TABLE IF NOT EXISTS turn_embeddings (
@@ -126,30 +129,7 @@ function initSchema() {
       session_id TEXT REFERENCES sessions(id),
       turn_order INTEGER,
       embedding TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS llm_profiles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      api_key TEXT,
-      base_url TEXT,
-      model TEXT,
-      timeout INTEGER,
-      is_default INTEGER DEFAULT 0,
-      model_type TEXT DEFAULT 'text',
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS coding_projects (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      dir TEXT,
-      description TEXT,
-      default_branch TEXT,
-      is_default INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
     CREATE TABLE IF NOT EXISTS data_center_datasets (
@@ -162,8 +142,8 @@ function initSchema() {
       schema_json TEXT,
       import_configs_json TEXT,
       module_id TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
     CREATE TABLE IF NOT EXISTS data_center_records (
@@ -176,8 +156,8 @@ function initSchema() {
       record_num TEXT,
       record_type TEXT,
       record_status TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
     CREATE TABLE IF NOT EXISTS data_center_modules (
@@ -187,20 +167,20 @@ function initSchema() {
       description TEXT,
       icon TEXT,
       sort_order INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
     CREATE TABLE IF NOT EXISTS ai_analysis (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kb_id INTEGER REFERENCES knowledge_bases(id),
+      project_id INTEGER REFERENCES projects(id),
       type TEXT,
       content TEXT,
       prompt TEXT,
       dir_path TEXT,
       report_date TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
     CREATE TABLE IF NOT EXISTS collector_tasks (
@@ -215,8 +195,8 @@ function initSchema() {
       notify_feishu INTEGER DEFAULT 1,
       dataset_id TEXT,
       params_json TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
     CREATE TABLE IF NOT EXISTS reminders (
@@ -232,22 +212,7 @@ function initSchema() {
       enabled INTEGER DEFAULT 1,
       created_at TEXT NOT NULL,
       last_triggered TEXT DEFAULT '',
-      kb_id INTEGER DEFAULT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS documents (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id),
-      path TEXT NOT NULL,
-      content TEXT NOT NULL,
-      indexed_at TEXT,
-      UNIQUE(kb_id, path)
-    );
-
-    CREATE TABLE IF NOT EXISTS chunks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      doc_id INTEGER NOT NULL REFERENCES documents(id),
-      content TEXT NOT NULL
+      project_id INTEGER DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS todos (
@@ -258,58 +223,20 @@ function initSchema() {
       due_date TEXT DEFAULT '',
       status TEXT DEFAULT 'pending',
       sort_order INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
+
   `);
   saveDb();
 }
 
-/** Migrate from old app branch schema to plan branch schema */
 function migrate() {
   const version = schemaVersion();
 
   if (version < 1) {
     setSchemaVersion(1);
 
-  // 1) knowledge_bases: old schema uses TEXT id + path; new uses INTEGER id + notes_dir
-  const hasOldKb = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='knowledge_bases' AND sql LIKE '%TEXT%id%'");
-  if (!hasOldKb) {
-    // new-style kb table exists; just add missing columns
-    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN notes_dir TEXT"); } catch {}
-    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN labels TEXT"); } catch {}
-    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN sort_order INTEGER DEFAULT 0"); } catch {}
-    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN dir_settings TEXT"); } catch {}
-    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN ignore_dirs TEXT"); } catch {}
-    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN ignore_files TEXT"); } catch {}
-    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN auto_report INTEGER DEFAULT 0"); } catch {}
-    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN feishu_push INTEGER DEFAULT 0"); } catch {}
-  } else {
-    // old-style kb table: copy to new table, drop old
-    const oldKbs = q('SELECT * FROM knowledge_bases');
-    db.run("DROP TABLE IF EXISTS knowledge_bases");
-    db.run(`
-      CREATE TABLE knowledge_bases (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        notes_dir TEXT,
-        labels TEXT,
-        sort_order INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now')),
-        dir_settings TEXT,
-        ignore_dirs TEXT,
-        ignore_files TEXT,
-        auto_report INTEGER DEFAULT 0,
-        feishu_push INTEGER DEFAULT 0
-      )
-    `);
-    for (const kb of oldKbs) {
-      db.run("INSERT INTO knowledge_bases (name, notes_dir, created_at) VALUES (?, ?, ?)",
-        kb.name, kb.path || kb.notes_dir || '', kb.created_at);
-    }
-  }
-
-  // 2) chat_sessions → sessions
   const hasLegacySessions = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_sessions'");
   if (hasLegacySessions) {
     const legacySessions = q('SELECT * FROM chat_sessions');
@@ -320,7 +247,6 @@ function migrate() {
     }
   }
 
-  // 3) chat_messages → messages
   const hasLegacyMessages = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_messages'");
   if (hasLegacyMessages) {
     const legacyMessages = q('SELECT * FROM chat_messages');
@@ -331,17 +257,6 @@ function migrate() {
     }
   }
 
-  // 4) old projects → coding_projects
-  const hasOldProjects = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'");
-  if (hasOldProjects) {
-    const old = q('SELECT * FROM projects');
-    for (const p of old) {
-      db.run("INSERT INTO coding_projects (name, dir, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        p.name, p.code_directory || '', p.description || '', p.created_at, p.updated_at);
-    }
-  }
-
-  // 5) old dataset_schemas → data_center_datasets
   const hasOldDs = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='dataset_schemas'");
   if (hasOldDs) {
     const old = q('SELECT * FROM dataset_schemas');
@@ -351,7 +266,6 @@ function migrate() {
     }
   }
 
-  // 6) old dataset_records → data_center_records
   const hasOldDsRec = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='dataset_records'");
   if (hasOldDsRec) {
     const old = q('SELECT * FROM dataset_records');
@@ -361,7 +275,6 @@ function migrate() {
     }
   }
 
-  // 7) old scheduled_tasks → collector_tasks
   const hasOldTasks = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_tasks'");
   if (hasOldTasks) {
     const old = q('SELECT * FROM scheduled_tasks');
@@ -371,18 +284,8 @@ function migrate() {
     }
   }
 
-  // 8) documents table: old uses TEXT kb_id; new uses INTEGER
-  // If old documents table had TEXT kb_id referencing old kb, it still works
-  // Just add missing columns if needed
   try { db.run("ALTER TABLE documents ADD COLUMN kb_id INTEGER"); } catch {}
-
-  // 9) Add notify_feishu column to existing collector_tasks
   try { db.run("ALTER TABLE collector_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
-  }
-
-  if (version < 2) {
-    try { db.run("ALTER TABLE knowledge_bases ADD COLUMN is_default INTEGER DEFAULT 0"); } catch {}
-    setSchemaVersion(2);
   }
 
   if (version < 3) {
@@ -391,29 +294,85 @@ function migrate() {
   }
 
   if (version < 4) {
-    try { db.run("ALTER TABLE coding_messages ADD COLUMN images TEXT DEFAULT NULL"); } catch {}
     try { db.run("ALTER TABLE messages ADD COLUMN images TEXT DEFAULT NULL"); } catch {}
     setSchemaVersion(4);
   }
 
-  // Ensure notify_feishu column exists (for tables created before the column was added)
+  if (version < 5) {
+    // Ensure projects table has columns needed for migration
+    try { db.run("ALTER TABLE projects ADD COLUMN type TEXT NOT NULL DEFAULT 'note'"); } catch {}
+    try { db.run("ALTER TABLE projects ADD COLUMN labels TEXT"); } catch {}
+    try { db.run("ALTER TABLE projects ADD COLUMN sort_order INTEGER DEFAULT 0"); } catch {}
+    try { db.run("ALTER TABLE projects ADD COLUMN auto_report INTEGER DEFAULT 0"); } catch {}
+    try { db.run("ALTER TABLE projects ADD COLUMN feishu_push INTEGER DEFAULT 0"); } catch {}
+    try { db.run("ALTER TABLE projects ADD COLUMN dir_settings TEXT"); } catch {}
+    try { db.run("ALTER TABLE projects ADD COLUMN ignore_dirs TEXT"); } catch {}
+    try { db.run("ALTER TABLE projects ADD COLUMN ignore_files TEXT"); } catch {}
+
+    // Ensure sessions table has project_id + active_agent columns
+    try { db.run("ALTER TABLE sessions ADD COLUMN project_id INTEGER"); } catch (e) { logger.error('[DB] ALTER sessions project_id:', e.message); }
+    try { db.run("ALTER TABLE sessions ADD COLUMN active_agent TEXT DEFAULT 'pi'"); } catch (e) { logger.error('[DB] ALTER sessions active_agent:', e.message); }
+
+    // Migrate kb_id → project_id in dependent tables (if old schema with kb_id)
+    try {
+      const docHasKb = qOne("SELECT kb_id FROM documents LIMIT 1");
+      if (docHasKb !== undefined) {
+        try { db.run("ALTER TABLE documents ADD COLUMN project_id INTEGER"); } catch {}
+        db.run("UPDATE documents SET project_id = kb_id WHERE project_id IS NULL");
+      }
+    } catch {}
+    try { db.run("ALTER TABLE note_embeddings ADD COLUMN project_id INTEGER"); } catch {}
+    try { db.run("UPDATE note_embeddings SET project_id = kb_id WHERE project_id IS NULL AND kb_id IS NOT NULL"); } catch {}
+    try { db.run("ALTER TABLE file_index_meta ADD COLUMN project_id INTEGER"); } catch {}
+    try { db.run("UPDATE file_index_meta SET project_id = kb_id WHERE project_id IS NULL AND kb_id IS NOT NULL"); } catch {}
+    try { db.run("ALTER TABLE ai_analysis ADD COLUMN project_id INTEGER"); } catch {}
+    try { db.run("UPDATE ai_analysis SET project_id = kb_id WHERE project_id IS NULL AND kb_id IS NOT NULL"); } catch {}
+    try { db.run("ALTER TABLE reminders ADD COLUMN project_id INTEGER"); } catch {}
+    try { db.run("UPDATE reminders SET project_id = kb_id WHERE project_id IS NULL AND kb_id IS NOT NULL"); } catch {}
+
+    // Update seed task params: kb_id → project_ids
+    const tasks = q("SELECT id, params_json FROM collector_tasks WHERE task_type = 'daily_report' OR task_type = 'auto_index'");
+    for (const t of tasks) {
+      try {
+        const params = JSON.parse(t.params_json || '{}');
+        if (params.kb_id && !params.project_ids) {
+          params.project_ids = [params.kb_id];
+          delete params.kb_id;
+          run('UPDATE collector_tasks SET params_json = ? WHERE id = ?', JSON.stringify(params), t.id);
+        }
+      } catch {}
+    }
+
+    setSchemaVersion(5);
+  }
+
   try { db.run("ALTER TABLE collector_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
 
-  // Seed default system tasks
   try {
     const existing = qOne("SELECT id FROM collector_tasks WHERE task_type = 'daily_report'");
     if (!existing) {
-      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_daily_report', '综合日报', '56 9 * * *', 'daily_report', '{\"kb_id\":1}', 1, 1)");
+      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_daily_report', '综合日报', '56 9 * * *', 'daily_report', '{}', 1, 1)");
     }
   } catch (e) { console.error('[DB] seed task error:', e); }
 
   try {
     const existing = qOne("SELECT id FROM collector_tasks WHERE task_type = 'auto_index'");
     if (!existing) {
-      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_auto_index', '自动索引笔记库', '0 */2 * * *', 'auto_index', '{\"kb_id\":1}', 1, 0)");
+      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_auto_index', '自动索引笔记库', '0 */2 * * *', 'auto_index', '{}', 1, 0)");
     }
   } catch (e) { console.error('[DB] seed auto_index error:', e); }
 
+  saveDb();
+}
+
+function ensureColumns() {
+  try { db.run("ALTER TABLE sessions ADD COLUMN project_id INTEGER"); } catch {}
+  try { db.run("ALTER TABLE sessions ADD COLUMN active_agent TEXT DEFAULT 'pi'"); } catch {}
+  try { db.run("ALTER TABLE documents ADD COLUMN project_id INTEGER"); } catch {}
+  try { db.run("ALTER TABLE note_embeddings ADD COLUMN project_id INTEGER"); } catch {}
+  try { db.run("ALTER TABLE file_index_meta ADD COLUMN project_id INTEGER"); } catch {}
+  try { db.run("ALTER TABLE ai_analysis ADD COLUMN project_id INTEGER"); } catch {}
+  try { db.run("ALTER TABLE reminders ADD COLUMN project_id INTEGER"); } catch {}
   saveDb();
 }
 
@@ -452,37 +411,113 @@ function configSet(key, value) {
   run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', key, value);
 }
 
-// ========== Knowledge Bases ==========
-const kb = {
-  list: () => q('SELECT * FROM knowledge_bases ORDER BY sort_order ASC, created_at DESC').map(kb => ({ ...kb, path: kb.notes_dir })),
-  get: (id) => { const r = qOne('SELECT * FROM knowledge_bases WHERE id = ?', id); return r ? { ...r, path: r.notes_dir } : null; },
-  add: (name, notesDir) => {
-    run('INSERT INTO knowledge_bases (name, notes_dir) VALUES (?, ?)', name, notesDir || '');
-    const r = qOne('SELECT id FROM knowledge_bases WHERE name = ? AND notes_dir = ?', name, notesDir || '');
-    return { id: r.id, name, path: notesDir, notes_dir: notesDir };
+// ========== Projects (unified: note + code) ==========
+const project = {
+  list: (type) => {
+    if (type) return q('SELECT * FROM projects WHERE type = ? ORDER BY sort_order ASC, created_at DESC', type);
+    return q('SELECT * FROM projects ORDER BY sort_order ASC, created_at DESC');
+  },
+  get: (id) => qOne('SELECT * FROM projects WHERE id = ?', id),
+  getDefault: () => qOne('SELECT * FROM projects WHERE is_default = 1'),
+  setDefault: (id) => {
+    run('UPDATE projects SET is_default = 0 WHERE is_default = 1');
+    if (id) run('UPDATE projects SET is_default = 1 WHERE id = ?', id);
+  },
+  add: (name, type, dir, description, defaultBranch) => {
+    const t = type || 'note';
+    run('INSERT INTO projects (name, type, dir, description, default_branch) VALUES (?, ?, ?, ?, ?)',
+      name, t, dir || '', description || '', defaultBranch || '');
+    const r = qOne('SELECT id FROM projects WHERE name = ? AND type = ?', name, t);
+    return { id: r.id, name, type: t };
+  },
+  update: (id, data) => {
+    const fields = []; const params = [];
+    if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
+    if (data.type !== undefined) { fields.push('type = ?'); params.push(data.type); }
+    if (data.dir !== undefined) { fields.push('dir = ?'); params.push(data.dir); }
+    if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
+    if (data.default_branch !== undefined) { fields.push('default_branch = ?'); params.push(data.default_branch); }
+    if (data.is_default !== undefined) { fields.push('is_default = ?'); params.push(data.is_default ? 1 : 0); }
+    if (data.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(data.sort_order); }
+    if (data.auto_report !== undefined) { fields.push('auto_report = ?'); params.push(data.auto_report ? 1 : 0); }
+    if (data.labels !== undefined) { fields.push('labels = ?'); params.push(data.labels); }
+    if (data.dir_settings !== undefined) { fields.push('dir_settings = ?'); params.push(data.dir_settings); }
+    if (data.ignore_dirs !== undefined) { fields.push('ignore_dirs = ?'); params.push(data.ignore_dirs); }
+    if (data.ignore_files !== undefined) { fields.push('ignore_files = ?'); params.push(data.ignore_files); }
+    if (fields.length) {
+      fields.push("updated_at = datetime('now', '+8 hours')");
+      params.push(id);
+      run(`UPDATE projects SET ${fields.join(', ')} WHERE id = ?`, ...params);
+    }
   },
   remove: (id) => {
-    run('DELETE FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE kb_id = ?)', id);
-    run('DELETE FROM documents WHERE kb_id = ?', id);
-    run('DELETE FROM note_embeddings WHERE kb_id = ?', id);
-    run('DELETE FROM knowledge_bases WHERE id = ?', id);
+    run('DELETE FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE project_id = ?)', id);
+    run('DELETE FROM documents WHERE project_id = ?', id);
+    run('DELETE FROM note_embeddings WHERE project_id = ?', id);
+    run('DELETE FROM file_index_meta WHERE project_id = ?', id);
+    run('DELETE FROM ai_analysis WHERE project_id = ?', id);
+    const sessions = q('SELECT id FROM sessions WHERE project_id = ?', id);
+    for (const s of sessions) {
+      run('DELETE FROM messages WHERE session_id = ?', s.id);
+      run('DELETE FROM turn_embeddings WHERE session_id = ?', s.id);
+    }
+    run('DELETE FROM sessions WHERE project_id = ?', id);
+    run('DELETE FROM projects WHERE id = ?', id);
   },
-  docCount: (kbId) => { const r = qOne('SELECT COUNT(*) as c FROM documents WHERE kb_id = ?', kbId); return r ? r.c : 0; },
-  insertDoc: (kbId, pathVal, content, fileMtime) => {
-    run("INSERT OR REPLACE INTO documents (kb_id, path, content, indexed_at, file_mtime) VALUES (?, ?, ?, datetime('now'), ?)", kbId, pathVal, content, fileMtime || null);
-    const r = qOne('SELECT id FROM documents WHERE kb_id = ? AND path = ?', kbId, pathVal);
+  // Document operations (for note-type projects)
+  docCount: (projectId) => {
+    try { const r = qOne('SELECT COUNT(*) as c FROM documents WHERE project_id = ?', projectId); return r ? r.c : 0; } catch { return 0; }
+  },
+  insertDoc: (projectId, pathVal, content, fileMtime) => {
+    run("INSERT OR REPLACE INTO documents (project_id, path, content, indexed_at, file_mtime) VALUES (?, ?, ?, datetime('now', '+8 hours'), ?)", projectId, pathVal, content, fileMtime || null);
+    const r = qOne('SELECT id FROM documents WHERE project_id = ? AND path = ?', projectId, pathVal);
     return r.id;
   },
   insertChunk: (docId, content) => run('INSERT INTO chunks (doc_id, content) VALUES (?, ?)', docId, content),
-  getChunks: (kbId) => q('SELECT c.content FROM chunks c JOIN documents d ON c.doc_id = d.id WHERE d.kb_id = ?', kbId).map(r => r.content),
-  deleteDocs: (kbId) => { run('DELETE FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE kb_id = ?)', kbId); run('DELETE FROM documents WHERE kb_id = ?', kbId); },
-  setDefault: (id) => {
-    run('UPDATE knowledge_bases SET is_default = 0 WHERE is_default = 1');
-    if (id) run('UPDATE knowledge_bases SET is_default = 1 WHERE id = ?', id);
+  getChunks: (projectId) => q('SELECT c.content FROM chunks c JOIN documents d ON c.doc_id = d.id WHERE d.project_id = ?', projectId).map(r => r.content),
+  deleteDocs: (projectId) => {
+    run('DELETE FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE project_id = ?)', projectId);
+    run('DELETE FROM documents WHERE project_id = ?', projectId);
   },
-  getDefault: () => {
-    const r = qOne('SELECT * FROM knowledge_bases WHERE is_default = 1');
-    return r ? { ...r, path: r.notes_dir } : null;
+};
+
+// ========== Sessions & Messages (unified: chat + coding) ==========
+const chat = {
+  sessions: (projectId) => {
+    try {
+      if (projectId) return q("SELECT s.*, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId);
+      return q("SELECT s.*, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s ORDER BY s.updated_at DESC");
+    } catch { return []; }
+  },
+  sessionsBySource: (source, projectId) => {
+    if (projectId) return q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.source = ? AND s.project_id = ? ORDER BY updated_at DESC`, source, projectId);
+    return q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.source = ? ORDER BY updated_at DESC`, source);
+  },
+  createSession: (id, projectId, title, mode, agent, source) => {
+    run("INSERT OR IGNORE INTO sessions (id, source, title, mode, project_id, active_agent) VALUES (?, ?, ?, ?, ?, ?)",
+      id, source || 'ui', title || '新对话', mode || 'general', projectId || null, agent || 'pi');
+    return qOne('SELECT * FROM sessions WHERE id = ?', id);
+  },
+  getSession: (id) => qOne('SELECT * FROM sessions WHERE id = ?', id),
+  deleteSession: (sessionId) => {
+    run('DELETE FROM turn_embeddings WHERE session_id = ?', sessionId);
+    run('DELETE FROM messages WHERE session_id = ?', sessionId);
+    run('DELETE FROM sessions WHERE id = ?', sessionId);
+  },
+  updateSessionTitle: (id, title) => {
+    run("UPDATE sessions SET title = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", title, id);
+  },
+  updateSessionAgent: (id, agent) => {
+    run("UPDATE sessions SET active_agent = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", agent, id);
+  },
+  messages: (sessionId) => {
+    const rows = q("SELECT * FROM messages WHERE session_id = ? ORDER BY id", sessionId);
+    return rows.map(r => ({ ...r, images: r.images ? JSON.parse(r.images) : null }));
+  },
+  addMessage: (sessionId, role, content, mode, images) => {
+    const imagesJson = images?.length ? JSON.stringify(images) : null;
+    run("INSERT INTO messages (session_id, role, content, mode, images) VALUES (?, ?, ?, ?, ?)", sessionId, role, content, mode || 'general', imagesJson);
+    run("UPDATE sessions SET updated_at = datetime('now', '+8 hours') WHERE id = ?", sessionId);
   },
 };
 
@@ -501,7 +536,7 @@ const dm = {
     if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
     if (data.icon !== undefined) { fields.push('icon = ?'); params.push(data.icon); }
     if (data.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(data.sort_order); }
-    if (fields.length) { fields.push("updated_at = datetime('now')"); params.push(id); run(`UPDATE data_center_modules SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE data_center_modules SET ${fields.join(', ')} WHERE id = ?`, ...params); }
   },
   remove: (id) => {
     const dsList = q('SELECT dataset_id FROM data_center_datasets WHERE module_id = ?', id);
@@ -534,7 +569,7 @@ const ds = {
     if (data.type !== undefined) { fields.push('type = ?'); params.push(data.type); }
     if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
     if (data.schema_json !== undefined) { fields.push('schema_json = ?'); params.push(data.schema_json); }
-    if (fields.length) { fields.push("updated_at = datetime('now')"); params.push(id); run(`UPDATE data_center_datasets SET ${fields.join(', ')} WHERE id = ? OR dataset_id = ?`, ...params, id); }
+    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE data_center_datasets SET ${fields.join(', ')} WHERE id = ? OR dataset_id = ?`, ...params, id); }
   },
   remove: (id) => {
     const dsRow = qOne('SELECT dataset_id FROM data_center_datasets WHERE id = ? OR dataset_id = ?', id, id);
@@ -551,60 +586,6 @@ const ds = {
   insert: (datasetId, dataObj) => run("INSERT INTO data_center_records (dataset_id, data_json) VALUES (?, ?)", datasetId, JSON.stringify(dataObj)),
   updateRecord: (id, dataObj) => run('UPDATE data_center_records SET data_json = ? WHERE id = ?', JSON.stringify(dataObj), id),
   deleteRecord: (id) => run('DELETE FROM data_center_records WHERE id = ?', id),
-};
-
-// ========== Sessions & Messages ==========
-const chat = {
-  sessions: () => q("SELECT s.*, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s ORDER BY updated_at DESC"),
-  sessionsBySource: (source) => q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE source = ? ORDER BY updated_at DESC`, source),
-  createSession: (id, title, mode, source) => {
-    run("INSERT OR IGNORE INTO sessions (id, source, title, mode) VALUES (?, ?, ?, ?)", id, source || 'ui', title || '新对话', mode || 'general');
-    return { id };
-  },
-  addMessage: (sessionId, role, content, mode, source, images) => {
-    const imagesJson = images?.length ? JSON.stringify(images) : null;
-    run("INSERT INTO messages (session_id, role, content, mode, source, images) VALUES (?, ?, ?, ?, ?, ?)", sessionId, role, content, mode || 'general', source || 'ui', imagesJson);
-    run("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", sessionId);
-  },
-  messages: (sessionId) => {
-    const rows = q("SELECT * FROM messages WHERE session_id = ? ORDER BY id", sessionId);
-    return rows.map(r => ({ ...r, images: r.images ? JSON.parse(r.images) : null }));
-  },
-  deleteSession: (sessionId) => { run("DELETE FROM turn_embeddings WHERE session_id = ?", sessionId); run('DELETE FROM messages WHERE session_id = ?', sessionId); run('DELETE FROM sessions WHERE id = ?', sessionId); },
-  updateSessionTitle: (id, title) => { run("UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ?", title, id); },
-  updateSessionMode: (id, mode) => { run("UPDATE sessions SET mode = ?, updated_at = datetime('now') WHERE id = ?", mode, id); },
-  sessionsByProject: (projectId) => q("SELECT s.*, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId),
-  createCodingSession: (id, projectId, title, agent) => {
-    run("INSERT OR IGNORE INTO sessions (id, source, title, mode, project_id, active_agent) VALUES (?, 'ui', ?, 'coding', ?, ?)", id, title || '新对话', projectId, agent || 'pi');
-    return qOne('SELECT * FROM sessions WHERE id = ?', id);
-  },
-  updateSessionAgent: (id, agent) => { run("UPDATE sessions SET active_agent = ?, updated_at = datetime('now') WHERE id = ?", agent, id); },
-  getSession: (id) => qOne('SELECT * FROM sessions WHERE id = ?', id),
-};
-
-// ========== Projects ==========
-const project = {
-  list: () => q('SELECT * FROM coding_projects ORDER BY updated_at DESC, created_at DESC'),
-  get: (id) => qOne('SELECT * FROM coding_projects WHERE id = ?', id),
-  add: (name, dir, description, defaultBranch) => {
-    run('INSERT INTO coding_projects (name, dir, description, default_branch) VALUES (?, ?, ?, ?)', name, dir || '', description || '', defaultBranch || '');
-    const r = qOne('SELECT id FROM coding_projects WHERE name = ?', name);
-    return { id: r.id, name };
-  },
-  update: (id, data) => {
-    const fields = []; const params = [];
-    if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
-    if (data.dir !== undefined) { fields.push('dir = ?'); params.push(data.dir); }
-    if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
-    if (data.default_branch !== undefined) { fields.push('default_branch = ?'); params.push(data.default_branch); }
-    if (data.is_default !== undefined) { fields.push('is_default = ?'); params.push(data.is_default ? 1 : 0); }
-    if (fields.length) {
-      fields.push("updated_at = datetime('now')");
-      params.push(id);
-      run(`UPDATE coding_projects SET ${fields.join(', ')} WHERE id = ?`, ...params);
-    }
-  },
-  delete: (id) => run('DELETE FROM coding_projects WHERE id = ?', id),
 };
 
 // ========== Collector Tasks ==========
@@ -629,7 +610,7 @@ const task = {
     if (data.dataset_id !== undefined) { fields.push('dataset_id = ?'); params.push(data.dataset_id); }
     if (data.prompt_key !== undefined) { fields.push('prompt_key = ?'); params.push(data.prompt_key); }
     if (data.url !== undefined) { fields.push('url = ?'); params.push(data.url); }
-    if (fields.length) { fields.push("updated_at = datetime('now')"); params.push(id); run(`UPDATE collector_tasks SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE collector_tasks SET ${fields.join(', ')} WHERE id = ?`, ...params); }
   },
   remove: (id) => run('DELETE FROM collector_tasks WHERE id = ?', id),
   setEnabled: (id, enabled) => run('UPDATE collector_tasks SET enabled = ?, updated_at = datetime(\'now\') WHERE id = ?', enabled ? 1 : 0, id),
@@ -642,12 +623,12 @@ const reminder = {
   get: (id) => qOne('SELECT * FROM reminders WHERE id = ?', id),
   add: (data) => {
     const id = data.id || 'R' + Date.now();
-    run('INSERT OR IGNORE INTO reminders (id, name, message, type, time, date, day_of_week, day_of_month, month_day, enabled, created_at, last_triggered, kb_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    run('INSERT OR IGNORE INTO reminders (id, name, message, type, time, date, day_of_week, day_of_month, month_day, enabled, created_at, last_triggered, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       id, data.name, data.message || '', data.type, data.time || '09:00', data.date || '',
       data.day_of_week || 0, data.day_of_month || 1, data.month_day || '',
       data.enabled !== undefined ? (data.enabled ? 1 : 0) : 1,
       data.created_at || new Date().toISOString().slice(0, 19).replace('T', ' '),
-      data.last_triggered || '', data.kb_id || null);
+      data.last_triggered || '', data.project_id || null);
     return { id };
   },
   update: (id, data) => {
@@ -682,7 +663,7 @@ const todo = {
     if (data.due_date !== undefined) { fields.push('due_date = ?'); params.push(data.due_date); }
     if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
     if (data.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(data.sort_order); }
-    if (fields.length) { fields.push("updated_at = datetime('now')"); params.push(id); run(`UPDATE todos SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE todos SET ${fields.join(', ')} WHERE id = ?`, ...params); }
   },
   remove: (id) => run('DELETE FROM todos WHERE id = ?', id),
 };
@@ -691,26 +672,4 @@ function close() {
   if (db) { saveDb(); db.close(); db = null; }
 }
 
-// ========== Coding Workbench ==========
-const coding = {
-  createSession: (id, projectId, title, agent) => {
-    run("INSERT OR IGNORE INTO coding_sessions (id, project_id, title, active_agent) VALUES (?, ?, ?, ?)", id, projectId, title || '新对话', agent || 'pi');
-    return qOne('SELECT * FROM coding_sessions WHERE id = ?', id);
-  },
-  sessionsByProject: (projectId) => q("SELECT s.*, (SELECT content FROM coding_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM coding_sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId),
-  getSession: (id) => qOne('SELECT * FROM coding_sessions WHERE id = ?', id),
-  updateSessionTitle: (id, title) => { run("UPDATE coding_sessions SET title = ?, updated_at = datetime('now') WHERE id = ?", title, id); },
-  updateSessionAgent: (id, agent) => { run("UPDATE coding_sessions SET active_agent = ?, updated_at = datetime('now') WHERE id = ?", agent, id); },
-  deleteSession: (sessionId) => { run('DELETE FROM coding_messages WHERE session_id = ?', sessionId); run('DELETE FROM coding_sessions WHERE id = ?', sessionId); },
-  addMessage: (sessionId, role, content, mode, images) => {
-    const imagesJson = images?.length ? JSON.stringify(images) : null;
-    run("INSERT INTO coding_messages (session_id, role, content, mode, images) VALUES (?, ?, ?, ?, ?)", sessionId, role, content, mode || 'pi', imagesJson);
-    run("UPDATE coding_sessions SET updated_at = datetime('now') WHERE id = ?", sessionId);
-  },
-  messages: (sessionId) => {
-    const rows = q("SELECT * FROM coding_messages WHERE session_id = ? ORDER BY id", sessionId);
-    return rows.map(r => ({ ...r, images: r.images ? JSON.parse(r.images) : null }));
-  },
-};
-
-module.exports = { getDb, close, q, qOne, run, runMany, configGet, configSet, kb, dm, ds, chat, task, reminder, todo, project, coding };
+module.exports = { getDb, close, q, qOne, run, runMany, configGet, configSet, project, chat, dm, ds, task, reminder, todo };

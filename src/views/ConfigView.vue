@@ -160,10 +160,10 @@
           <table class="vars-table">
             <thead><tr><th>工具</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td><code>get_today_info()</code></td><td>获取今天的日期、知识库名称等基本信息</td></tr>
+              <tr><td><code>get_today_info()</code></td><td>获取今天的日期、项目/知识库信息</td></tr>
               <tr><td><code>query_todos(status, date_from)</code></td><td>查询待办事项，可按状态( done/in_progress/pending )和日期范围过滤</td></tr>
               <tr><td><code>query_messages(date_from, role)</code></td><td>查询对话记录，可按日期和角色( user/assistant )过滤</td></tr>
-              <tr><td><code>query_documents(kb_id, date_from)</code></td><td>查询知识库文档更新记录</td></tr>
+              <tr><td><code>query_documents(project_id, date_from)</code></td><td>查询项目/知识库文档更新记录</td></tr>
               <tr><td><code>query_data_records(dataset_name, date_from)</code></td><td>查询数据中心记录，可按数据集名称过滤</td></tr>
               <tr><td><code>query_reminders()</code></td><td>查询所有已启用的提醒</td></tr>
             </tbody>

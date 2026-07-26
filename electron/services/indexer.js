@@ -7,23 +7,23 @@ const logger = require('./logger');
 let watchers = new Map();
 let running = false;
 
-async function indexSingle(kbId) {
-  const kb = db.kb.get(kbId);
-  if (!kb) throw new Error(`知识库 ${kbId} 不存在`);
-  logger.info(`[Indexer] indexing: ${kb.name} (${kb.path})`);
-  const result = await rag.indexKnowledgeBase(kbId, kb.path);
-  db.kb.deleteDocs(kbId);
+async function indexSingle(projectId) {
+  const project = db.project.get(projectId);
+  if (!project) throw new Error(`项目 ${projectId} 不存在`);
+  if (project.type !== 'note') throw new Error(`项目 ${project.name} 不是笔记库类型`);
+  logger.info(`[Indexer] indexing: ${project.name} (${project.dir})`);
+  const result = await rag.indexKnowledgeBase(projectId, project.dir);
+  db.project.deleteDocs(projectId);
 
-  // Walk directory and store documents
   const files = [];
-  walkDir(kb.path, files);
+  walkDir(project.dir, files);
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf-8');
     const stat = fs.statSync(file);
-    const docId = db.kb.insertDoc(kbId, file, content, stat.mtimeMs);
+    const docId = db.project.insertDoc(projectId, file, content, stat.mtimeMs);
     const chunks = rag.chunkText(content);
     for (const chunk of chunks) {
-      db.kb.insertChunk(docId, chunk);
+      db.project.insertChunk(docId, chunk);
     }
   }
   logger.info(`[Indexer] indexed ${result.totalChunks} chunks from ${files.length} files`);
@@ -31,41 +31,41 @@ async function indexSingle(kbId) {
 }
 
 async function indexAll() {
-  const kbs = db.kb.list();
-  for (const kb of kbs) {
+  const noteProjects = db.project.list('note');
+  for (const p of noteProjects) {
     try {
-      await indexSingle(kb.id);
+      await indexSingle(p.id);
     } catch (e) {
-      logger.error(`[Indexer] error indexing ${kb.name}:`, e.message);
+      logger.error(`[Indexer] error indexing ${p.name}:`, e.message);
     }
   }
 }
 
 function watchAll() {
   stopWatching();
-  const kbs = db.kb.list();
-  for (const kb of kbs) {
-    if (!fs.existsSync(kb.path)) continue;
+  const noteProjects = db.project.list('note');
+  for (const p of noteProjects) {
+    if (!fs.existsSync(p.dir)) continue;
     try {
-      const watcher = fs.watch(kb.path, { recursive: true }, (eventType, filename) => {
+      const watcher = fs.watch(p.dir, { recursive: true }, (eventType, filename) => {
         if (!filename || !filename.endsWith('.md')) return;
         logger.info(`[Indexer] change detected: ${filename}`);
-        debounceIndex(kb.id);
+        debounceIndex(p.id);
       });
-      watchers.set(kb.id, watcher);
+      watchers.set(p.id, watcher);
     } catch (e) {
-      logger.error(`[Indexer] watch error for ${kb.name}:`, e.message);
+      logger.error(`[Indexer] watch error for ${p.name}:`, e.message);
     }
   }
 }
 
 const debounceTimers = new Map();
-function debounceIndex(kbId) {
-  if (debounceTimers.has(kbId)) clearTimeout(debounceTimers.get(kbId));
-  debounceTimers.set(kbId, setTimeout(async () => {
-    debounceTimers.delete(kbId);
+function debounceIndex(projectId) {
+  if (debounceTimers.has(projectId)) clearTimeout(debounceTimers.get(projectId));
+  debounceTimers.set(projectId, setTimeout(async () => {
+    debounceTimers.delete(projectId);
     try {
-      await indexSingle(kbId);
+      await indexSingle(projectId);
     } catch (e) {
       logger.error(`[Indexer] debounce index error:`, e.message);
     }
@@ -73,7 +73,7 @@ function debounceIndex(kbId) {
 }
 
 function stopWatching() {
-  for (const [id, watcher] of watchers) {
+  for (const watcher of watchers.values()) {
     watcher.close();
   }
   watchers.clear();

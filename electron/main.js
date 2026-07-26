@@ -151,7 +151,7 @@ function listDir(dirPath) {
     const full = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
       items.push({ name: entry.name, path: full, type: 'folder' });
-    } else if (entry.name.endsWith('.md') || entry.name.endsWith('.txt') || entry.name.endsWith('.json')) {
+    } else if (entry.isFile()) {
       items.push({ name: entry.name, path: full, type: 'file' });
     }
   }
@@ -185,10 +185,10 @@ function buildCodingContext(history) {
 
 function parseFeishuContext(text, db) {
   const projects = db.project.list();
-  const kbs = db.kb.list();
+  const noteProjects = projects.filter(p => p.type === 'note');
   let cleanText = text;
   let projectDir = '';
-  const kbIds = [];
+  const projectIds = [];
 
   const projectMatch = text.match(/\/code\s*[：:]\s*(\S+)/);
   if (projectMatch) {
@@ -200,36 +200,36 @@ function parseFeishuContext(text, db) {
 
   const bracketMatch = text.match(/\[笔记库\s*[：:]\s*([^\]]+)\]/);
   if (bracketMatch) {
-    const kbName = bracketMatch[1].trim();
-    const found = kbs.find(k => k.name.includes(kbName) || kbName.includes(k.name));
-    if (found) kbIds.push(found.id);
+    const projectName = bracketMatch[1].trim();
+    const found = noteProjects.find(p => p.name.includes(projectName) || projectName.includes(p.name));
+    if (found) projectIds.push(found.id);
     cleanText = cleanText.replace(bracketMatch[0], '').trim();
   }
 
   const colonMatch = cleanText.match(/笔记库\s*[：:]\s*(\S+)/);
-  if (colonMatch && kbIds.length === 0) {
-    const kbName = colonMatch[1];
-    const found = kbs.find(k => k.name.includes(kbName) || kbName.includes(k.name));
-    if (found) kbIds.push(found.id);
+  if (colonMatch && projectIds.length === 0) {
+    const projectName = colonMatch[1];
+    const found = noteProjects.find(p => p.name.includes(projectName) || projectName.includes(p.name));
+    if (found) projectIds.push(found.id);
     cleanText = cleanText.replace(colonMatch[0], '').trim();
   }
 
-  if (kbIds.length === 0) {
-    for (const kb of kbs) {
-      if (text.includes(kb.name)) {
-        kbIds.push(kb.id);
-        cleanText = cleanText.replace(kb.name, '').trim();
+  if (projectIds.length === 0) {
+    for (const p of noteProjects) {
+      if (text.includes(p.name)) {
+        projectIds.push(p.id);
+        cleanText = cleanText.replace(p.name, '').trim();
         break;
       }
     }
   }
 
-  if (!projectDir && kbIds.length === 0) {
-    const defaultKb = db.kb.getDefault();
-    if (defaultKb) kbIds.push(defaultKb.id);
+  if (!projectDir && projectIds.length === 0) {
+    const defaultProject = db.project.getDefault();
+    if (defaultProject && defaultProject.type === 'note') projectIds.push(defaultProject.id);
   }
 
-  return { projectDir, kbIds, cleanText: cleanText || text };
+  return { projectDir, projectIds, cleanText: cleanText || text };
 }
 
 const feishuMessageHandler = async (msg) => {
@@ -242,9 +242,6 @@ const feishuMessageHandler = async (msg) => {
   logger.info(' SessionId: %s', sessionId);
   logger.info('═══════════════════════════════════════');
 
-  db.chat.createSession(sessionId, '飞书-' + msg.chatId.slice(0, 8), 'general', 'feishu');
-  db.chat.addMessage(sessionId, 'user', msg.text, 'general', 'feishu');
-
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('feishu:message', msg);
   }
@@ -253,43 +250,63 @@ const feishuMessageHandler = async (msg) => {
 
   try {
     const context = parseFeishuContext(msg.text, db);
+    // Determine the project_id for this Feishu session
+    let feishuProjectId = null;
+    if (context.projectIds.length > 0) {
+      feishuProjectId = context.projectIds[0];
+    } else if (context.projectDir) {
+      const allProjects = db.project.list();
+      const byDir = allProjects.find(p => p.dir === context.projectDir);
+      if (byDir) feishuProjectId = byDir.id;
+    }
+    if (!feishuProjectId) {
+      const def = db.project.getDefault();
+      if (def) feishuProjectId = def.id;
+    }
+    if (!feishuProjectId) {
+      const first = db.project.list();
+      if (first.length > 0) feishuProjectId = first[0].id;
+    }
+
+    db.chat.createSession(sessionId, feishuProjectId, msg.text.slice(0, 30), 'feishu', 'pi', 'feishu');
+    db.chat.addMessage(sessionId, 'user', msg.text, 'general');
 
     const kbFallback = { hasResults: false, text: '' };
     const buildKBInjectedPrompt = async () => {
-      if (context.kbIds.length === 0) return context.cleanText;
-      const kbNames = context.kbIds.map(id => db.kb.get(id)?.name).filter(Boolean).join(', ');
+      if (context.projectIds.length === 0) return context.cleanText;
+      const projectNames = context.projectIds.map(id => db.project.get(id)?.name).filter(Boolean).join(', ');
       try {
         const rag = require('./services/rag');
         let allResults = [];
-        for (const kbId of context.kbIds) {
-          const docs = await rag.searchKnowledgeBase(kbId, context.cleanText);
+        for (const projectId of context.projectIds) {
+          const docs = await rag.searchKnowledgeBase(projectId, context.cleanText);
           allResults.push(...docs);
         }
         allResults.sort((a, b) => b.score - a.score);
         const top = allResults.slice(0, 6);
         if (top.length === 0) {
-          const kbPaths = context.kbIds.map(id => db.kb.get(id)?.path).filter(Boolean).join(', ');
-          kbFallback.text = `📚 笔记库「${kbNames}」中未找到相关内容。请在笔记库目录中搜索：${kbPaths}`;
-          return `笔记库「${kbNames}」的 RAG 索引未命中。请在以下目录中用 grep/find 搜索文件：${kbPaths}\n\n用户问题：${context.cleanText}`;
+          const projectDirs = context.projectIds.map(id => db.project.get(id)?.dir).filter(Boolean).join(', ');
+          kbFallback.text = `📚 笔记库「${projectNames}」中未找到相关内容。请在笔记库目录中搜索：${projectDirs}`;
+          return `笔记库「${projectNames}」的 RAG 索引未命中。请在以下目录中用 grep/find 搜索文件：${projectDirs}\n\n用户问题：${context.cleanText}`;
         }
         const contextText = top.map((d, i) => `【结果${i + 1}】${d.text}`).join('\n\n');
         kbFallback.hasResults = true;
         kbFallback.text = top.map((d, i) => `📄 **相关文档 ${i + 1}**\n${d.text}`).join('\n\n---\n\n');
-        return `以下是知识库「${kbNames}」中与问题相关的内容：\n\n${contextText}\n\n请基于以上知识库内容回答用户问题，如果知识库内容不足以回答，请说明。\n\n用户问题：${context.cleanText}`;
+        return `以下是知识库「${projectNames}」中与问题相关的内容：\n\n${contextText}\n\n请基于以上知识库内容回答用户问题，如果知识库内容不足以回答，请说明。\n\n用户问题：${context.cleanText}`;
       } catch (e) {
         logger.error('[Feishu] KB search error: %s', e.message);
         return context.cleanText;
       }
     };
 
-    const setMode = (mode) => { try { db.chat.updateSessionMode(sessionId, mode); } catch {} };
+    const setMode = (mode) => { try { db.run("UPDATE sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", mode, sessionId); } catch {} };
     const questionText = await buildKBInjectedPrompt();
     const replyOrchestrator = async (cwd) => {
       const session = await orchestrator.createSession(cwd);
       let reply = '';
       const sendReply = (text) => {
         if (text) {
-          db.chat.addMessage(sessionId, 'assistant', text, 'general', 'feishu');
+          db.chat.addMessage(sessionId, 'assistant', text, 'general');
           feishu.replyMessage(msg, text);
         }
       };
@@ -312,19 +329,13 @@ const feishuMessageHandler = async (msg) => {
     if (context.projectDir) {
       setMode('code');
       await replyOrchestrator(context.projectDir);
-    } else if (context.kbIds.length > 0) {
+    } else if (context.projectIds.length > 0) {
       setMode('kb');
-      const kbCwd = db.kb.get(context.kbIds[0])?.path || '';
-      await replyOrchestrator(kbCwd);
+      const projectCwd = db.project.get(context.projectIds[0])?.dir || '';
+      await replyOrchestrator(projectCwd);
     } else {
       const feishuRouter = require('./services/feishu-router');
-      const deps = {
-        db,
-        kb: require('./services/knowledge-base'),
-        project: db.project,
-        feishu,
-        orchestrator,
-      };
+      const deps = { db, project: db.project, feishu, orchestrator };
 
       const intent = feishuRouter.classify(context.cleanText);
       let reply = await feishuRouter.route({
@@ -359,36 +370,39 @@ function startFeishu(configData) {
 
 // ========== IPC Handlers ==========
 
-// --- Knowledge Base ---
+// --- Projects (Knowledge Base) ---
 ipcMain.handle('kb:list', () => {
-  const kbs = db.kb.list();
-  return kbs.map(kb => ({ ...kb, totalDocs: db.kb.docCount(kb.id) }));
+  const projects = db.project.list('note');
+  return projects.map(p => ({ ...p, totalDocs: db.project.docCount(p.id) }));
 });
-ipcMain.handle('notes:tree', (_, { kbId }) => {
-  const kb = db.kb.get(kbId);
-  if (!kb || !fs.existsSync(kb.path)) return [];
-  return listDir(kb.path);
+ipcMain.handle('notes:tree', (_, { projectId }) => {
+  const project = db.project.get(projectId);
+  if (!project || !fs.existsSync(project.dir)) return [];
+  return listDir(project.dir);
 });
 ipcMain.handle('notes:treeChildren', (_, { dirPath }) => {
   return listDir(dirPath);
 });
-ipcMain.handle('notes:read', (_, { kbId, filePath }) => {
-  const kb = db.kb.get(kbId);
-  if (!kb) return { ok: false, error: '笔记库不存在' };
-  const fullPath = path.isAbsolute(filePath) ? filePath : path.join(kb.path, filePath);
-  if (!fullPath.startsWith(kb.path)) return { ok: false, error: '路径越权' };
+ipcMain.handle('notes:read', (_, { projectId, filePath }) => {
+  const project = db.project.get(projectId);
+  if (!project) return { ok: false, error: '笔记库不存在' };
+  const fullPath = path.isAbsolute(filePath) ? filePath : path.join(project.dir, filePath);
+  if (!fullPath.startsWith(project.dir)) return { ok: false, error: '路径越权' };
   if (!fs.existsSync(fullPath)) return { ok: false, error: '文件不存在' };
   try {
-    const content = fs.readFileSync(fullPath, 'utf-8');
+    const buf = fs.readFileSync(fullPath);
+    const header = buf.slice(0, 2048);
+    if (header.includes(0)) return { ok: false, error: '二进制文件无法预览' };
+    const content = buf.toString('utf-8');
     return { ok: true, content, filePath: fullPath };
   } catch (e) {
     return { ok: false, error: e.message };
   }
 });
 ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
-  return db.kb.add(name, dirPath);
+  return db.project.add(name, 'note', dirPath);
 });
-ipcMain.handle('kb:remove', (_, { id }) => db.kb.remove(id));
+ipcMain.handle('kb:remove', (_, { id }) => db.project.remove(id));
 ipcMain.handle('kb:scan', async (_, { id }) => {
   try {
     const result = await indexer.indexSingle(id);
@@ -398,8 +412,8 @@ ipcMain.handle('kb:scan', async (_, { id }) => {
     return { error: e.message };
   }
 });
-ipcMain.handle('kb:setDefault', (_, { id }) => db.kb.setDefault(id));
-ipcMain.handle('kb:getDefault', () => db.kb.getDefault());
+ipcMain.handle('kb:setDefault', (_, { id }) => db.project.setDefault(id));
+ipcMain.handle('kb:getDefault', () => db.project.getDefault());
 ipcMain.handle('kb:search', async (_, { id, query }) => {
   try {
     const rag = require('./services/rag');
@@ -436,7 +450,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
   const sid = sessionId || 'session_' + Date.now();
   const activeAgent = agent || 'pi';
   try {
-    db.chat.createSession(sid, null, activeAgent, 'ui');
+    db.chat.createSession(sid, null, null, 'general', activeAgent, 'ui');
 
     const existing = db.chat.messages(sid);
     if (existing.length === 0) {
@@ -444,7 +458,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
       db.chat.updateSessionTitle(sid, title);
     }
 
-    db.chat.addMessage(sid, 'user', question, activeAgent, 'ui', images);
+    db.chat.addMessage(sid, 'user', question, activeAgent, images);
 
     if (activeAgent === 'opencode') {
       // ===== opencode agent =====
@@ -454,7 +468,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
       // Build context: include kb context if specified
       let context = '';
       if (kbIds?.length) {
-        const kbNames = (await Promise.all(kbIds.map(id => db.kb.get(id)))).filter(Boolean).map(k => k.name).join(', ');
+        const kbNames = (await Promise.all(kbIds.map(id => db.project.get(id)))).filter(Boolean).map(k => k.name).join(', ');
         context = `[笔记库: ${kbNames}]`;
       }
 
@@ -468,7 +482,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
           sendToRenderer('chat:delta', { sessionId: sid, text: delta });
         },
         () => {
-          if (reply) db.chat.addMessage(sid, 'assistant', reply, 'opencode', 'ui');
+          if (reply) db.chat.addMessage(sid, 'assistant', reply, 'opencode');
           sendToRenderer('chat:done', { sessionId: sid });
         },
         (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
@@ -480,7 +494,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
       sendToRenderer('chat:status', { sessionId: sid, text: 'AI 正在分析问题...' });
 
       const augmentedQuestion = kbIds?.length
-        ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.kb.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
+        ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.project.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
         : question;
 
       let reply = '';
@@ -491,7 +505,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
         },
         (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent }),
         () => {
-          if (reply) db.chat.addMessage(sid, 'assistant', reply, 'pi', 'ui');
+          if (reply) db.chat.addMessage(sid, 'assistant', reply, 'pi');
           sendToRenderer('chat:done', { sessionId: sid });
         },
         (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
@@ -502,56 +516,58 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
     sendToRenderer('chat:error', { sessionId: sid, text: err.message });
   }
 });
-ipcMain.handle('chat:session:create', (_, { id, title, mode, source }) => {
+ipcMain.handle('chat:session:create', (_, { id, projectId, title, mode, source, agent }) => {
   const sid = id || 'chat_' + Date.now();
-  return db.chat.createSession(sid, title, mode || 'general', source || 'ui');
+  return db.chat.createSession(sid, projectId, title, mode || 'general', agent, source || 'ui');
 });
-ipcMain.handle('chat:session:list', () => db.chat.sessions());
-ipcMain.handle('chat:session:listBySource', (_, { source }) => db.chat.sessionsBySource(source));
+ipcMain.handle('chat:session:list', (_, { projectId } = {}) => db.chat.sessions(projectId));
+ipcMain.handle('chat:session:listByProject', (_, { projectId }) => db.chat.sessions(projectId));
+ipcMain.handle('chat:session:listBySource', (_, { source, projectId }) => db.chat.sessionsBySource(source, projectId));
+ipcMain.handle('chat:session:updateAgent', (_, { sessionId, agent }) => db.chat.updateSessionAgent(sessionId, agent));
 ipcMain.handle('chat:session:messages', (_, { sessionId }) => db.chat.messages(sessionId));
 ipcMain.handle('chat:session:delete', (_, { sessionId }) => db.chat.deleteSession(sessionId));
 ipcMain.handle('chat:session:updateTitle', (_, { sessionId, title }) => db.chat.updateSessionTitle(sessionId, title));
 
 // ========== Coding Workbench ==========
 ipcMain.handle('coding:session:create', (_, { id, projectId, title, agent }) => {
-  return db.coding.createSession(id || ('coding_' + Date.now()), projectId, title, agent);
+  return db.chat.createSession(id || ('coding_' + Date.now()), projectId, title, 'coding', agent, 'ui');
 });
 ipcMain.handle('coding:session:listByProject', (_, { projectId }) => {
-  return db.coding.sessionsByProject(projectId);
+  return db.chat.sessions(projectId);
 });
-ipcMain.handle('coding:session:messages', (_, { sessionId }) => db.coding.messages(sessionId));
-ipcMain.handle('coding:session:delete', (_, { sessionId }) => db.coding.deleteSession(sessionId));
-ipcMain.handle('coding:session:updateTitle', (_, { sessionId, title }) => db.coding.updateSessionTitle(sessionId, title));
+ipcMain.handle('coding:session:messages', (_, { sessionId }) => db.chat.messages(sessionId));
+ipcMain.handle('coding:session:delete', (_, { sessionId }) => db.chat.deleteSession(sessionId));
+ipcMain.handle('coding:session:updateTitle', (_, { sessionId, title }) => db.chat.updateSessionTitle(sessionId, title));
 ipcMain.handle('coding:switchAgent', (_, { sessionId, agent }) => {
-  db.coding.updateSessionAgent(sessionId, agent);
-  return db.coding.getSession(sessionId);
+  db.chat.updateSessionAgent(sessionId, agent);
+  return db.chat.getSession(sessionId);
 });
 ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, agent, images }) => {
   const sid = sessionId || ('coding_' + Date.now());
   try {
-    let session = db.coding.getSession(sid);
+    let session = db.chat.getSession(sid);
     if (!session) {
-      session = db.coding.createSession(sid, null, null, agent || 'pi');
+      session = db.chat.createSession(sid, null, null, 'coding', agent || 'pi', 'ui');
     }
     const agentName = agent || session.active_agent || 'pi';
 
     // 如果 agent 变了，更新数据库
     if (session.active_agent !== agentName) {
-      db.coding.updateSessionAgent(sid, agentName);
+      db.chat.updateSessionAgent(sid, agentName);
     }
 
     // 首条消息自动设置标题
-    const existing = db.coding.messages(sid);
+    const existing = db.chat.messages(sid);
     if (existing.length === 0) {
       const title = question.length > 30 ? question.slice(0, 30) + '...' : question;
-      db.coding.updateSessionTitle(sid, title);
+      db.chat.updateSessionTitle(sid, title);
     }
 
     // 构建上下文（从历史消息中提取，实现跨 Agent 上下文保持）
     const context = buildCodingContext(existing);
 
     // 保存用户消息（含图片）
-    db.coding.addMessage(sid, 'user', question, agentName, images);
+    db.chat.addMessage(sid, 'user', question, agentName, images);
 
     let reply = '';
     const agentLabel = agentName === 'pi' ? 'pi agent' : agentName === 'opencode' ? 'opencode' : 'Claude Code';
@@ -562,7 +578,7 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
       sendToRenderer('coding:delta', { sessionId: sid, text: delta });
     };
     const onDone = () => {
-      if (reply) db.coding.addMessage(sid, 'assistant', reply, agentName);
+      if (reply) db.chat.addMessage(sid, 'assistant', reply, agentName);
       sendToRenderer('coding:done', { sessionId: sid });
     };
     const onError = (err) => {
@@ -594,10 +610,10 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
 });
 
 // --- Projects ---
-ipcMain.handle('project:list', () => db.project.list());
+ipcMain.handle('project:list', (_, { type } = {}) => db.project.list(type));
 ipcMain.handle('project:get', (_, { id }) => db.project.get(id));
-ipcMain.handle('project:add', (_, { name, dir, description, defaultBranch }) => {
-  return db.project.add(name, dir, description, defaultBranch);
+ipcMain.handle('project:add', (_, { name, type, dir, description, defaultBranch }) => {
+  return db.project.add(name, type || 'code', dir, description, defaultBranch);
 });
 ipcMain.handle('project:update', (_, { id, data }) => db.project.update(id, data));
 ipcMain.handle('project:delete', (_, { id }) => db.project.delete(id));

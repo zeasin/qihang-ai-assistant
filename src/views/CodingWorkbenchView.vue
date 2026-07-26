@@ -3,7 +3,7 @@
     <!-- ========== 左栏：项目树 + 对话列表 ========== -->
     <div class="workbench-sidebar">
       <div class="sidebar-header">
-        <h3 class="sidebar-title">代码工作台</h3>
+        <h3 class="sidebar-title">工作台</h3>
         <button class="btn btn-sm btn-secondary" @click="openAddProject">+ 项目</button>
       </div>
 
@@ -63,7 +63,7 @@
       <!-- 无对话时 -->
       <div v-if="!currentSessionId" class="workbench-empty">
         <div class="empty-icon">💻</div>
-        <div class="empty-title">代码工作台</div>
+        <div class="empty-title">工作台</div>
         <div class="empty-desc">
           从左侧选择一个项目下的对话，或新建一个对话开始编程<br>
           支持 <strong>pi agent</strong> · <strong>opencode</strong> · <strong>Claude Code</strong> 三种 Agent
@@ -191,11 +191,25 @@
             <input v-model="projectForm.name" class="form-control" placeholder="例如: CRM系统">
           </div>
           <div class="form-group">
+            <label>类型</label>
+            <div class="type-radio-group">
+              <label class="type-radio" :class="{ active: projectForm.type === 'code' }">
+                <input type="radio" v-model="projectForm.type" value="code"> 代码库
+              </label>
+              <label class="type-radio" :class="{ active: projectForm.type === 'note' }">
+                <input type="radio" v-model="projectForm.type" value="note"> 笔记库
+              </label>
+              <label class="type-radio" :class="{ active: projectForm.type === 'hybrid' }">
+                <input type="radio" v-model="projectForm.type" value="hybrid"> 混合
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
             <label>描述</label>
             <textarea v-model="projectForm.description" class="form-control" rows="2" placeholder="项目描述"></textarea>
           </div>
           <div class="form-group">
-            <label>代码目录</label>
+            <label>目录</label>
             <div class="input-with-btn">
               <input v-model="projectForm.dir" class="form-control" placeholder="选择目录..." readonly>
               <button class="btn btn-secondary" @click="pickFolder">选择</button>
@@ -237,7 +251,7 @@ const messagesContainer = ref<HTMLElement>();
 const pendingImages = ref<{ data: string; mimeType: string }[]>([]);const fileInputRef = ref<HTMLInputElement | null>(null);
 const showProjectModal = ref(false);
 const editingProject = ref<any>(null);
-const projectForm = ref({ name: '', description: '', dir: '' });
+const projectForm = ref({ name: '', description: '', dir: '', type: 'code' });
 
 // ========== 计算属性 ==========
 const currentProject = computed(() => {
@@ -655,7 +669,7 @@ const autoResizeTextarea = () => {
 // ========== 项目弹窗 ==========
 function openAddProject() {
   editingProject.value = null;
-  projectForm.value = { name: '', description: '', dir: '' };
+  projectForm.value = { name: '', description: '', dir: '', type: 'code' };
   showProjectModal.value = true;
 }
 
@@ -665,6 +679,7 @@ function openEditProject(project: any) {
     name: project.name || '',
     description: project.description || '',
     dir: project.dir || '',
+    type: project.type || 'code',
   };
   showProjectModal.value = true;
 }
@@ -687,7 +702,7 @@ async function saveProject() {
     if (editingProject.value) {
       await API.project.update(editingProject.value.id, projectForm.value);
     } else {
-      await API.project.add(projectForm.value.name, projectForm.value.dir, projectForm.value.description);
+      await API.project.add(projectForm.value.name, projectForm.value.type || 'code', projectForm.value.dir, projectForm.value.description);
     }
     closeProjectModal();
     await loadProjects();
@@ -723,14 +738,9 @@ async function deleteProject(project: any) {
 onMounted(async () => {
   await loadProjects();
   await checkAgentStatus();
-  // 尝试恢复之前选中的对话
-  const restored = await restoreCodingState();
-  if (!restored) {
-    // 恢复失败，自动展开第一个项目
-    if (projects.value.length > 0) {
-      expandedProjects.add(projects.value[0].id);
-      await loadSessions(projects.value[0].id);
-    }
+  if (projects.value.length > 0) {
+    expandedProjects.add(projects.value[0].id);
+    await loadSessions(projects.value[0].id);
   }
 });
 
@@ -1443,7 +1453,43 @@ onBeforeUnmount(() => {
 .modal-body {
   padding: 20px 24px;
   overflow-y: auto;
+  max-height: 70vh;
 }
+
+.type-radio-group {
+  display: flex;
+  gap: 8px;
+}
+
+.type-radio {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: #fafafa;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.type-radio:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.type-radio.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.type-radio input { display: none; }
 
 .modal-footer {
   padding: 0 24px 20px;

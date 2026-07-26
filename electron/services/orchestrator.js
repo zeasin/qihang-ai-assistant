@@ -61,20 +61,20 @@ async function createTools(dbRef) {
     }),
     execute: async (callId, params) => {
       logger.info(`[Orchestrator] Tool: search_knowledge_base("${params.query}")`);
-      const kbs = dbRef.kb.list();
-      let targetKbs = kbs;
-      if (params.kbName) targetKbs = kbs.filter(k => k.name === params.kbName || k.name.includes(params.kbName));
-      if (!targetKbs.length) {
-        const names = kbs.map(k => k.name).join(', ');
+      const noteProjects = dbRef.project.list('note');
+      let targetProjects = noteProjects;
+      if (params.kbName) targetProjects = noteProjects.filter(p => p.name === params.kbName || p.name.includes(params.kbName));
+      if (!targetProjects.length) {
+        const names = noteProjects.map(p => p.name).join(', ');
         return { content: [{ type: 'text', text: `知识库未找到。可用: ${names || '无'}` }], details: {} };
       }
       let results = [];
-      for (const kb of targetKbs) {
+      for (const p of targetProjects) {
         try {
-          const docs = await rag.searchKnowledgeBase(kb.id, params.query);
-          results.push(...docs.map(d => ({ ...d, kbName: kb.name })));
+          const docs = await rag.searchKnowledgeBase(p.id, params.query);
+          results.push(...docs.map(d => ({ ...d, kbName: p.name })));
         } catch (e) {
-          logger.warn(`[Orchestrator] KB search error for ${kb.name}: ${e.message}`);
+          logger.warn(`[Orchestrator] KB search error for ${p.name}: ${e.message}`);
         }
       }
       results.sort((a, b) => b.score - a.score);
@@ -421,15 +421,15 @@ async function createReportTools(kbId) {
       label: 'Query Documents',
       description: '查询知识库中文档更新记录（documents）。可过滤知识库ID、日期范围。',
       parameters: Type.Object({
-        kb_id: Type.Optional(Type.Number({ description: '知识库ID' })),
+        project_id: Type.Optional(Type.Number({ description: '项目/知识库ID' })),
         date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
         date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
         limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
       }),
       execute: async (callId, params) => {
-        let sql = "SELECT id, kb_id, path, substr(content, 1, 300) as content, file_mtime FROM documents WHERE 1=1";
+        let sql = "SELECT id, project_id, path, substr(content, 1, 300) as content, file_mtime FROM documents WHERE 1=1";
         const sqlParams = [];
-        if (params.kb_id) { sql += ' AND kb_id = ?'; sqlParams.push(params.kb_id); }
+        if (params.project_id) { sql += ' AND project_id = ?'; sqlParams.push(params.project_id); }
         if (params.date_from) { sql += ' AND file_mtime >= ?'; sqlParams.push(params.date_from); }
         if (params.date_to) { sql += ' AND file_mtime <= ?'; sqlParams.push(params.date_to); }
         sql += " AND path NOT LIKE '%node_modules%' AND path NOT LIKE '%.git%' ORDER BY file_mtime DESC LIMIT ?";
@@ -479,12 +479,14 @@ async function createReportTools(kbId) {
     sdk.defineTool({
       name: 'get_today_info',
       label: 'Get Today Info',
-      description: '获取当前日期信息（今天的中国日期、知识库名称等）。',
-      parameters: Type.Object({}),
-      execute: async () => {
-        const info = { today: getChinaDate(), yesterday: getChinaDate(-1), weekAgo: getChinaDate(-7), kbId: kbId || null, kbName: kbId ? (db.qOne("SELECT name FROM knowledge_bases WHERE id = ?", kbId) || {}).name || '笔记库' : '笔记库' };
-        return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }], details: {} };
-      },
+          description: '获取当前日期信息（今天的中国日期、项目/知识库名称等）。',
+        parameters: Type.Object({}),
+        execute: async () => {
+          const projectId = kbId || null;
+          const projectName = projectId ? (db.qOne("SELECT name FROM projects WHERE id = ?", projectId) || {}).name || '笔记库' : '笔记库';
+          const info = { today: getChinaDate(), yesterday: getChinaDate(-1), weekAgo: getChinaDate(-7), projectId, projectName };
+          return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }], details: {} };
+        },
     }),
   ];
 }
