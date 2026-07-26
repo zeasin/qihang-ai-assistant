@@ -25,19 +25,14 @@ const routes = [
     redirect: '/data'
   },
   {
-    path: '/projects',
-    name: 'Projects',
-    component: () => import('@/views/ProjectView.vue')
+    path: '/insights',
+    name: 'Insights',
+    component: () => import('@/views/InsightsView.vue')
   },
   {
     path: '/tasks',
     name: 'Tasks',
     component: () => import('@/views/TaskCenterView.vue')
-  },
-  {
-    path: '/insights',
-    name: 'Insights',
-    component: () => import('@/views/InsightsView.vue')
   },
   {
     path: '/planner',
@@ -48,6 +43,11 @@ const routes = [
     path: '/tools',
     name: 'Tools',
     component: () => import('@/views/ToolsView.vue')
+  },
+  {
+    path: '/coding',
+    name: 'Coding',
+    component: () => import('@/views/CodingWorkbenchView.vue')
   },
   {
     path: '/config',

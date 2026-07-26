@@ -84,6 +84,17 @@ interface ElectronAPI {
   };
   on: (channel: string, callback: (...args: any[]) => void) => void;
   removeAllListeners: (channel: string) => void;
+
+  // Coding Workbench
+  coding: {
+    createSession: (id: string, projectId: string, title?: string, agent?: string) => Promise<any>;
+    listSessionsByProject: (projectId: string) => Promise<any[]>;
+    getMessages: (sessionId: string) => Promise<any[]>;
+    deleteSession: (sessionId: string) => Promise<void>;
+    updateTitle: (sessionId: string, title: string) => Promise<void>;
+    switchAgent: (sessionId: string, agent: string) => Promise<any>;
+    send: (question: string, sessionId: string, projectDir: string, agent: string) => Promise<void>;
+  };
 }
 
 declare global {

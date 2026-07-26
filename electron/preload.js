@@ -133,10 +133,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     set: (cfg) => ipcRenderer.invoke('config:set', cfg),
   },
 
+  // Coding Workbench
+  coding: {
+    createSession: (id, projectId, title, agent) =>
+      ipcRenderer.invoke('coding:session:create', { id, projectId, title, agent }),
+    listSessionsByProject: (projectId) =>
+      ipcRenderer.invoke('coding:session:listByProject', { projectId }),
+    getMessages: (sessionId) =>
+      ipcRenderer.invoke('coding:session:messages', { sessionId }),
+    deleteSession: (sessionId) =>
+      ipcRenderer.invoke('coding:session:delete', { sessionId }),
+    updateTitle: (sessionId, title) =>
+      ipcRenderer.invoke('coding:session:updateTitle', { sessionId, title }),
+    switchAgent: (sessionId, agent) =>
+      ipcRenderer.invoke('coding:switchAgent', { sessionId, agent }),
+    send: (question, sessionId, projectDir, agent) =>
+      ipcRenderer.invoke('coding:send', { question, sessionId, projectDir, agent }),
+  },
+
   // Event listeners (streaming)
   on: (channel, callback) => {
     const validChannels = [
       'chat:delta', 'chat:status', 'chat:tool', 'chat:done', 'chat:error',
+      'coding:delta', 'coding:status', 'coding:tool', 'coding:done', 'coding:error',
       'kb:scan-progress', 'service:status', 'service:toggle', 'feishu:message',
     ];
     if (validChannels.includes(channel)) {

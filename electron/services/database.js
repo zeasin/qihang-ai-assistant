@@ -63,6 +63,24 @@ function initSchema() {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS coding_sessions (
+      id TEXT PRIMARY KEY,
+      project_id INTEGER REFERENCES coding_projects(id) ON DELETE SET NULL,
+      title TEXT,
+      active_agent TEXT DEFAULT 'pi',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS coding_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES coding_sessions(id),
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      mode TEXT DEFAULT 'pi',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS knowledge_bases (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -543,6 +561,13 @@ const chat = {
   deleteSession: (sessionId) => { run("DELETE FROM turn_embeddings WHERE session_id = ?", sessionId); run('DELETE FROM messages WHERE session_id = ?', sessionId); run('DELETE FROM sessions WHERE id = ?', sessionId); },
   updateSessionTitle: (id, title) => { run("UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ?", title, id); },
   updateSessionMode: (id, mode) => { run("UPDATE sessions SET mode = ?, updated_at = datetime('now') WHERE id = ?", mode, id); },
+  sessionsByProject: (projectId) => q("SELECT s.*, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId),
+  createCodingSession: (id, projectId, title, agent) => {
+    run("INSERT OR IGNORE INTO sessions (id, source, title, mode, project_id, active_agent) VALUES (?, 'ui', ?, 'coding', ?, ?)", id, title || '新对话', projectId, agent || 'pi');
+    return qOne('SELECT * FROM sessions WHERE id = ?', id);
+  },
+  updateSessionAgent: (id, agent) => { run("UPDATE sessions SET active_agent = ?, updated_at = datetime('now') WHERE id = ?", agent, id); },
+  getSession: (id) => qOne('SELECT * FROM sessions WHERE id = ?', id),
 };
 
 // ========== Projects ==========
@@ -654,4 +679,22 @@ function close() {
   if (db) { saveDb(); db.close(); db = null; }
 }
 
-module.exports = { getDb, close, q, qOne, run, runMany, configGet, configSet, kb, dm, ds, chat, task, reminder, todo, project };
+// ========== Coding Workbench ==========
+const coding = {
+  createSession: (id, projectId, title, agent) => {
+    run("INSERT OR IGNORE INTO coding_sessions (id, project_id, title, active_agent) VALUES (?, ?, ?, ?)", id, projectId, title || '新对话', agent || 'pi');
+    return qOne('SELECT * FROM coding_sessions WHERE id = ?', id);
+  },
+  sessionsByProject: (projectId) => q("SELECT s.*, (SELECT content FROM coding_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM coding_sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId),
+  getSession: (id) => qOne('SELECT * FROM coding_sessions WHERE id = ?', id),
+  updateSessionTitle: (id, title) => { run("UPDATE coding_sessions SET title = ?, updated_at = datetime('now') WHERE id = ?", title, id); },
+  updateSessionAgent: (id, agent) => { run("UPDATE coding_sessions SET active_agent = ?, updated_at = datetime('now') WHERE id = ?", agent, id); },
+  deleteSession: (sessionId) => { run('DELETE FROM coding_messages WHERE session_id = ?', sessionId); run('DELETE FROM coding_sessions WHERE id = ?', sessionId); },
+  addMessage: (sessionId, role, content, mode) => {
+    run("INSERT INTO coding_messages (session_id, role, content, mode) VALUES (?, ?, ?, ?)", sessionId, role, content, mode || 'pi');
+    run("UPDATE coding_sessions SET updated_at = datetime('now') WHERE id = ?", sessionId);
+  },
+  messages: (sessionId) => q("SELECT * FROM coding_messages WHERE session_id = ? ORDER BY id", sessionId),
+};
+
+module.exports = { getDb, close, q, qOne, run, runMany, configGet, configSet, kb, dm, ds, chat, task, reminder, todo, project, coding };

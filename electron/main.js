@@ -167,6 +167,19 @@ function sendToRenderer(channel, data) {
   }
 }
 
+/**
+ * 构建编程对话上下文（从历史消息中提取）
+ */
+function buildCodingContext(history) {
+  if (!history || !history.length) return '';
+  const lines = history.map(m => {
+    if (m.role === 'user') return `【用户】${m.content}`;
+    if (m.role === 'assistant') return `【助手】${m.content}`;
+    return '';
+  }).filter(Boolean);
+  return '以下是之前的对话历史，请基于此上下文继续对话：\n\n' + lines.join('\n\n');
+}
+
 // ========== Feishu message handler (shared) ==========
 
 function parseFeishuContext(text, db) {
@@ -465,6 +478,87 @@ ipcMain.handle('chat:session:messages', (_, { sessionId }) => db.chat.messages(s
 ipcMain.handle('chat:session:delete', (_, { sessionId }) => db.chat.deleteSession(sessionId));
 ipcMain.handle('chat:session:updateTitle', (_, { sessionId, title }) => db.chat.updateSessionTitle(sessionId, title));
 
+// ========== Coding Workbench ==========
+ipcMain.handle('coding:session:create', (_, { id, projectId, title, agent }) => {
+  return db.coding.createSession(id || ('coding_' + Date.now()), projectId, title, agent);
+});
+ipcMain.handle('coding:session:listByProject', (_, { projectId }) => {
+  return db.coding.sessionsByProject(projectId);
+});
+ipcMain.handle('coding:session:messages', (_, { sessionId }) => db.coding.messages(sessionId));
+ipcMain.handle('coding:session:delete', (_, { sessionId }) => db.coding.deleteSession(sessionId));
+ipcMain.handle('coding:session:updateTitle', (_, { sessionId, title }) => db.coding.updateSessionTitle(sessionId, title));
+ipcMain.handle('coding:switchAgent', (_, { sessionId, agent }) => {
+  db.coding.updateSessionAgent(sessionId, agent);
+  return db.coding.getSession(sessionId);
+});
+ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, agent }) => {
+  const sid = sessionId || ('coding_' + Date.now());
+  try {
+    let session = db.coding.getSession(sid);
+    if (!session) {
+      session = db.coding.createSession(sid, null, null, agent || 'pi');
+    }
+    const agentName = agent || session.active_agent || 'pi';
+
+    // 如果 agent 变了，更新数据库
+    if (session.active_agent !== agentName) {
+      db.coding.updateSessionAgent(sid, agentName);
+    }
+
+    // 首条消息自动设置标题
+    const existing = db.coding.messages(sid);
+    if (existing.length === 0) {
+      const title = question.length > 30 ? question.slice(0, 30) + '...' : question;
+      db.coding.updateSessionTitle(sid, title);
+    }
+
+    // 构建上下文（从历史消息中提取，实现跨 Agent 上下文保持）
+    const context = buildCodingContext(existing);
+
+    // 保存用户消息
+    db.coding.addMessage(sid, 'user', question, agentName);
+
+    let reply = '';
+    const agentLabel = agentName === 'pi' ? 'pi agent' : agentName === 'opencode' ? 'opencode' : 'Claude Code';
+    sendToRenderer('coding:status', { sessionId: sid, text: `${agentLabel} 正在处理...` });
+
+    const onDelta = (delta) => {
+      reply += delta;
+      sendToRenderer('coding:delta', { sessionId: sid, text: delta });
+    };
+    const onDone = () => {
+      if (reply) db.coding.addMessage(sid, 'assistant', reply, agentName);
+      sendToRenderer('coding:done', { sessionId: sid });
+    };
+    const onError = (err) => {
+      sendToRenderer('coding:error', { sessionId: sid, text: err });
+    };
+    const onTool = (toolEvent) => {
+      sendToRenderer('coding:tool', { sessionId: sid, ...toolEvent });
+    };
+
+    if (agentName === 'opencode') {
+      const oc = require('./services/opencode');
+      await oc.prompt(context, question, onDelta, onDone);
+    } else if (agentName === 'claude') {
+      const cc = require('./services/claude-code');
+      await cc.prompt(context, question, projectDir || '', onDelta, onDone, onError);
+    } else {
+      // pi agent
+      const fullPrompt = context ? `${context}
+
+---
+
+用户的新问题：${question}` : question;
+      const piSession = await orchestrator.createSession(projectDir || '');
+      await orchestrator.chat(piSession, fullPrompt, onDelta, onTool, onDone, onError, null);
+    }
+  } catch (err) {
+    sendToRenderer('coding:error', { sessionId: sid, text: err.message });
+  }
+});
+
 // --- Projects ---
 ipcMain.handle('project:list', () => db.project.list());
 ipcMain.handle('project:get', (_, { id }) => db.project.get(id));
@@ -478,11 +572,16 @@ ipcMain.handle('project:delete', (_, { id }) => db.project.delete(id));
 ipcMain.handle('agent:status', async () => {
   const piStatus = await orchestrator.checkStatus();
   let opencodeStatus = { installed: false, version: null };
+  let claudeStatus = { installed: false, version: null };
   try {
     const oc = require('./services/opencode');
     opencodeStatus = await oc.checkStatus();
   } catch {}
-  return { pi: piStatus, opencode: opencodeStatus };
+  try {
+    const cc = require('./services/claude-code');
+    claudeStatus = await cc.checkStatus();
+  } catch {}
+  return { pi: piStatus, opencode: opencodeStatus, claude: claudeStatus };
 });
 
 // --- Service Management ---
