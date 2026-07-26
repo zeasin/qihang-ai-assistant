@@ -2,6 +2,21 @@ const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } = require
 const path = require('path');
 const fs = require('fs');
 
+// Suppress EPIPE errors from console (harmless when console pipe closes)
+const { Console } = require('console');
+['log', 'warn', 'error', 'info', 'debug'].forEach(method => {
+  const orig = Console.prototype[method];
+  Console.prototype[method] = function(...args) {
+    try { return orig.apply(this, args); } catch (e) { if (e && e.code !== 'EPIPE') throw e; }
+  };
+});
+process.on('uncaughtException', (err) => {
+  if (err && err.code === 'EPIPE') return;
+});
+process.on('unhandledRejection', (err) => {
+  if (err && err.code === 'EPIPE') return;
+});
+
 // Polyfill for Electron: undici v6 (bundled with pi-agent) expects worker_threads.markAsUncloneable
 try {
   const wt = require('worker_threads');
@@ -189,12 +204,13 @@ function parseFeishuContext(text, db) {
   let cleanText = text;
   let projectDir = '';
   const projectIds = [];
+  let explicit = false;
 
   const projectMatch = text.match(/\/code\s*[：:]\s*(\S+)/);
   if (projectMatch) {
     const projectName = projectMatch[1];
     const found = projects.find(p => p.name.includes(projectName));
-    if (found) projectDir = found.dir;
+    if (found) { projectDir = found.dir; explicit = true; }
     cleanText = cleanText.replace(projectMatch[0], '').trim();
   }
 
@@ -202,7 +218,7 @@ function parseFeishuContext(text, db) {
   if (bracketMatch) {
     const projectName = bracketMatch[1].trim();
     const found = noteProjects.find(p => p.name.includes(projectName) || projectName.includes(p.name));
-    if (found) projectIds.push(found.id);
+    if (found) { projectIds.push(found.id); explicit = true; }
     cleanText = cleanText.replace(bracketMatch[0], '').trim();
   }
 
@@ -210,47 +226,73 @@ function parseFeishuContext(text, db) {
   if (colonMatch && projectIds.length === 0) {
     const projectName = colonMatch[1];
     const found = noteProjects.find(p => p.name.includes(projectName) || projectName.includes(p.name));
-    if (found) projectIds.push(found.id);
+    if (found) { projectIds.push(found.id); explicit = true; }
     cleanText = cleanText.replace(colonMatch[0], '').trim();
   }
 
-  if (projectIds.length === 0) {
-    for (const p of noteProjects) {
-      if (text.includes(p.name)) {
-        projectIds.push(p.id);
+  if (!explicit) {
+    const idMatch = text.match(/^(\d+)\b/);
+    if (idMatch) {
+      const numId = parseInt(idMatch[1], 10);
+      const found = projects.find(p => p.id === numId);
+      if (found) {
+        if (found.type === 'code') projectDir = found.dir;
+        else projectIds.push(found.id);
+        explicit = true;
+        cleanText = cleanText.replace(idMatch[1], '').trim();
+      }
+    }
+  }
+
+  if (!explicit) {
+    for (const p of projects) {
+      if (text.startsWith(p.name)) {
+        if (p.type === 'code') projectDir = p.dir;
+        else projectIds.push(p.id);
+        explicit = true;
         cleanText = cleanText.replace(p.name, '').trim();
         break;
       }
     }
   }
 
-  if (!projectDir && projectIds.length === 0) {
-    const defaultProject = db.project.getDefault();
-    if (defaultProject && defaultProject.type === 'note') projectIds.push(defaultProject.id);
-  }
-
-  return { projectDir, projectIds, cleanText: cleanText || text };
+  return { projectDir, projectIds, cleanText: cleanText || text, explicit };
 }
 
 const feishuMessageHandler = async (msg) => {
-  const sessionId = 'feishu_' + msg.chatId + '_' + new Date().toISOString().slice(0, 10);
   logger.info('═══════════════════════════════════════');
   logger.info(' 飞书消息已接收');
   logger.info(' 发送者: %s', msg.sender);
   logger.info(' 内容: %s', msg.text);
   logger.info(' ChatId: %s', msg.chatId);
-  logger.info(' SessionId: %s', sessionId);
   logger.info('═══════════════════════════════════════');
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('feishu:message', msg);
   }
 
-  feishu.replyMessage(msg, '🤔 AI 正在思考，请稍后...');
-
   try {
     const context = parseFeishuContext(msg.text, db);
-    // Determine the project_id for this Feishu session
+
+    if (!context.explicit) {
+      const allProjects = db.project.list();
+      if (allProjects.length === 0) {
+        feishu.replyMessage(msg, '⚠️ 当前没有可用的项目。请先在系统中添加项目后再使用。');
+        return;
+      }
+      let helpMsg = '📋 **请指定要使用的项目**\n\n';
+      helpMsg += '在消息中包含项目名称或项目ID即可：\n\n';
+      for (const p of allProjects) {
+        const typeLabel = p.type === 'code' ? '代码' : '笔记';
+        helpMsg += `  **${p.id}**: ${p.name} (${typeLabel}) — ${p.description || p.dir || ''}\n`;
+      }
+      helpMsg += '\n**示例：**\n';
+      helpMsg += `  \`${allProjects[0].name} 帮我看看这个代码\`\n`;
+      helpMsg += `  \`${allProjects[0].id} 查一下相关知识\`\n`;
+      feishu.replyMessage(msg, helpMsg);
+      return;
+    }
+
     let feishuProjectId = null;
     if (context.projectIds.length > 0) {
       feishuProjectId = context.projectIds[0];
@@ -267,6 +309,15 @@ const feishuMessageHandler = async (msg) => {
       const first = db.project.list();
       if (first.length > 0) feishuProjectId = first[0].id;
     }
+    if (!feishuProjectId) {
+      feishu.replyMessage(msg, '⚠️ 无法确定项目，请先添加项目后再使用。');
+      return;
+    }
+
+    feishu.replyMessage(msg, '🤔 AI 正在思考，请稍后...');
+
+    const sessionId = 'feishu_' + feishuProjectId + '_' + msg.sender;
+    logger.info(' SessionId: %s', sessionId);
 
     db.chat.createSession(sessionId, feishuProjectId, msg.text.slice(0, 30), 'feishu', 'pi', 'feishu');
     db.chat.addMessage(sessionId, 'user', msg.text, 'general');
@@ -301,8 +352,10 @@ const feishuMessageHandler = async (msg) => {
 
     const setMode = (mode) => { try { db.run("UPDATE sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", mode, sessionId); } catch {} };
     const questionText = await buildKBInjectedPrompt();
+    const feishuSessionDir = path.join(app.getPath('userData'), 'feishu-sessions', String(feishuProjectId), msg.sender);
+    fs.mkdirSync(feishuSessionDir, { recursive: true });
     const replyOrchestrator = async (cwd) => {
-      const session = await orchestrator.createSession(cwd);
+      const session = await orchestrator.createSession(cwd, feishuSessionDir);
       let reply = '';
       const sendReply = (text) => {
         if (text) {

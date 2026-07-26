@@ -160,9 +160,9 @@ const SYSTEM_PROMPT = `你是一位智能办公助理，可以帮助用户处理
 
 保持回答简洁、准确。`;
 
-async function createSession(projectDir) {
+async function createSession(projectDir, sessionDir) {
   const sdk = await ensurePi();
-  logger.info('[Orchestrator] createSession: cwd=%s', projectDir || process.cwd());
+  logger.info('[Orchestrator] createSession: cwd=%s, sessionDir=%s', projectDir || process.cwd(), sessionDir || '(in-memory)');
 
   logger.info('[Orchestrator] Creating tools...');
   const tools = await createTools(db);
@@ -171,11 +171,14 @@ async function createSession(projectDir) {
   const builtinTools = ['read', 'bash', 'grep', 'find', 'ls'];
   logger.info('[Orchestrator] Built-in tools: %s', builtinTools.join(', '));
 
+  const cwd = projectDir || process.cwd();
   const sessionOptions = {
-    cwd: projectDir || process.cwd(),
+    cwd,
     tools: builtinTools,
     customTools: tools,
-    sessionManager: sdk.SessionManager.inMemory(),
+    sessionManager: sessionDir
+      ? sdk.SessionManager.continueRecent(cwd, sessionDir)
+      : sdk.SessionManager.inMemory(),
   };
 
   try {

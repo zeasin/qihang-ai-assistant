@@ -58,7 +58,7 @@ function append(line) {
     fs.appendFileSync(logPath, line + '\n');
     currentSize += Buffer.byteLength(line, 'utf-8') + 1;
   } catch (e) {
-    console.error('[Logger] Write error:', e.message);
+    try { console.error('[Logger] Write error:', e.message); } catch {}
   }
 }
 
@@ -90,21 +90,21 @@ const logger = {
     if (LEVELS['INFO'] < LEVELS[currentLogLevel]) return;
     const line = format('INFO', message, ...args);
     append(line);
-    console.log(line);
+    try { console.log(line); } catch (e) { if (e && e.code !== 'EPIPE') throw e; }
   },
 
   warn(message, ...args) {
     if (LEVELS['WARN'] < LEVELS[currentLogLevel]) return;
     const line = format('WARN', message, ...args);
     append(line);
-    console.warn(line);
+    try { console.warn(line); } catch (e) { if (e && e.code !== 'EPIPE') throw e; }
   },
 
   error(message, ...args) {
     if (LEVELS['ERROR'] < LEVELS[currentLogLevel]) return;
     const line = format('ERROR', message, ...args);
     append(line);
-    console.error(line);
+    try { console.error(line); } catch (e) { if (e && e.code !== 'EPIPE') throw e; }
   },
 
   getLogDir() {

@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const logger = require('./logger');
 
 const DB_DIR = path.join(require('os').homedir(), '.biling-ai');
 const DB_PATH = path.join(DB_DIR, 'biling.db');
@@ -374,8 +375,17 @@ function migrate() {
 }
 
 function ensureColumns() {
-  try { db.run("ALTER TABLE sessions ADD COLUMN project_id INTEGER"); } catch {}
-  try { db.run("ALTER TABLE sessions ADD COLUMN active_agent TEXT DEFAULT 'pi'"); } catch {}
+  // 用 PRAGMA 检查并添加 sessions 表缺失的列（比 ALTER TABLE 更可靠）
+  const sessionCols = q("PRAGMA table_info('sessions')").map(r => r.name);
+  const neededSessions = [
+    { name: 'project_id', sql: "ALTER TABLE sessions ADD COLUMN project_id INTEGER" },
+    { name: 'active_agent', sql: "ALTER TABLE sessions ADD COLUMN active_agent TEXT DEFAULT 'pi'" },
+  ];
+  for (const col of neededSessions) {
+    if (!sessionCols.includes(col.name)) {
+      try { db.run(col.sql); saveDb(); logger.info('[DB] Added column %s to sessions', col.name); } catch (e) { logger.error('[DB] Failed to add %s to sessions: %s', col.name, e.message); }
+    }
+  }
   try { db.run("ALTER TABLE documents ADD COLUMN project_id INTEGER"); } catch {}
   try { db.run("ALTER TABLE note_embeddings ADD COLUMN project_id INTEGER"); } catch {}
   try { db.run("ALTER TABLE file_index_meta ADD COLUMN project_id INTEGER"); } catch {}
@@ -402,8 +412,13 @@ function qOne(sql, ...params) {
 }
 
 function run(sql, ...params) {
-  db.run(sql, params);
-  saveDb();
+  try {
+    db.run(sql, params);
+    saveDb();
+  } catch (e) {
+    logger.error('[DB] SQL error: %s | SQL: %s', e.message, sql.slice(0, 200));
+    throw e;
+  }
 }
 
 function runMany(sqls) {
@@ -465,7 +480,8 @@ const project = {
     run('DELETE FROM note_embeddings WHERE project_id = ?', id);
     run('DELETE FROM file_index_meta WHERE project_id = ?', id);
     run('DELETE FROM ai_analysis WHERE project_id = ?', id);
-    const sessions = q('SELECT id FROM sessions WHERE project_id = ?', id);
+    let sessions = [];
+    try { sessions = q('SELECT id FROM sessions WHERE project_id = ?', id); } catch {}
     for (const s of sessions) {
       run('DELETE FROM messages WHERE session_id = ?', s.id);
       run('DELETE FROM turn_embeddings WHERE session_id = ?', s.id);
@@ -499,12 +515,33 @@ const chat = {
     } catch { return []; }
   },
   sessionsBySource: (source, projectId) => {
-    if (projectId) return q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.source = ? AND s.project_id = ? ORDER BY updated_at DESC`, source, projectId);
-    return q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.source = ? ORDER BY updated_at DESC`, source);
+    try {
+      if (projectId) return q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.source = ? AND s.project_id = ? ORDER BY updated_at DESC`, source, projectId);
+      return q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.source = ? ORDER BY updated_at DESC`, source);
+    } catch { return []; }
   },
   createSession: (id, projectId, title, mode, agent, source) => {
-    run("INSERT OR IGNORE INTO sessions (id, source, title, mode, project_id, active_agent) VALUES (?, ?, ?, ?, ?, ?)",
-      id, source || 'ui', title || '新对话', mode || 'general', projectId || null, agent || 'pi');
+    // 确保 sessions 表有 project_id 和 active_agent 列
+    for (const col of ['project_id', 'active_agent']) {
+      try {
+        const info = q("PRAGMA table_info('sessions')");
+        const hasCol = info.some(r => r.name === col);
+        if (!hasCol) {
+          const type = col === 'project_id' ? 'INTEGER' : "TEXT DEFAULT 'pi'";
+          db.run(`ALTER TABLE sessions ADD COLUMN ${col} ${type}`);
+          saveDb();
+          logger.info('[DB] Added column %s to sessions via createSession', col);
+        }
+      } catch (_) {}
+    }
+    try {
+      run("INSERT OR IGNORE INTO sessions (id, source, title, mode, project_id, active_agent) VALUES (?, ?, ?, ?, ?, ?)",
+        id, source || 'ui', title || '新对话', mode || 'general', projectId || null, agent || 'pi');
+    } catch (e) {
+      logger.error('[DB] createSession fallback: %s', e.message);
+      run("INSERT OR IGNORE INTO sessions (id, source, title, mode, active_agent) VALUES (?, ?, ?, ?, ?)",
+        id, source || 'ui', title || '新对话', mode || 'general', agent || 'pi');
+    }
     return qOne('SELECT * FROM sessions WHERE id = ?', id);
   },
   getSession: (id) => qOne('SELECT * FROM sessions WHERE id = ?', id),
