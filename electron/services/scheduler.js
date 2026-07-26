@@ -333,8 +333,24 @@ function buildReportSections(data) {
   return { sections, vars, score };
 }
 
-const DEFAULT_REPORT_TEMPLATE =
-'{{greetingLine}}\n' +
+const SYSTEM_PROMPT = `你是一位日报生成助手。请使用提供的工具查询今日数据，然后生成一份完整的综合日报。
+
+## 可用工具
+- query_todos — 查询待办事项（按状态、优先级、日期）
+- query_messages — 查询今日对话记录
+- query_documents — 查询今日更新的文档/笔记（可指定 project_id 过滤）
+- query_data_records — 查询数据中心记录
+- query_reminders — 查询已启用的提醒
+- get_today_info — 获取当前日期、项目信息
+
+## 要求
+1. 先调用 get_today_info 了解当前日期和项目
+2. 调用各查询工具获取今日数据
+3. 按用户要求的格式生成日报
+4. 数据为空的部分略过，不要编造
+5. 评分要合理，基于实际数据`;
+
+const DEFAULT_REPORT_TEMPLATE = '{{greetingLine}}\n' +
 '\n' +
 '📅 {{today}}\n' +
 '\n' +
@@ -561,8 +577,11 @@ const executors = {
   },
   'auto_index': async (task) => {
     logger.info(`[Scheduler] auto-index triggered: ${task.name}`);
-    const config = JSON.parse(task.params_json || '{}');
-    const projectIds = config.project_ids || (config.kb_id ? [config.kb_id] : []);
+    const projectIds = [task.project_id].filter(Boolean);
+    if (!projectIds.length) {
+      const config = JSON.parse(task.params_json || '{}');
+      projectIds = config.project_ids || (config.kb_id ? [config.kb_id] : []);
+    }
     if (projectIds.length) {
       for (const projectId of projectIds) {
         try {
@@ -576,21 +595,26 @@ const executors = {
   },
 'daily_report': async (task) => {
     logger.info(`[Scheduler] daily report: ${task.name}`);
+    let mainProjectId = null;
+    let today = getChinaDate();
     try {
-      const config = JSON.parse(task.params_json || '{}');
-      let projectIds = config.project_ids;
-      if (!projectIds || !projectIds.length) {
-        if (config.kb_id) {
-          projectIds = [config.kb_id];
-        } else {
-          const firstProject = db.qOne("SELECT id FROM projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
-          if (firstProject) projectIds = [firstProject.id];
+      let projectIds = [task.project_id].filter(Boolean);
+      if (!projectIds.length) {
+        const config = JSON.parse(task.params_json || '{}');
+        projectIds = config.project_ids;
+        if (!projectIds || !projectIds.length) {
+          if (config.kb_id) {
+            projectIds = [config.kb_id];
+          } else {
+            const firstProject = db.qOne("SELECT id FROM projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
+            if (firstProject) projectIds = [firstProject.id];
+          }
         }
       }
       if (!projectIds || !projectIds.length) { logger.warn('[Scheduler] daily_report: no project available'); return; }
-      const today = getChinaDate();
+      today = getChinaDate();
       const projectNames = projectIds.map(id => (db.qOne("SELECT name FROM projects WHERE id = ?", id) || {}).name || '笔记库').join(', ');
-      const mainProjectId = projectIds[0];
+      mainProjectId = projectIds[0];
 
       // ========== Default User Prompt (editable in config page) ==========
       const DEFAULT_USER_PROMPT = '请按以下格式生成日报：\n\n## 日报格式要求\n使用 Markdown 格式，包含以下板块：\n\n### 1️⃣ 今日概览\n- ✅ 完成任务数量、📋 待办数量、💬 对话次数、📝 笔记更新数、🗂️ 新增记录数\n\n### 2️⃣ 今日完成\n- 列出今日完成的任务，高优先级的用 ⭐ 标记\n\n### 3️⃣ 待办事项\n- 逾期的用 🔴 标记并注明逾期天数\n- 进行中的用 🔄 标记\n- 高优先级的用 🔴 标记\n\n### 4️⃣ 对话与沟通\n- 今日对话次数和简要摘要\n\n### 5️⃣ 笔记与记录\n- 更新的文档和新增的记录\n\n### 6️⃣ 今日提醒\n- 已启用的提醒（如有）\n\n### 7️⃣ 综合评估\n- 根据完成任务、待办处理、知识沉淀等维度给出今日效率评分（0-100分）\n- 给出具体的改进行动建议\n\n## 注意事项\n- 数据为空的部分可以略过，不要编造数据\n- 评分要合理，基于实际数据给出\n- 建议要具体、可执行\n- 语言简洁专业，使用中文';
@@ -653,7 +677,7 @@ const executors = {
       const msg = task.name + (task.message ? '\n' + task.message : '');
       sendNotification('⏰ 提醒', msg);
       if (task.notify_feishu) await sendFeishu(`⏰ ${msg}`);
-      db.run("UPDATE collector_tasks SET updated_at = datetime('now', '+8 hours') WHERE id = ?", task.id);
+      db.run("UPDATE sys_tasks SET updated_at = datetime('now', '+8 hours') WHERE id = ?", task.id);
     } catch (e) {
       logger.error(`[Scheduler] reminder error: ${e.message}`);
     }
@@ -688,7 +712,7 @@ async function checkAndRegenerateDailyReport() {
       logger.info(`[Scheduler] today's report (${today}) already exists, skipping auto-regeneration`);
       return;
     }
-    const task = db.qOne("SELECT * FROM collector_tasks WHERE task_type = 'daily_report' AND enabled = 1 LIMIT 1");
+    const task = db.qOne("SELECT * FROM sys_tasks WHERE task_type = 'daily_report' AND enabled = 1 LIMIT 1");
     if (!task) {
       logger.warn('[Scheduler] no daily_report task found for auto-regeneration');
       return;

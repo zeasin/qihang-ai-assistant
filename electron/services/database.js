@@ -183,7 +183,7 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
-    CREATE TABLE IF NOT EXISTS collector_tasks (
+    CREATE TABLE IF NOT EXISTS sys_tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       task_id TEXT,
       name TEXT,
@@ -195,6 +195,7 @@ function initSchema() {
       notify_feishu INTEGER DEFAULT 1,
       dataset_id TEXT,
       params_json TEXT,
+      project_id INTEGER DEFAULT NULL,
       created_at TEXT DEFAULT (datetime('now', '+8 hours')),
       updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
@@ -279,13 +280,13 @@ function migrate() {
   if (hasOldTasks) {
     const old = q('SELECT * FROM scheduled_tasks');
     for (const t of old) {
-      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      db.run("INSERT INTO sys_tasks (task_id, name, cron_expression, task_type, params_json, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         t.id, t.name, t.cron_expr, t.task_type, t.config_json, t.enabled, t.created_at);
     }
   }
 
   try { db.run("ALTER TABLE documents ADD COLUMN kb_id INTEGER"); } catch {}
-  try { db.run("ALTER TABLE collector_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
+  try { db.run("ALTER TABLE sys_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
   }
 
   if (version < 3) {
@@ -331,14 +332,14 @@ function migrate() {
     try { db.run("UPDATE reminders SET project_id = kb_id WHERE project_id IS NULL AND kb_id IS NOT NULL"); } catch {}
 
     // Update seed task params: kb_id → project_ids
-    const tasks = q("SELECT id, params_json FROM collector_tasks WHERE task_type = 'daily_report' OR task_type = 'auto_index'");
+    const tasks = q("SELECT id, params_json FROM sys_tasks WHERE task_type = 'daily_report' OR task_type = 'auto_index'");
     for (const t of tasks) {
       try {
         const params = JSON.parse(t.params_json || '{}');
         if (params.kb_id && !params.project_ids) {
           params.project_ids = [params.kb_id];
           delete params.kb_id;
-          run('UPDATE collector_tasks SET params_json = ? WHERE id = ?', JSON.stringify(params), t.id);
+          run('UPDATE sys_tasks SET params_json = ? WHERE id = ?', JSON.stringify(params), t.id);
         }
       } catch {}
     }
@@ -346,19 +347,26 @@ function migrate() {
     setSchemaVersion(5);
   }
 
-  try { db.run("ALTER TABLE collector_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
+  if (version < 6) {
+    // Rename collector_tasks → sys_tasks
+    try { db.run("ALTER TABLE collector_tasks RENAME TO sys_tasks"); } catch {}
+    try { db.run("ALTER TABLE sys_tasks ADD COLUMN project_id INTEGER DEFAULT NULL"); } catch {}
+    setSchemaVersion(6);
+  }
+
+  try { db.run("ALTER TABLE sys_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
 
   try {
-    const existing = qOne("SELECT id FROM collector_tasks WHERE task_type = 'daily_report'");
+    const existing = qOne("SELECT id FROM sys_tasks WHERE task_type = 'daily_report'");
     if (!existing) {
-      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_daily_report', '综合日报', '56 9 * * *', 'daily_report', '{}', 1, 1)");
+      db.run("INSERT INTO sys_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_daily_report', '综合日报', '56 9 * * *', 'daily_report', '{}', 1, 1)");
     }
   } catch (e) { console.error('[DB] seed task error:', e); }
 
   try {
-    const existing = qOne("SELECT id FROM collector_tasks WHERE task_type = 'auto_index'");
+    const existing = qOne("SELECT id FROM sys_tasks WHERE task_type = 'auto_index'");
     if (!existing) {
-      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_auto_index', '自动索引笔记库', '0 */2 * * *', 'auto_index', '{}', 1, 0)");
+      db.run("INSERT INTO sys_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_auto_index', '自动索引笔记库', '0 */2 * * *', 'auto_index', '{}', 1, 0)");
     }
   } catch (e) { console.error('[DB] seed auto_index error:', e); }
 
@@ -372,6 +380,7 @@ function ensureColumns() {
   try { db.run("ALTER TABLE note_embeddings ADD COLUMN project_id INTEGER"); } catch {}
   try { db.run("ALTER TABLE file_index_meta ADD COLUMN project_id INTEGER"); } catch {}
   try { db.run("ALTER TABLE ai_analysis ADD COLUMN project_id INTEGER"); } catch {}
+  try { db.run("ALTER TABLE sys_tasks ADD COLUMN project_id INTEGER DEFAULT NULL"); } catch {}
   try { db.run("ALTER TABLE reminders ADD COLUMN project_id INTEGER"); } catch {}
   saveDb();
 }
@@ -590,13 +599,13 @@ const ds = {
 
 // ========== Collector Tasks ==========
 const task = {
-  list: () => q('SELECT * FROM collector_tasks ORDER BY created_at DESC'),
-  get: (id) => qOne('SELECT * FROM collector_tasks WHERE id = ?', id),
+  list: () => q('SELECT * FROM sys_tasks ORDER BY created_at DESC'),
+  get: (id) => qOne('SELECT * FROM sys_tasks WHERE id = ?', id),
   add: (name, cronExpr, taskType, params) => {
     const taskId = 't_' + Date.now();
-    run('INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, dataset_id, prompt_key, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      taskId, name, cronExpr, taskType, JSON.stringify(params || {}), (params && params.dataset_id) || '', (params && params.prompt_key) || '', (params && params.url) || '');
-    const r = qOne('SELECT id FROM collector_tasks WHERE task_id = ?', taskId);
+    run('INSERT INTO sys_tasks (task_id, name, cron_expression, task_type, params_json, dataset_id, prompt_key, url, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      taskId, name, cronExpr, taskType, JSON.stringify(params || {}), (params && params.dataset_id) || '', (params && params.prompt_key) || '', (params && params.url) || '', (params && params.project_id) || null);
+    const r = qOne('SELECT id FROM sys_tasks WHERE task_id = ?', taskId);
     return { id: r.id, task_id: taskId };
   },
   update: (id, data) => {
@@ -610,11 +619,12 @@ const task = {
     if (data.dataset_id !== undefined) { fields.push('dataset_id = ?'); params.push(data.dataset_id); }
     if (data.prompt_key !== undefined) { fields.push('prompt_key = ?'); params.push(data.prompt_key); }
     if (data.url !== undefined) { fields.push('url = ?'); params.push(data.url); }
-    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE collector_tasks SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+    if (data.project_id !== undefined) { fields.push('project_id = ?'); params.push(data.project_id); }
+    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE sys_tasks SET ${fields.join(', ')} WHERE id = ?`, ...params); }
   },
-  remove: (id) => run('DELETE FROM collector_tasks WHERE id = ?', id),
-  setEnabled: (id, enabled) => run('UPDATE collector_tasks SET enabled = ?, updated_at = datetime(\'now\') WHERE id = ?', enabled ? 1 : 0, id),
-  getActive: () => q("SELECT * FROM collector_tasks WHERE enabled = 1"),
+  remove: (id) => run('DELETE FROM sys_tasks WHERE id = ?', id),
+  setEnabled: (id, enabled) => run('UPDATE sys_tasks SET enabled = ?, updated_at = datetime(\'now\') WHERE id = ?', enabled ? 1 : 0, id),
+  getActive: () => q("SELECT * FROM sys_tasks WHERE enabled = 1"),
 };
 
 // ========== Reminders ==========

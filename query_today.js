@@ -109,7 +109,7 @@ async function main() {
   
   // 10. 收集任务
   const activeCollectorTasks = db.exec(`
-    SELECT COUNT(*) as count FROM collector_tasks
+    SELECT COUNT(*) as count FROM sys_tasks
     WHERE enabled = 1
   `);
   

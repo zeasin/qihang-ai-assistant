@@ -15,12 +15,13 @@
           <span v-else class="badge badge-gray">○ 调度器已停止</span>
         </div>
         <table v-if="tasks.length" class="config-table">
-          <thead><tr><th style="width:30px">#</th><th>名称</th><th>类型</th><th>Cron</th><th style="width:60px">启用</th><th style="width:80px">飞书通知</th></tr></thead>
+          <thead><tr><th style="width:30px">#</th><th>名称</th><th>类型</th><th>项目</th><th>Cron</th><th style="width:60px">启用</th><th style="width:80px">飞书通知</th></tr></thead>
           <tbody>
             <tr v-for="(t, i) in tasks" :key="t.id">
               <td><code>{{ i + 1 }}</code></td>
               <td>{{ t.name }}</td>
               <td><span class="badge badge-gray">{{ t.task_type }}</span></td>
+              <td><span class="task-project-name">{{ projectName(t.project_id) }}</span></td>
               <td><code>{{ t.cron_expression }}</code></td>
               <td><label class="toggle"><input type="checkbox" :checked="t.enabled" @change="toggleTask(t)"><span class="slider"></span></label></td>
               <td><label class="toggle"><input type="checkbox" :checked="t.notify_feishu" @change="toggleFeishu(t)"><span class="slider"></span></label></td>
@@ -212,6 +213,7 @@ import { ref, reactive, onMounted, onBeforeUnmount } from 'vue';
 
 const API = window.electronAPI;
 
+const projects = ref<any[]>([]);
 const agentStatus = ref({ pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null }, opencode: { installed: false, version: null, providers: [], totalModels: 0 } });
 const showHelp = ref(false);
 
@@ -240,6 +242,14 @@ const embeddingApiKey = ref('');
 const embeddingStatus = ref('');
 
 
+async function loadProjects() {
+  try { projects.value = await API.project.list(); } catch { projects.value = []; }
+}
+function projectName(projectId: number | null): string {
+  if (!projectId) return '—';
+  const p = projects.value.find(p => p.id === projectId);
+  return p ? p.name : '—';
+}
 async function loadTasks() {
   try { tasks.value = await API.task.list(); } catch { tasks.value = []; }
 }
@@ -402,6 +412,7 @@ async function testEmbedding() {
 onMounted(async () => {
   await loadConfig();
   checkAgentStatus();
+  await loadProjects();
   await loadTasks();
   await loadSchedulerStatus();
   try {
@@ -475,6 +486,7 @@ onBeforeUnmount(() => {});
 .config-table th, .config-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
 .config-table th { background: var(--hover); font-weight: 600; color: var(--text-secondary); font-size: 12px; }
 .config-table td code { font-size: 12px; background: #f5f5f7; padding: 2px 6px; border-radius: 4px; }
+.config-table .task-project-name { font-size: 12px; color: var(--text-secondary); }
 .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 12px; font-weight: 500; margin-right: 6px; }
 .badge-gray { background: #f5f5f7; color: #909296; }
 .badge-primary { background: rgba(99, 102, 241, 0.1); color: var(--primary); }
