@@ -198,6 +198,9 @@ async function createSession(projectDir) {
 async function chat(session, text, onDelta, onTool, onDone, onError, images) {
   logger.info(`[Orchestrator] chat() called, text length: ${text.length}${images?.length ? `, images: ${images.length}` : ''}`);
 
+  let hasTextDelta = false;
+  let completed = false;
+
   session.subscribe((event) => {
     switch (event.type) {
       case 'message_update': {
@@ -205,11 +208,21 @@ async function chat(session, text, onDelta, onTool, onDone, onError, images) {
         if (!msg) { logger.debug('[Orchestrator] message_update without assistantMessageEvent'); break; }
         if (msg.type === 'text_delta') {
           const delta = msg.delta;
-          logger.info(`[Orchestrator] text_delta: ${delta.substring(0, 120)}`);
-          onDelta?.(delta);
+          if (delta) {
+            hasTextDelta = true;
+            logger.info(`[Orchestrator] text_delta: ${delta.substring(0, 120)}`);
+            onDelta?.(delta);
+          }
         } else if (msg.type === 'thinking_delta') {
           logger.info(`[Orchestrator] thinking_delta: ${(msg.delta || '').substring(0, 120)}`);
           onTool?.({ type: 'thinking', text: msg.delta });
+        } else if (msg.type === 'text' || msg.type === 'content') {
+          const content = msg.content || msg.text || '';
+          if (content) {
+            hasTextDelta = true;
+            logger.info(`[Orchestrator] text content: ${content.substring(0, 120)}`);
+            onDelta?.(content);
+          }
         } else {
           logger.info(`[Orchestrator] message_update type=${msg.type}`);
         }
@@ -226,16 +239,66 @@ async function chat(session, text, onDelta, onTool, onDone, onError, images) {
       case 'agent_start':
         logger.info('[Orchestrator] agent_start — pi agent 开始处理');
         break;
-      case 'agent_end':
+      case 'agent_end': {
         logger.info('[Orchestrator] agent_end — pi agent 处理完成');
-        onDone?.();
+        if (completed) break;
+        completed = true;
+
+        if (hasTextDelta) {
+          onDone?.();
+        } else {
+          // 没有收到 text_delta，尝试从 agent_end 的 messages 中提取内容
+          let fallbackText = '';
+          try {
+            if (event.messages && Array.isArray(event.messages)) {
+              for (const m of event.messages) {
+                if (m.role === 'assistant' && m.content) {
+                  const content = typeof m.content === 'string' ? m.content :
+                    Array.isArray(m.content) ? m.content.map(c => c.text || c.content || '').join('') : '';
+                  if (content) {
+                    fallbackText = content;
+                    break;
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            logger.warn('[Orchestrator] Failed to extract fallback text from agent_end messages: %s', e.message);
+          }
+
+          if (fallbackText) {
+            logger.info('[Orchestrator] Using fallback text from agent_end messages (%d chars)', fallbackText.length);
+            hasTextDelta = true;
+            onDelta?.(fallbackText);
+            onDone?.();
+          } else {
+            logger.warn('[Orchestrator] agent_end without any text content — reporting error');
+            onError?.('模型未返回有效回复，请检查模型配置或重试。可能原因：模型连接失败、API Key 未配置、或模型未正确响应。');
+          }
+        }
         break;
+      }
       case 'turn_start':
         logger.info('[Orchestrator] turn_start — 新的一轮 LLM 调用');
         break;
-      case 'turn_end':
+      case 'turn_end': {
         logger.info('[Orchestrator] turn_end — 本轮 LLM 调用结束');
+        if (!hasTextDelta && event.message) {
+          try {
+            const msg = event.message;
+            const content = typeof msg.content === 'string' ? msg.content :
+              Array.isArray(msg.content) ? msg.content.map(c => c.text || c.content || '').join('') : '';
+            if (content) {
+              hasTextDelta = true;
+              logger.info('[Orchestrator] Extracted text from turn_end message (%d chars)', content.length);
+              onDelta?.(content);
+            }
+          } catch (e) {
+            logger.warn('[Orchestrator] Failed to extract text from turn_end: %s', e.message);
+          }
+        }
         break;
+      }
       case 'message_start':
         logger.info('[Orchestrator] message_start — 新消息开始');
         break;
@@ -255,12 +318,15 @@ async function chat(session, text, onDelta, onTool, onDone, onError, images) {
 
     await session.prompt(text, promptOptions);
     const elapsed = Date.now() - startTime;
-    logger.info('[Orchestrator] session.prompt() completed in %dms', elapsed);
+    logger.info('[Orchestrator] session.prompt() completed in %dms (hasTextDelta=%s)', elapsed, hasTextDelta);
   } catch (e) {
     const elapsed = Date.now() - startTime;
     logger.error('[Orchestrator] session.prompt() FAILED after %dms: %s', elapsed, e.message);
     logger.error('[Orchestrator] Error stack: %s', e.stack);
-    onError?.(e.message);
+    if (!completed) {
+      completed = true;
+      onError?.(e.message);
+    }
   } finally {
     setTimeout(() => {
       if (activeSession === session) {

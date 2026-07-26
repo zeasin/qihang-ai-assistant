@@ -751,6 +751,7 @@ ipcMain.handle('config:get', () => {
     projectDir: db.configGet('projectDir') || '',
     ollamaHost: db.configGet('ollamaHost') || 'http://127.0.0.1:11434',
     embedModel: db.configGet('embedModel') || 'nomic-embed-text',
+    embeddingBaseUrl: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
     feishuWebhookUrl: db.configGet('feishuWebhookUrl') || '',
     feishuAppId: db.configGet('feishuAppId') || '',
     feishuAppSecret: db.configGet('feishuAppSecret') || '',

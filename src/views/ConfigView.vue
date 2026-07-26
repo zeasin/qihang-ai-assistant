@@ -65,6 +65,24 @@
         </div>
       </div>
 
+      <!-- Embedding Model Configuration -->
+      <div class="card">
+        <h2>🧠 嵌入模型配置</h2>
+        <div class="text-muted mb-2">配置笔记库索引使用的嵌入模型（Embedding Model），用于语义搜索。需要 Ollama 已下载对应模型。</div>
+        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
+          <div class="form-group" style="flex:1;min-width:200px;">
+            <label style="font-size:12px;">模型名称</label>
+            <input v-model="embedModel" type="text" class="form-control" placeholder="nomic-embed-text / bge-m3 / ...">
+          </div>
+          <div class="form-group" style="flex:1;min-width:250px;">
+            <label style="font-size:12px;">Ollama 服务地址</label>
+            <input v-model="embeddingBaseUrl" type="text" class="form-control" placeholder="http://127.0.0.1:11434">
+          </div>
+          <button class="btn btn-primary" @click="saveEmbeddingConfig" style="margin-bottom:12px;">保存配置</button>
+        </div>
+        <span v-if="embeddingStatus" class="text-muted" :style="{ color: embeddingStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ embeddingStatus }}</span>
+      </div>
+
       <!-- Feishu Webhook -->
       <div class="card">
         <h2>🔗 飞书 Webhook 配置</h2>
@@ -210,6 +228,11 @@ const reportPrompt = ref('');
 const reportSettingsStatus = ref('');
 const showTemplateHelp = ref(false);
 const templateStatus = ref('');
+// Embedding model
+const embedModel = ref('');
+const embeddingBaseUrl = ref('');
+const embeddingStatus = ref('');
+
 
 async function loadTasks() {
   try { tasks.value = await API.task.list(); } catch { tasks.value = []; }
@@ -300,6 +323,8 @@ async function loadConfig() {
     feishuAppSecret.value = cfg.feishuAppSecret || '';
     reportRetentionDays.value = cfg.dailyReportRetentionDays || '30';
     reportPrompt.value = cfg.dailyReportPrompt || '';
+    embedModel.value = cfg.embedModel || 'nomic-embed-text';
+    embeddingBaseUrl.value = cfg.embeddingBaseUrl || 'http://127.0.0.1:11434';
   } catch { console.warn('加载配置失败'); }
 }
 
@@ -329,6 +354,21 @@ async function resetReportTemplate() {
   reportPrompt.value = '';
   await saveReportTemplate();
 }
+async function saveEmbeddingConfig() {
+  if (!embedModel.value.trim()) { embeddingStatus.value = '❌ 请输入模型名称'; return; }
+  if (!embeddingBaseUrl.value.trim()) { embeddingStatus.value = '❌ 请输入 Ollama 服务地址'; return; }
+  try {
+    await API.config.set({
+      embedModel: embedModel.value.trim(),
+      embeddingBaseUrl: embeddingBaseUrl.value.trim(),
+    });
+    embeddingStatus.value = '✅ 已保存，重启应用后生效';
+    setTimeout(() => embeddingStatus.value = '', 3000);
+  } catch (e) {
+    embeddingStatus.value = '❌ ' + (e.message || '保存失败');
+  }
+}
+
 
 onMounted(async () => {
   await loadConfig();
