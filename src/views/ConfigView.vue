@@ -107,6 +107,72 @@
         <span v-if="feishuStatus" class="text-muted" :style="{ color: feishuStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ feishuStatus }}</span>
       </div>
 
+      <!-- Report Settings -->
+      <div class="card">
+        <h2>📊 综合日报设置</h2>
+        <div class="text-muted mb-2">管理综合日报的生成和保存策略。</div>
+        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:center;">
+          <div class="form-group" style="flex:0 0 160px;">
+            <label style="font-size:12px;">保留天数</label>
+            <input v-model="reportRetentionDays" type="number" class="form-control" min="1" max="365" style="width:100px;">
+          </div>
+          <button class="btn btn-primary" @click="saveReportSettings">保存</button>
+        </div>
+        <div style="margin-top:12px;">
+          <label style="font-size:12px;display:block;margin-bottom:4px;">自定义附加内容（追加到日报末尾，支持 Markdown）</label>
+          <textarea v-model="reportPrompt" class="form-control" rows="3" placeholder="例如：&#10;📌 本周重点：完成项目上线&#10;🎯 明日目标：优化首页加载速度" style="font-size:13px;"></textarea>
+        </div>
+        <span v-if="reportSettingsStatus" class="text-muted" :style="{ color: reportSettingsStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }" style="margin-top:8px;display:block;">{{ reportSettingsStatus }}</span>
+      </div>
+
+      <!-- Report Template Editor -->
+      <div class="card">
+        <h2>📝 日报生成模板</h2>
+        <div class="text-muted mb-2">
+          编辑下方 JavaScript 函数来自定义日报的全部生成逻辑。
+          函数接收 <code>data</code> 对象，返回 <code>{ text: string, score: number }</code>。
+          置空可恢复默认模板。
+        </div>
+        <div class="template-help" @click="showTemplateHelp = !showTemplateHelp">
+          <span>{{ showTemplateHelp ? '▼' : '▶' }}</span>
+          📖 查看 data 可用变量
+        </div>
+        <div v-if="showTemplateHelp" class="template-help-content">
+          <table class="vars-table">
+            <thead><tr><th>变量</th><th>类型</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td><code>today</code></td><td>string</td><td>今日日期 YYYY-MM-DD（中国时区）</td></tr>
+              <tr><td><code>yesterday</code></td><td>string</td><td>昨日日期</td></tr>
+              <tr><td><code>greeting</code></td><td>string</td><td>根据时段生成的问候语（早上/中午/下午/晚上）</td></tr>
+              <tr><td><code>kbName</code></td><td>string</td><td>笔记库名称</td></tr>
+              <tr><td><code>doneToday</code></td><td>array</td><td>今日完成的任务列表 [{title, priority}]</td></tr>
+              <tr><td><code>pendingTodos</code></td><td>array</td><td>未完成的待办 [{title, status, due_date, priority}]</td></tr>
+              <tr><td><code>overdueTodos</code></td><td>array</td><td>逾期的待办</td></tr>
+              <tr><td><code>reminders</code></td><td>array</td><td>启用的提醒列表</td></tr>
+              <tr><td><code>chats</code></td><td>array</td><td>今日对话 snippets</td></tr>
+              <tr><td><code>workLogs</code></td><td>array</td><td>今日工作日志（含 data_json）</td></tr>
+              <tr><td><code>recs</code></td><td>array</td><td>今日新增记录（含 data_json）</td></tr>
+              <tr><td><code>recCount</code></td><td>number</td><td>新增记录总数</td></tr>
+              <tr><td><code>docs</code></td><td>array</td><td>今日更新的文档 [{path, snippet}]</td></tr>
+              <tr><td><code>docCountToday</code></td><td>number</td><td>更新的文档数</td></tr>
+              <tr><td><code>doneWeek</code></td><td>array</td><td>本周每日完成统计 [{d, c}]</td></tr>
+              <tr><td><code>chatCountToday</code></td><td>number</td><td>今日对话次数</td></tr>
+              <tr><td><code>chatCountWeek</code></td><td>number</td><td>本周对话次数</td></tr>
+              <tr><td><code>recCountWeek</code></td><td>number</td><td>本周新增记录数</td></tr>
+              <tr><td><code>todos</code></td><td>array</td><td>全部待办（近 30 条）</td></tr>
+              <tr><td><code>allDatasets</code></td><td>array</td><td>全部数据集 [{dataset_id, name}]</td></tr>
+              <tr><td><code>dsNameMap</code></td><td>object</td><td>数据集 ID → 名称 映射</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <textarea v-model="reportTemplate" class="code-editor" rows="20" spellcheck="false" placeholder="（空 = 使用默认模板）"></textarea>
+        <div class="flex" style="gap:8px;margin-top:8px;">
+          <button class="btn btn-primary" @click="saveReportTemplate">保存模板</button>
+          <button class="btn btn-secondary" @click="resetReportTemplate">恢复默认</button>
+          <span v-if="templateStatus" class="text-muted" :style="{ color: templateStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }" style="margin-left:8px;">{{ templateStatus }}</span>
+        </div>
+      </div>
+
       </div>
 
     <!-- Help Modal -->
@@ -156,6 +222,14 @@ const feishuStatus = ref('');
 // Scheduled tasks
 const schedulerRunning = ref(false);
 const tasks = ref<any[]>([]);
+
+// Report settings
+const reportRetentionDays = ref('30');
+const reportPrompt = ref('');
+const reportSettingsStatus = ref('');
+const reportTemplate = ref('');
+const showTemplateHelp = ref(false);
+const templateStatus = ref('');
 
 async function loadTasks() {
   try { tasks.value = await API.task.list(); } catch { tasks.value = []; }
@@ -244,7 +318,38 @@ async function loadConfig() {
     webhookUrl.value = cfg.feishuWebhookUrl || '';
     feishuAppId.value = cfg.feishuAppId || '';
     feishuAppSecret.value = cfg.feishuAppSecret || '';
+    reportRetentionDays.value = cfg.dailyReportRetentionDays || '30';
+    reportPrompt.value = cfg.dailyReportPrompt || '';
+    reportTemplate.value = cfg.dailyReportTemplate || '';
   } catch { console.warn('加载配置失败'); }
+}
+
+async function saveReportSettings() {
+  try {
+    await API.config.set({
+      daily_report_retention_days: reportRetentionDays.value,
+      daily_report_prompt: reportPrompt.value,
+    });
+    reportSettingsStatus.value = '✅ 已保存';
+    setTimeout(() => reportSettingsStatus.value = '', 3000);
+  } catch (e: any) {
+    reportSettingsStatus.value = '❌ ' + (e.message || '保存失败');
+  }
+}
+
+async function saveReportTemplate() {
+  try {
+    await API.config.set({ daily_report_template: reportTemplate.value });
+    templateStatus.value = '✅ 已保存';
+    setTimeout(() => templateStatus.value = '', 3000);
+  } catch (e: any) {
+    templateStatus.value = '❌ ' + (e.message || '保存失败');
+  }
+}
+
+async function resetReportTemplate() {
+  reportTemplate.value = '';
+  await saveReportTemplate();
 }
 
 onMounted(async () => {
@@ -267,6 +372,49 @@ onBeforeUnmount(() => {});
 .content-title { font-size: 18px; font-weight: 600; color: var(--text-primary); }
 .content-body { flex: 1; overflow-y: auto; padding: 24px; }
 .card { background: white; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 20px; margin-bottom: 16px; }
+
+.template-help {
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: var(--hover);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+}
+.template-help:hover { background: #e8eaed; }
+.template-help-content {
+  margin-bottom: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fafbfc;
+}
+.vars-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.vars-table th { text-align: left; padding: 6px 10px; background: var(--hover); font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border); position: sticky; top: 0; }
+.vars-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+.vars-table code { font-size: 11px; background: #f1f5f9; padding: 1px 4px; border-radius: 3px; color: var(--primary); }
+.code-editor {
+  width: 100%;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #1e293b;
+  color: #e2e8f0;
+  resize: vertical;
+  min-height: 200px;
+  tab-size: 2;
+}
+.code-editor:focus { outline: none; border-color: var(--primary); }
+.code-editor::placeholder { color: #64748b; }
 .card h2 { font-size: 16px; font-weight: 600; margin: 0 0 8px; color: var(--text-primary); }
 .card-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .card-title-row h2 { margin: 0; }

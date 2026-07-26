@@ -654,6 +654,9 @@ ipcMain.handle('config:get', () => {
     feishuWebhookUrl: db.configGet('feishuWebhookUrl') || '',
     feishuAppId: db.configGet('feishuAppId') || '',
     feishuAppSecret: db.configGet('feishuAppSecret') || '',
+    dailyReportRetentionDays: db.configGet('daily_report_retention_days') || '30',
+    dailyReportPrompt: db.configGet('daily_report_prompt') || '',
+    dailyReportTemplate: db.configGet('daily_report_template') || scheduler.DEFAULT_REPORT_TEMPLATE || '',
     labels,
   };
 });
