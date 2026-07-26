@@ -117,6 +117,9 @@
                 :class="{ 'markdown-body': msg.role === 'assistant' }"
               >
                 <div v-if="thinkingText && idx === messages.length - 1" class="thinking-status">{{ thinkingText }}</div>
+                <div v-if="msg.images?.length" class="message-images">
+                    <img v-for="(img, i) in msg.images" :key="i" :src="`data:${img.mimeType};base64,${img.data}`" class="chat-image" />
+                  </div>
                 <div v-html="msg.role === 'user' ? escHtml(msg.content) : renderMarkdown(msg.content)"></div>
               </div>
             </div>
@@ -131,14 +134,29 @@
               class="chat-input"
               :placeholder="`输入代码问题，Enter 发送... (当前: ${agentLabel(activeAgent)})`"
               @keydown.enter.exact.prevent="sendMessage"
+              @paste="handlePaste"
               @compositionstart="composing = true"
               @compositionend="composing = false"
               ref="inputRef"
               :disabled="isStreaming"
               rows="1"
             ></textarea>
+            <div v-if="pendingImages.length" class="image-preview-bar">
+                <div v-for="(img, i) in pendingImages" :key="i" class="image-preview-item">
+                  <img :src="`data:${img.mimeType};base64,${img.data}`" class="image-preview-thumb" />
+                  <button class="image-preview-remove" @click="removeImage(i)">×</button>
+                </div>
+              </div>
             <div class="input-footer">
               <div class="input-left">
+                <button class="toolbar-btn" @click="handleImageClick" title="上传图片">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                      <circle cx="8.5" cy="8.5" r="1.5"/>
+                      <polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                  </button>
+                  <input ref="fileInputRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
                 <span class="input-hint">Enter 发送 · Shift+Enter 换行</span>
               </div>
               <div class="input-right">
@@ -216,6 +234,7 @@ const agentReady = ref(false);
 const thinkingText = ref('');
 const inputRef = ref<HTMLTextAreaElement>();
 const messagesContainer = ref<HTMLElement>();
+const pendingImages = ref<{ data: string; mimeType: string }[]>([]);const fileInputRef = ref<HTMLInputElement | null>(null);
 const showProjectModal = ref(false);
 const editingProject = ref<any>(null);
 const projectForm = ref({ name: '', description: '', dir: '' });
@@ -257,7 +276,14 @@ async function loadMessages(sessionId: string) {
       role: m.role,
       content: m.content,
       mode: m.mode,
+      images: m.images || undefined,
     }));
+    // 从数据库加载的消息中如果有图片，解析出来
+    for (const m of messages.value) {
+      if (m.images && typeof m.images === 'string') {
+        try { m.images = JSON.parse(m.images); } catch { m.images = undefined; }
+      }
+    }
   } catch {
     messages.value = [];
   }
@@ -350,11 +376,55 @@ async function checkAgentStatus() {
     agentReady.value = false;
   }
 }
+// ========== 图片处理 ==========
+function handlePaste(event: ClipboardEvent) {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      event.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        const base64 = dataUrl.split(',')[1];
+        pendingImages.value.push({ data: base64, mimeType: file.type });
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+}
+
+function handleImageClick() {
+  fileInputRef.value?.click();
+}
+
+function handleImageUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!input.files) return;
+  for (const file of Array.from(input.files)) {
+    if (!file.type.startsWith('image/')) continue;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      const base64 = dataUrl.split(',')[1];
+      pendingImages.value.push({ data: base64, mimeType: file.type });
+    };
+    reader.readAsDataURL(file);
+  }
+  input.value = '';
+}
+
+function removeImage(index: number) {
+  pendingImages.value.splice(index, 1);
+}
+
 
 // ========== 发送消息 ==========
 async function sendMessage() {
   const text = inputText.value.trim();
-  if (!text || isStreaming.value) return;
+  if ((!text && !pendingImages.value.length) || isStreaming.value) return;
 
   if (!currentSessionId.value) {
     // 如果还没有对话，找第一个项目自动创建
@@ -378,7 +448,14 @@ async function sendMessage() {
 }
 
 async function doSend(text: string) {
+  // 获取待发送的图片并清空预览
+  const images = pendingImages.value.map(img => ({ data: img.data, mimeType: img.mimeType }));
+  pendingImages.value = [];
+
   const userMsg: any = { role: 'user', content: text };
+  if (images.length) {
+    userMsg.images = images;
+  }
   messages.value.push(userMsg);
 
   inputText.value = '';
@@ -397,6 +474,13 @@ async function doSend(text: string) {
 
   const sid = currentSessionId.value;
   const projectDir = currentProject.value?.dir || '';
+
+  // 清理旧的事件监听器（避免泄漏）
+  API.removeAllListeners('coding:delta');
+  API.removeAllListeners('coding:status');
+  API.removeAllListeners('coding:tool');
+  API.removeAllListeners('coding:done');
+  API.removeAllListeners('coding:error');
 
   // 注册事件监听
   const onDelta = (data: { sessionId: string; text: string }) => {
@@ -438,6 +522,12 @@ async function doSend(text: string) {
     if (currentProject.value) {
       loadSessions(currentProject.value.id);
     }
+    // 清理监听器
+    API.removeAllListeners('coding:delta');
+    API.removeAllListeners('coding:status');
+    API.removeAllListeners('coding:tool');
+    API.removeAllListeners('coding:done');
+    API.removeAllListeners('coding:error');
   };
 
   const onError = (data: { sessionId: string; text: string }) => {
@@ -449,6 +539,12 @@ async function doSend(text: string) {
       msg.status = '错误';
     }
     scrollToBottom();
+    // 清理监听器
+    API.removeAllListeners('coding:delta');
+    API.removeAllListeners('coding:status');
+    API.removeAllListeners('coding:tool');
+    API.removeAllListeners('coding:done');
+    API.removeAllListeners('coding:error');
   };
 
   API.on('coding:delta', onDelta);
@@ -458,11 +554,17 @@ async function doSend(text: string) {
   API.on('coding:error', onError);
 
   try {
-    await API.coding.send(text, sid, projectDir, activeAgent.value);
+    await API.coding.send(text, sid, projectDir, activeAgent.value, images.length ? images : undefined);
   } catch (err: any) {
     isStreaming.value = false;
     const msg = messages.value[msgIdx];
     if (msg) msg.content = '❌ ' + (err.message || '发送失败');
+    // 清理监听器
+    API.removeAllListeners('coding:delta');
+    API.removeAllListeners('coding:status');
+    API.removeAllListeners('coding:tool');
+    API.removeAllListeners('coding:done');
+    API.removeAllListeners('coding:error');
   }
 }
 
@@ -1133,6 +1235,16 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: #94a3b8;
 }
+
+/* ========== 图片预览（输入区） ========== */
+.image-preview-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px; border-top: 1px solid #f1f5f9; }
+.image-preview-item { position: relative; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; flex-shrink: 0; }
+.image-preview-thumb { width: 100%; height: 100%; object-fit: cover; }
+.image-preview-remove { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; border: none; background: rgba(0,0,0,0.5); color: white; font-size: 12px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+.image-preview-remove:hover { background: rgba(239,68,68,0.8); }
+/* ========== 消息中的图片 ========== */
+.message-images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.chat-image { max-width: 300px; max-height: 300px; border-radius: 8px; border: 1px solid #e2e8f0; object-fit: contain; }
 
 .input-right {
   display: flex;

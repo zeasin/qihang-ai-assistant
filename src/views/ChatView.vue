@@ -296,7 +296,14 @@ const loadMessages = async (sessionId: string) => {
     messages.value = msgs.map((m: any) => ({
       role: m.role,
       content: m.content,
+      images: m.images || undefined,
     }));
+    // 解析图片（从数据库加载时可能是 JSON 字符串）
+    for (const m of messages.value) {
+      if (m.images && typeof m.images === 'string') {
+        try { m.images = JSON.parse(m.images); } catch { m.images = undefined; }
+      }
+    }
   } catch {
     messages.value = [];
   }

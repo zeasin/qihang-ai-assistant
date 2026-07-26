@@ -60,6 +60,7 @@ function initSchema() {
       content TEXT NOT NULL,
       mode TEXT DEFAULT 'general',
       kb_id TEXT,
+      images TEXT DEFAULT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -78,6 +79,7 @@ function initSchema() {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       mode TEXT DEFAULT 'pi',
+      images TEXT DEFAULT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -388,6 +390,12 @@ function migrate() {
     setSchemaVersion(3);
   }
 
+  if (version < 4) {
+    try { db.run("ALTER TABLE coding_messages ADD COLUMN images TEXT DEFAULT NULL"); } catch {}
+    try { db.run("ALTER TABLE messages ADD COLUMN images TEXT DEFAULT NULL"); } catch {}
+    setSchemaVersion(4);
+  }
+
   // Ensure notify_feishu column exists (for tables created before the column was added)
   try { db.run("ALTER TABLE collector_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
 
@@ -553,11 +561,15 @@ const chat = {
     run("INSERT OR IGNORE INTO sessions (id, source, title, mode) VALUES (?, ?, ?, ?)", id, source || 'ui', title || '新对话', mode || 'general');
     return { id };
   },
-  addMessage: (sessionId, role, content, mode, source) => {
-    run("INSERT INTO messages (session_id, role, content, mode, source) VALUES (?, ?, ?, ?, ?)", sessionId, role, content, mode || 'general', source || 'ui');
+  addMessage: (sessionId, role, content, mode, source, images) => {
+    const imagesJson = images?.length ? JSON.stringify(images) : null;
+    run("INSERT INTO messages (session_id, role, content, mode, source, images) VALUES (?, ?, ?, ?, ?, ?)", sessionId, role, content, mode || 'general', source || 'ui', imagesJson);
     run("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", sessionId);
   },
-  messages: (sessionId) => q("SELECT * FROM messages WHERE session_id = ? ORDER BY id", sessionId),
+  messages: (sessionId) => {
+    const rows = q("SELECT * FROM messages WHERE session_id = ? ORDER BY id", sessionId);
+    return rows.map(r => ({ ...r, images: r.images ? JSON.parse(r.images) : null }));
+  },
   deleteSession: (sessionId) => { run("DELETE FROM turn_embeddings WHERE session_id = ?", sessionId); run('DELETE FROM messages WHERE session_id = ?', sessionId); run('DELETE FROM sessions WHERE id = ?', sessionId); },
   updateSessionTitle: (id, title) => { run("UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ?", title, id); },
   updateSessionMode: (id, mode) => { run("UPDATE sessions SET mode = ?, updated_at = datetime('now') WHERE id = ?", mode, id); },
@@ -690,11 +702,15 @@ const coding = {
   updateSessionTitle: (id, title) => { run("UPDATE coding_sessions SET title = ?, updated_at = datetime('now') WHERE id = ?", title, id); },
   updateSessionAgent: (id, agent) => { run("UPDATE coding_sessions SET active_agent = ?, updated_at = datetime('now') WHERE id = ?", agent, id); },
   deleteSession: (sessionId) => { run('DELETE FROM coding_messages WHERE session_id = ?', sessionId); run('DELETE FROM coding_sessions WHERE id = ?', sessionId); },
-  addMessage: (sessionId, role, content, mode) => {
-    run("INSERT INTO coding_messages (session_id, role, content, mode) VALUES (?, ?, ?, ?)", sessionId, role, content, mode || 'pi');
+  addMessage: (sessionId, role, content, mode, images) => {
+    const imagesJson = images?.length ? JSON.stringify(images) : null;
+    run("INSERT INTO coding_messages (session_id, role, content, mode, images) VALUES (?, ?, ?, ?, ?)", sessionId, role, content, mode || 'pi', imagesJson);
     run("UPDATE coding_sessions SET updated_at = datetime('now') WHERE id = ?", sessionId);
   },
-  messages: (sessionId) => q("SELECT * FROM coding_messages WHERE session_id = ? ORDER BY id", sessionId),
+  messages: (sessionId) => {
+    const rows = q("SELECT * FROM coding_messages WHERE session_id = ? ORDER BY id", sessionId);
+    return rows.map(r => ({ ...r, images: r.images ? JSON.parse(r.images) : null }));
+  },
 };
 
 module.exports = { getDb, close, q, qOne, run, runMany, configGet, configSet, kb, dm, ds, chat, task, reminder, todo, project, coding };

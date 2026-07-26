@@ -449,7 +449,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
       ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.kb.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
       : question;
 
-    db.chat.addMessage(sid, 'user', question, 'pi', 'ui');
+    db.chat.addMessage(sid, 'user', question, 'pi', 'ui', images);
     let reply = '';
     await orchestrator.chat(session, augmentedQuestion,
       (delta) => {
@@ -492,7 +492,7 @@ ipcMain.handle('coding:switchAgent', (_, { sessionId, agent }) => {
   db.coding.updateSessionAgent(sessionId, agent);
   return db.coding.getSession(sessionId);
 });
-ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, agent }) => {
+ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, agent, images }) => {
   const sid = sessionId || ('coding_' + Date.now());
   try {
     let session = db.coding.getSession(sid);
@@ -516,8 +516,8 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
     // 构建上下文（从历史消息中提取，实现跨 Agent 上下文保持）
     const context = buildCodingContext(existing);
 
-    // 保存用户消息
-    db.coding.addMessage(sid, 'user', question, agentName);
+    // 保存用户消息（含图片）
+    db.coding.addMessage(sid, 'user', question, agentName, images);
 
     let reply = '';
     const agentLabel = agentName === 'pi' ? 'pi agent' : agentName === 'opencode' ? 'opencode' : 'Claude Code';
@@ -552,7 +552,7 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
 
 用户的新问题：${question}` : question;
       const piSession = await orchestrator.createSession(projectDir || '');
-      await orchestrator.chat(piSession, fullPrompt, onDelta, onTool, onDone, onError, null);
+      await orchestrator.chat(piSession, fullPrompt, onDelta, onTool, onDone, onError, images);
     }
   } catch (err) {
     sendToRenderer('coding:error', { sessionId: sid, text: err.message });
