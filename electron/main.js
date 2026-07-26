@@ -643,10 +643,12 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
 
     if (agentName === 'opencode') {
       const oc = require('./services/opencode');
-      await oc.prompt(context, question, projectDir || "", onDelta, onDone, onError, onTool);
+      // opencode 服务端自己管理 session 上下文，不传本地历史避免重复
+      await oc.prompt('', question, projectDir || "", onDelta, onDone, onError, onTool);
     } else if (agentName === 'claude') {
       const cc = require('./services/claude-code');
-      await cc.prompt(context, question, projectDir || '', onDelta, onDone, onError);
+      // Claude SDK 自己管理 session 上下文，不传本地历史避免重复
+      await cc.prompt('', question, projectDir || '', onDelta, onDone, onError, onTool);
     } else {
       // pi agent
       const fullPrompt = context ? `${context}
