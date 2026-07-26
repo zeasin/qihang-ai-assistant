@@ -133,6 +133,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     set: (cfg) => ipcRenderer.invoke('config:set', cfg),
   },
 
+  // Embedding Model
+  embedding: {
+    test: (model, host, apiKey) => ipcRenderer.invoke("embedding:test", { model, host, apiKey }),
+  },
+
   // Coding Workbench
   coding: {
     createSession: (id, projectId, title, agent) =>

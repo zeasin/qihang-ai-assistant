@@ -68,19 +68,24 @@
       <!-- Embedding Model Configuration -->
       <div class="card">
         <h2>🧠 嵌入模型配置</h2>
-        <div class="text-muted mb-2">配置笔记库索引使用的嵌入模型（Embedding Model），用于语义搜索。需要 Ollama 已下载对应模型。</div>
+        <div class="text-muted mb-2">配置笔记库索引使用的嵌入模型（Embedding Model），用于语义搜索。支持 Ollama 和 OpenAI 兼容接口（如 vLLM、LM Studio 等）。填写 API Key 则使用 OpenAI 兼容接口，否则使用 Ollama。</div>
         <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
-          <div class="form-group" style="flex:1;min-width:200px;">
+          <div class="form-group" style="flex:1;min-width:160px;">
             <label style="font-size:12px;">模型名称</label>
             <input v-model="embedModel" type="text" class="form-control" placeholder="nomic-embed-text / bge-m3 / ...">
           </div>
-          <div class="form-group" style="flex:1;min-width:250px;">
-            <label style="font-size:12px;">Ollama 服务地址</label>
+          <div class="form-group" style="flex:1;min-width:200px;">
+            <label style="font-size:12px;">服务地址</label>
             <input v-model="embeddingBaseUrl" type="text" class="form-control" placeholder="http://127.0.0.1:11434">
           </div>
+          <div class="form-group" style="flex:1;min-width:220px;">
+            <label style="font-size:12px;">API Key（可选，非 Ollama 时填写）</label>
+            <input v-model="embeddingApiKey" type="password" class="form-control" placeholder="sk-... 留空则使用 Ollama">
+          </div>
           <button class="btn btn-primary" @click="saveEmbeddingConfig" style="margin-bottom:12px;">保存配置</button>
+          <button class="btn btn-secondary" @click="testEmbedding" style="margin-bottom:12px;">测试连接</button>
         </div>
-        <span v-if="embeddingStatus" class="text-muted" :style="{ color: embeddingStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ embeddingStatus }}</span>
+        <span v-if="embeddingStatus" class="text-muted" :style="{ color: embeddingStatus.startsWith('✅') ? '#22c55e' : embeddingStatus.startsWith('⏳') ? '#f59e0b' : '#ef4444' }">{{ embeddingStatus }}</span>
       </div>
 
       <!-- Feishu Webhook -->
@@ -231,6 +236,7 @@ const templateStatus = ref('');
 // Embedding model
 const embedModel = ref('');
 const embeddingBaseUrl = ref('');
+const embeddingApiKey = ref('');
 const embeddingStatus = ref('');
 
 
@@ -325,6 +331,7 @@ async function loadConfig() {
     reportPrompt.value = cfg.dailyReportPrompt || '';
     embedModel.value = cfg.embedModel || 'nomic-embed-text';
     embeddingBaseUrl.value = cfg.embeddingBaseUrl || 'http://127.0.0.1:11434';
+    embeddingApiKey.value = cfg.embeddingApiKey || '';
   } catch { console.warn('加载配置失败'); }
 }
 
@@ -356,17 +363,39 @@ async function resetReportTemplate() {
 }
 async function saveEmbeddingConfig() {
   if (!embedModel.value.trim()) { embeddingStatus.value = '❌ 请输入模型名称'; return; }
-  if (!embeddingBaseUrl.value.trim()) { embeddingStatus.value = '❌ 请输入 Ollama 服务地址'; return; }
   try {
     await API.config.set({
       embedModel: embedModel.value.trim(),
-      embeddingBaseUrl: embeddingBaseUrl.value.trim(),
+      embeddingBaseUrl: embeddingBaseUrl.value.trim() || 'http://127.0.0.1:11434',
+      embeddingApiKey: embeddingApiKey.value.trim() || '',
     });
     embeddingStatus.value = '✅ 已保存，重启应用后生效';
     setTimeout(() => embeddingStatus.value = '', 3000);
   } catch (e) {
     embeddingStatus.value = '❌ ' + (e.message || '保存失败');
   }
+}
+
+async function testEmbedding() {
+  if (!embedModel.value.trim()) { embeddingStatus.value = '❌ 请输入模型名称'; return; }
+  embeddingStatus.value = '⏳ 正在测试连接...';
+  try {
+    const result = await API.embedding.test(
+      embedModel.value.trim(),
+      embeddingBaseUrl.value.trim() || 'http://127.0.0.1:11434',
+      embeddingApiKey.value.trim() || ''
+    );
+    if (result.ok) {
+      embeddingStatus.value = result.message;
+    } else {
+      embeddingStatus.value = result.message;
+    }
+  } catch (e) {
+    embeddingStatus.value = '❌ 测试异常: ' + (e.message || e);
+  }
+  setTimeout(() => {
+    if (embeddingStatus.value.startsWith('⏳')) embeddingStatus.value = '';
+  }, 10000);
 }
 
 

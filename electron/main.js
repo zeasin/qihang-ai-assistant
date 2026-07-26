@@ -752,6 +752,7 @@ ipcMain.handle('config:get', () => {
     ollamaHost: db.configGet('ollamaHost') || 'http://127.0.0.1:11434',
     embedModel: db.configGet('embedModel') || 'nomic-embed-text',
     embeddingBaseUrl: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
+    embeddingApiKey: db.configGet('embeddingApiKey') || '',
     feishuWebhookUrl: db.configGet('feishuWebhookUrl') || '',
     feishuAppId: db.configGet('feishuAppId') || '',
     feishuAppSecret: db.configGet('feishuAppSecret') || '',
@@ -764,6 +765,15 @@ ipcMain.handle('config:get', () => {
 ipcMain.handle('config:set', (_, cfg) => {
   Object.entries(cfg).forEach(([k, v]) => db.configSet(k, String(v)));
   return true;
+});
+
+ipcMain.handle("embedding:test", async (_, { model, host, apiKey }) => {
+  try {
+    const result = await rag.testConnection({ model, host, apiKey });
+    return result;
+  } catch (e) {
+    return { ok: false, message: "❌ 测试异常: " + (e.message || e) };
+  }
 });
 
 // ========== App Lifecycle ==========
@@ -782,6 +792,7 @@ app.whenReady().then(async () => {
   rag.configure({
     model: db.configGet("embedModel") || "nomic-embed-text",
     host: db.configGet("embeddingBaseUrl") || "http://127.0.0.1:11434",
+    apiKey: db.configGet("embeddingApiKey") || '',
   });
   createWindow();
 

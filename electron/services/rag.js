@@ -9,18 +9,21 @@ const RAG_DIR = path.join(require('os').homedir(), '.biling-ai', 'rag');
 let embedConfig = {
   model: 'nomic-embed-text',
   host: 'http://127.0.0.1:11434',
+  apiKey: '',
 };
 
 /**
  * 配置嵌入模型参数
  * @param {Object} opts
  * @param {string} [opts.model] - 模型名，如 'nomic-embed-text', 'bge-m3'
- * @param {string} [opts.host] - Ollama 服务地址，如 'http://127.0.0.1:11434'
+ * @param {string} [opts.host] - 服务地址，如 'http://127.0.0.1:11434'
+ * @param {string} [opts.apiKey] - API Key（用于非 Ollama 的兼容服务）
  */
 function configure(opts = {}) {
   if (opts.model) embedConfig.model = opts.model;
   if (opts.host) embedConfig.host = opts.host;
-  logger.info(`[RAG] 嵌入模型配置: ${embedConfig.model} @ ${embedConfig.host}`);
+  if (opts.apiKey !== undefined) embedConfig.apiKey = opts.apiKey;
+  logger.info(`[RAG] 嵌入模型配置: ${embedConfig.model} @ ${embedConfig.host} ${embedConfig.apiKey ? '(已设置 API Key)' : '(无 API Key, 使用 Ollama)'}`);
 }
 
 function ensureDir(dir) {
@@ -51,6 +54,32 @@ function chunkText(text, maxLen = 512) {
 }
 
 async function embed(text) {
+  // 如果有 apiKey，使用 OpenAI 兼容接口
+  if (embedConfig.apiKey) {
+    const baseUrl = embedConfig.host.replace(/\/+$/, '');
+    const basePath = baseUrl.includes('/v1') ? '' : '/v1';
+    const url = baseUrl + basePath + '/embeddings';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + embedConfig.apiKey,
+      },
+      body: JSON.stringify({
+        model: embedConfig.model,
+        input: text,
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`嵌入 API 错误: ${res.status} ${errText}`);
+    }
+    const data = await res.json();
+    if (data.data && data.data.length > 0) return data.data[0].embedding;
+    if (data.embeddings && data.embeddings.length > 0) return data.embeddings[0];
+    throw new Error('嵌入 API 返回格式异常: 未找到 embedding 数据');
+  }
+  // 否则使用 Ollama
   const client = new ollama.Ollama({ host: embedConfig.host });
   const res = await client.embed({ model: embedConfig.model, input: text });
   return res.embeddings[0];
@@ -117,4 +146,57 @@ function walkDir(dir, files) {
   }
 }
 
-module.exports = { configure, indexKnowledgeBase, searchKnowledgeBase, getIndexStatus, chunkText, embed };
+/** 测试嵌入模型连接是否正常
+ * @param {Object} [opts] - 可选，覆盖当前配置进行测试
+ * @param {string} [opts.model]
+ * @param {string} [opts.host]
+ * @param {string} [opts.apiKey]
+ * @returns {Promise<{ok: boolean, message: string, vectorSize?: number}>}
+ */
+async function testConnection(opts = {}) {
+  const model = opts.model || embedConfig.model;
+  const host = opts.host || embedConfig.host;
+  const apiKey = opts.apiKey !== undefined ? opts.apiKey : embedConfig.apiKey;
+
+  const testText = '测试连接 test connection';
+
+  try {
+    if (apiKey) {
+      // 测试 OpenAI 兼容接口
+      const baseUrl = host.replace(/\/+$/, '');
+      const basePath = baseUrl.includes('/v1') ? '' : '/v1';
+      const url = baseUrl + basePath + '/embeddings';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + apiKey,
+        },
+        body: JSON.stringify({ model, input: testText }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        return { ok: false, message: `HTTP ${res.status}: ${errText.slice(0, 200)}` };
+      }
+      const data = await res.json();
+      let emb;
+      if (data.data && data.data.length > 0) emb = data.data[0].embedding;
+      else if (data.embeddings && data.embeddings.length > 0) emb = data.embeddings[0];
+      if (!emb) return { ok: false, message: 'API 返回格式异常：未找到 embedding 数据' };
+      return { ok: true, message: `✅ 连接成功 (向量维度: ${emb.length})`, vectorSize: emb.length };
+    } else {
+      // 测试 Ollama
+      const client = new ollama.Ollama({ host });
+      const res = await client.embed({ model, input: testText });
+      if (!res || !res.embeddings || !res.embeddings.length) {
+        return { ok: false, message: 'Ollama 返回异常：未找到 embedding 数据' };
+      }
+      const emb = res.embeddings[0];
+      return { ok: true, message: `✅ 连接成功 (向量维度: ${emb.length})`, vectorSize: emb.length };
+    }
+  } catch (e) {
+    return { ok: false, message: `❌ 连接失败: ${e.message || e}` };
+  }
+}
+
+module.exports = { configure, indexKnowledgeBase, searchKnowledgeBase, getIndexStatus, chunkText, embed, testConnection };
