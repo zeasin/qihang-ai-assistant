@@ -310,6 +310,7 @@ async function selectSession(session: any) {
   activeAgent.value = session.active_agent || 'pi';
   await loadMessages(session.id);
   checkAgentStatus();
+  saveCodingState();
 }
 
 async function newSession(projectId: number) {
@@ -376,6 +377,58 @@ async function checkAgentStatus() {
     agentReady.value = false;
   }
 }
+// ========== 状态持久化 ==========
+const CODING_STATE_KEY = "coding_workbench_state";
+
+function saveCodingState() {
+  if (!currentSessionId.value) return;
+  const projectId = currentSession.value?.project_id;
+  if (!projectId) return;
+  try {
+    localStorage.setItem(CODING_STATE_KEY, JSON.stringify({
+      sessionId: currentSessionId.value,
+      projectId: projectId,
+      agent: activeAgent.value,
+    }));
+  } catch (e) {
+    console.error("保存工作台状态失败:", e);
+  }
+}
+
+async function restoreCodingState() {
+  try {
+    const saved = localStorage.getItem(CODING_STATE_KEY);
+    if (!saved) return false;
+    const { sessionId, projectId, agent } = JSON.parse(saved);
+    if (!sessionId || !projectId) return false;
+    
+    // 找到对应的项目
+    const project = projects.value.find((p) => p.id === projectId);
+    if (!project) return false;
+    
+    // 展开项目并加载对话列表
+    expandedProjects.add(projectId);
+    await loadSessions(projectId);
+    
+    // 找到对应的对话
+    const sessions = projectSessions[projectId] || [];
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session) return false;
+    
+    // 恢复选中状态
+    currentSessionId.value = session.id;
+    currentSession.value = session;
+    if (agent) activeAgent.value = agent;
+    await loadMessages(session.id);
+    checkAgentStatus();
+    
+    return true;
+  } catch (e) {
+    console.error("恢复工作台状态失败:", e);
+    return false;
+  }
+}
+
 // ========== 图片处理 ==========
 function handlePaste(event: ClipboardEvent) {
   const items = event.clipboardData?.items;
@@ -670,10 +723,14 @@ async function deleteProject(project: any) {
 onMounted(async () => {
   await loadProjects();
   await checkAgentStatus();
-  // 自动展开第一个项目
-  if (projects.value.length > 0) {
-    expandedProjects.add(projects.value[0].id);
-    await loadSessions(projects.value[0].id);
+  // 尝试恢复之前选中的对话
+  const restored = await restoreCodingState();
+  if (!restored) {
+    // 恢复失败，自动展开第一个项目
+    if (projects.value.length > 0) {
+      expandedProjects.add(projects.value[0].id);
+      await loadSessions(projects.value[0].id);
+    }
   }
 });
 

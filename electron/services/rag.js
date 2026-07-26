@@ -5,6 +5,24 @@ const logger = require('./logger');
 
 const RAG_DIR = path.join(require('os').homedir(), '.biling-ai', 'rag');
 
+// 嵌入模型配置（可通过 configure() 修改）
+let embedConfig = {
+  model: 'nomic-embed-text',
+  host: 'http://127.0.0.1:11434',
+};
+
+/**
+ * 配置嵌入模型参数
+ * @param {Object} opts
+ * @param {string} [opts.model] - 模型名，如 'nomic-embed-text', 'bge-m3'
+ * @param {string} [opts.host] - Ollama 服务地址，如 'http://127.0.0.1:11434'
+ */
+function configure(opts = {}) {
+  if (opts.model) embedConfig.model = opts.model;
+  if (opts.host) embedConfig.host = opts.host;
+  logger.info(`[RAG] 嵌入模型配置: ${embedConfig.model} @ ${embedConfig.host}`);
+}
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -33,8 +51,8 @@ function chunkText(text, maxLen = 512) {
 }
 
 async function embed(text) {
-  const client = new ollama.Ollama();
-  const res = await client.embed({ model: 'nomic-embed-text', input: text });
+  const client = new ollama.Ollama({ host: embedConfig.host });
+  const res = await client.embed({ model: embedConfig.model, input: text });
   return res.embeddings[0];
 }
 
@@ -99,4 +117,4 @@ function walkDir(dir, files) {
   }
 }
 
-module.exports = { indexKnowledgeBase, searchKnowledgeBase, getIndexStatus, chunkText, embed };
+module.exports = { configure, indexKnowledgeBase, searchKnowledgeBase, getIndexStatus, chunkText, embed };

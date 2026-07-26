@@ -16,7 +16,8 @@ const scheduler = require('./services/scheduler');
 const indexer = require('./services/indexer');
 const logger = require('./services/logger');
 const httpserver = require('./services/httpserver');
-const { createTrayIcon } = require('./icon');
+const { createTrayIcon } = require("./icon");
+const rag = require("./services/rag");
 
 let mainWindow = null;
 let tray = null;
@@ -93,10 +94,10 @@ function showWindow() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
+    width: 1400,
+    height: 900,
+    minWidth: 1000,
+    minHeight: 700,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -775,6 +776,12 @@ app.whenReady().then(async () => {
     logger.error('DB init error: %s', e);
   }
   createTray();
+
+  // 配置嵌入模型（从数据库读取）
+  rag.configure({
+    model: db.configGet("embedModel") || "nomic-embed-text",
+    host: db.configGet("embeddingBaseUrl") || "http://127.0.0.1:11434",
+  });
   createWindow();
 
   const savedAppId = db.configGet('feishuAppId');
