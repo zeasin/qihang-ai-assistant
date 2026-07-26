@@ -583,7 +583,7 @@ const sendMessage = async () => {
   try {
     const kbIds = mentionedKbs.value.map(k => k.id);
     const projectDir = selectedProject.value?.dir || '';
-    await API.chat.send(fullText, currentSessionId.value, projectDir, kbIds, images);
+    await API.chat.send(fullText, currentSessionId.value, projectDir, kbIds, images, selectedAgent.value);
   } catch (err: any) {
     isStreaming.value = false;
     messages.value[msgIdx].content = '❌ ' + (err.message || '发送失败');

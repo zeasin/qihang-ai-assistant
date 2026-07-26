@@ -432,10 +432,11 @@ ipcMain.handle('ds:deleteRecord', (_, { id }) => db.ds.deleteRecord(id));
 ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
 
 // --- Chat / Orchestrator ---
-ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbIds, images }) => {
+ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbIds, images, agent }) => {
   const sid = sessionId || 'session_' + Date.now();
+  const activeAgent = agent || 'pi';
   try {
-    db.chat.createSession(sid, null, 'pi', 'ui');
+    db.chat.createSession(sid, null, activeAgent, 'ui');
 
     const existing = db.chat.messages(sid);
     if (existing.length === 0) {
@@ -443,28 +444,60 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
       db.chat.updateSessionTitle(sid, title);
     }
 
-    const session = await orchestrator.createSession(projectDir || '');
-    sendToRenderer('chat:status', { sessionId: sid, text: 'AI 正在分析问题...' });
+    db.chat.addMessage(sid, 'user', question, activeAgent, 'ui', images);
 
-    const augmentedQuestion = kbIds?.length
-      ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.kb.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
-      : question;
+    if (activeAgent === 'opencode') {
+      // ===== opencode agent =====
+      sendToRenderer('chat:status', { sessionId: sid, text: 'opencode 正在处理...' });
+      const opencode = require('./services/opencode');
 
-    db.chat.addMessage(sid, 'user', question, 'pi', 'ui', images);
-    let reply = '';
-    await orchestrator.chat(session, augmentedQuestion,
-      (delta) => {
-        reply += delta;
-        sendToRenderer('chat:delta', { sessionId: sid, text: delta });
-      },
-      (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent }),
-      () => {
-        if (reply) db.chat.addMessage(sid, 'assistant', reply, 'pi', 'ui');
-        sendToRenderer('chat:done', { sessionId: sid });
-      },
-      (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
-      images
-    );
+      // Build context: include kb context if specified
+      let context = '';
+      if (kbIds?.length) {
+        const kbNames = (await Promise.all(kbIds.map(id => db.kb.get(id)))).filter(Boolean).map(k => k.name).join(', ');
+        context = `[笔记库: ${kbNames}]`;
+      }
+
+      let reply = '';
+      await opencode.prompt(
+        context,
+        question,
+        projectDir || '',
+        (delta) => {
+          reply += delta;
+          sendToRenderer('chat:delta', { sessionId: sid, text: delta });
+        },
+        () => {
+          if (reply) db.chat.addMessage(sid, 'assistant', reply, 'opencode', 'ui');
+          sendToRenderer('chat:done', { sessionId: sid });
+        },
+        (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
+        (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent })
+      );
+    } else {
+      // ===== pi agent (default) =====
+      const session = await orchestrator.createSession(projectDir || '');
+      sendToRenderer('chat:status', { sessionId: sid, text: 'AI 正在分析问题...' });
+
+      const augmentedQuestion = kbIds?.length
+        ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.kb.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
+        : question;
+
+      let reply = '';
+      await orchestrator.chat(session, augmentedQuestion,
+        (delta) => {
+          reply += delta;
+          sendToRenderer('chat:delta', { sessionId: sid, text: delta });
+        },
+        (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent }),
+        () => {
+          if (reply) db.chat.addMessage(sid, 'assistant', reply, 'pi', 'ui');
+          sendToRenderer('chat:done', { sessionId: sid });
+        },
+        (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
+        images
+      );
+    }
   } catch (err) {
     sendToRenderer('chat:error', { sessionId: sid, text: err.message });
   }
@@ -541,7 +574,7 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
 
     if (agentName === 'opencode') {
       const oc = require('./services/opencode');
-      await oc.prompt(context, question, onDelta, onDone);
+      await oc.prompt(context, question, projectDir || "", onDelta, onDone, onError, onTool);
     } else if (agentName === 'claude') {
       const cc = require('./services/claude-code');
       await cc.prompt(context, question, projectDir || '', onDelta, onDone, onError);

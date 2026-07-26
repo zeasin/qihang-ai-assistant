@@ -82,6 +82,8 @@ function serveVueSpa(req, res) {
 function serveStatic(res, filePath) {
   const fullPath = path.join(DIST_DIR, filePath);
   if (fs.existsSync(fullPath)) {
+    const stat = fs.statSync(fullPath);
+    if (!stat.isFile()) return false;
     const ext = path.extname(fullPath);
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
     res.end(fs.readFileSync(fullPath));

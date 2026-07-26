@@ -56,8 +56,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Chat
   chat: {
-    send: (question, sessionId, projectDir, kbIds, images) =>
-      ipcRenderer.invoke('chat:send', { question, sessionId, projectDir, kbIds, images }),
+    send: (question, sessionId, projectDir, kbIds, images, agent) =>
+      ipcRenderer.invoke('chat:send', { question, sessionId, projectDir, kbIds, images, agent }),
     createSession: (sessionId, title, mode, source) =>
       ipcRenderer.invoke('chat:session:create', { id: sessionId, title, mode, source }),
     getSessions: () => ipcRenderer.invoke('chat:session:list'),
