@@ -16,3 +16,5 @@ memory.trace.db
 memory.trace.db.old
 nul
 target/
+.opencode/
+.claude/

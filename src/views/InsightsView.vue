@@ -66,6 +66,37 @@
         </div>
       </div>
 
+      <!-- 综合日报 -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">📊 综合日报</h3>
+        </div>
+        <div v-if="reports.length" class="report-list">
+          <div
+            v-for="(r, i) in reports"
+            :key="r.id"
+            class="report-item"
+            :class="{ active: expandedReport === i }"
+            @click="toggleReport(i, r)"
+          >
+            <div class="report-header">
+              <span class="report-date">{{ r.report_date || '日报' }}</span>
+              <span class="report-toggle">{{ expandedReport === i ? '▾' : '▸' }}</span>
+            </div>
+            <div class="report-summary">{{ (r.summary || '').slice(0, 100) }}</div>
+            <div class="report-time">{{ r.created_at }}</div>
+            <div v-if="expandedReport === i" class="report-detail">
+              <div class="preview" v-html="renderMarkdown(reportDetail)"></div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="empty-state">
+          <div class="empty-icon">📊</div>
+          <div class="empty-title">暂无日报</div>
+          <div class="empty-desc">每日 9:56 自动生成综合日报</div>
+        </div>
+      </div>
+
       <!-- 子项目分析 -->
       <div class="card">
         <div class="card-header">
@@ -197,12 +228,14 @@
         </div>
       </div>
     </div>
+
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { marked } from 'marked';
+
+const API = window.electronAPI;
 
 const selectedKb = ref('');
 const kbList = ref<any[]>([]);
@@ -216,6 +249,10 @@ const stats = ref({
   totalChats: 0
 });
 
+const reports = ref<any[]>([]);
+const expandedReport = ref<number | null>(null);
+const reportDetail = ref('');
+
 // ========== 项目、标签、热力图 ==========
 const projects = ref<any[]>([]);
 const tags = ref<any[]>([]);
@@ -228,11 +265,35 @@ const quickActionResult = ref<Record<string, string>>({});
 // ========== 工具函数 ==========
 const renderMarkdown = (text: string) => {
   if (!text) return '';
-  try {
-    return marked(text);
-  } catch (e) {
-    return text.replace(/\n/g, '<br>');
+  const lines = text.split('\n');
+  const out: string[] = [];
+  for (const line of lines) {
+    const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if (/^### /.test(line)) { out.push('<h3>' + esc.slice(4) + '</h3>'); continue; }
+    if (/^## /.test(line)) { out.push('<h2 style="font-size:16px;margin:12px 0 6px">' + esc.slice(3) + '</h2>'); continue; }
+    if (/^# /.test(line)) { out.push('<h1 style="font-size:18px;margin:16px 0 8px">' + esc.slice(2) + '</h1>'); continue; }
+    if (/^---$/.test(line)) { out.push('<hr>'); continue; }
+    if (/^☀️ /.test(line)) { out.push('<div style="font-size:20px;font-weight:700;margin:16px 0 8px">' + esc + '</div>'); continue; }
+    if (/^📅 /.test(line)) { out.push('<div style="font-size:14px;color:#64748b;margin-bottom:16px">' + esc + '</div>'); continue; }
+    if (/^✅ /.test(line)) { out.push('<div style="font-size:15px;font-weight:600;margin:12px 0 6px;color:#16a34a">' + esc + '</div>'); continue; }
+    if (/^⚠️ /.test(line)) { out.push('<div style="font-size:15px;font-weight:600;margin:12px 0 6px;color:#ef4444">' + esc + '</div>'); continue; }
+    if (/^📋 /.test(line)) { out.push('<div style="font-size:15px;font-weight:600;margin:12px 0 6px">' + esc + '</div>'); continue; }
+    if (/^⏰ /.test(line)) { out.push('<div style="font-size:15px;font-weight:600;margin:12px 0 6px">' + esc + '</div>'); continue; }
+    if (/^💬 /.test(line)) { out.push('<div style="font-size:15px;font-weight:600;margin:12px 0 6px">' + esc + '</div>'); continue; }
+    if (/^📝 /.test(line)) { out.push('<div style="font-size:15px;font-weight:600;margin:12px 0 6px">' + esc + '</div>'); continue; }
+    if (/^🗂️ /.test(line)) { out.push('<div style="font-size:15px;font-weight:600;margin:12px 0 6px">' + esc + '</div>'); continue; }
+    if (/^📊 /.test(line)) { out.push('<div style="font-size:15px;font-weight:600;margin:12px 0 6px">' + esc + '</div>'); continue; }
+    if (/^🌅 /.test(line)) { out.push('<div style="font-size:14px;color:#6366f1;margin:8px 0">' + esc + '</div>'); continue; }
+    if (/^🌤️ /.test(line)) { out.push('<div style="font-size:14px;color:#6366f1;margin:8px 0">' + esc + '</div>'); continue; }
+    if (/^🌇 /.test(line)) { out.push('<div style="font-size:14px;color:#6366f1;margin:8px 0">' + esc + '</div>'); continue; }
+    if (/^🌙 /.test(line)) { out.push('<div style="font-size:14px;color:#6366f1;margin:8px 0">' + esc + '</div>'); continue; }
+    if (/^💡 /.test(line)) { out.push('<div style="font-size:13px;color:#94a3b8;margin-top:8px">' + esc + '</div>'); continue; }
+    if (/^  - 🔴 /.test(line)) { out.push('<div style="padding:2px 0 2px 16px;color:#ef4444">' + esc.slice(6) + '</div>'); continue; }
+    if (/^  - /.test(line)) { out.push('<div style="padding:2px 0 2px 16px">' + esc.slice(4) + '</div>'); continue; }
+    if (line === '') { out.push('<br>'); continue; }
+    out.push('<div>' + esc + '</div>');
   }
+  return out.join('\n');
 };
 
 function formatSize(bytes: number): string {
@@ -282,6 +343,15 @@ function toggleProject(index: number) {
   expandedProject.value = expandedProject.value === index ? null : index;
 }
 
+function toggleReport(i: number, r: any) {
+  if (expandedReport.value === i) {
+    expandedReport.value = null;
+  } else {
+    expandedReport.value = i;
+    reportDetail.value = r.content || '无内容';
+  }
+}
+
 // ========== AI 分析项目 ==========
 async function analyzeProject(projectName: string) {
 }
@@ -291,7 +361,21 @@ async function runQuickAction(action: string) {
   quickActionResult.value[action] = '功能不可用（后端未连接）';
 }
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+    stats.value = await API.insights.stats();
+  } catch {}
+  try {
+    const list = await API.kb.list();
+    kbList.value = list;
+  } catch {}
+  try {
+    reports.value = await API.insights.reports();
+    if (reports.value.length) {
+      expandedReport.value = 0;
+      reportDetail.value = reports.value[0].content || '无内容';
+    }
+  } catch {}
 });
 </script>
 
@@ -529,6 +613,19 @@ onMounted(() => {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 12px;
 }
+
+/* 日报列表 */
+.report-list { display: flex; flex-direction: column; gap: 6px; }
+.report-item { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s; }
+.report-item:hover { border-color: var(--primary); }
+.report-item.active { border-color: var(--primary); background: rgba(99,102,241,0.03); }
+.report-header { display: flex; align-items: center; justify-content: space-between; }
+.report-date { font-size: 14px; font-weight: 600; color: var(--primary); }
+.report-toggle { font-size: 12px; color: var(--text-muted); }
+.report-summary { font-size: 13px; color: var(--text-secondary); margin-top: 4px; line-height: 1.4; }
+.report-time { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.report-detail { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.report-detail .preview { font-size: 13px; line-height: 1.8; }
 
 .project-card {
   background: white;

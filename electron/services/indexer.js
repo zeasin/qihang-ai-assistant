@@ -19,7 +19,8 @@ async function indexSingle(kbId) {
   walkDir(kb.path, files);
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf-8');
-    const docId = db.kb.insertDoc(kbId, file, content);
+    const stat = fs.statSync(file);
+    const docId = db.kb.insertDoc(kbId, file, content, stat.mtimeMs);
     const chunks = rag.chunkText(content);
     for (const chunk of chunks) {
       db.kb.insertChunk(docId, chunk);

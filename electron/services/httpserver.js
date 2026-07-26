@@ -141,6 +141,18 @@ tr:hover{background:#f8fafc}
 .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
 .status-dot.on{background:#22c55e}
 .status-dot.off{background:#94a3b8}
+input,textarea,select{width:100%;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box;margin-bottom:10px}
+input:focus,textarea:focus{border-color:#6366f1;outline:none}
+textarea{min-height:80px;resize:vertical}
+.btn{padding:8px 16px;border-radius:6px;border:none;font-size:13px;cursor:pointer;font-weight:500}
+.btn-primary{background:#6366f1;color:#fff}
+.btn-primary:hover{background:#4f46e5}
+.btn-secondary{background:#e2e8f0;color:#475569}
+.btn-secondary:hover{background:#cbd5e1}
+.btn-danger{background:#ef4444;color:#fff}
+.btn-sm{padding:4px 10px;font-size:12px}
+.flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+@media(max-width:640px){body{padding:12px}h1{font-size:18px}.nav a{padding:6px 12px;font-size:13px}th,td{padding:6px 8px;font-size:12px}}
 `;
 
 function remoteIndex() {
@@ -149,11 +161,13 @@ function remoteIndex() {
 <h1>📘 笔灵 AI 远程管理</h1>
 <div class="nav">
   <a href="/web/notes">📝 笔记浏览</a>
+  <a href="/web/reports">📊 综合日报</a>
   <a href="/web/datacenter">🗂️ 数据中心</a>
-  <a href="/web/planner">📋 提醒</a>
+  <a href="/web/planner">✅ 待办</a>
+  <a href="/web/quicknote">✏️ 随手记</a>
   <a href="/web/status">⚡ 服务状态</a>
 </div>
-<div class="card"><p style="font-size:14px;color:#64748b">选择上方功能查看数据。</p></div>
+<div class="card"><p style="font-size:14px;color:#64748b">选择上方功能查看或管理数据。</p></div>
 </div></body></html>`;
 }
 
@@ -495,19 +509,48 @@ init()
 }
 
 function plannerPage() {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>提醒 - 笔灵 AI</title><style>${LAYOUT_CSS}</style></head><body>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>待办 - 笔灵 AI</title><style>${LAYOUT_CSS}</style></head><body>
 <div class="container">
 <a class="back" href="/web">← 返回</a>
-<h1>📋 提醒</h1>
-<div id="tasks">加载中...</div>
-<div id="reminders" style="margin-top:12px">加载中...</div>
+<h1>✅ 待办</h1>
+<div id="content">加载中...</div>
 </div>
 <script>
-async function init(){
-try{const t=await(await fetch('/api/tasks')).json()
-document.getElementById('tasks').innerHTML='<div class="card"><h2>📌 定时任务</h2>'+(t.length?'<table><thead><tr><th>名称</th><th>类型</th><th>Cron</th><th>状态</th></tr></thead><tbody>'+t.map(r=>'<tr><td>'+r.name+'</td><td>'+(r.task_type||'-')+'</td><td><code>'+(r.cron_expression||'-')+'</code></td><td><span class="badge '+(r.enabled?'badge-green':'badge-gray')+'">'+(r.enabled?'启用':'停用')+'</span></td></tr>').join('')+'</tbody></table>':'<div class="empty">暂无任务</div>')+'</div>'}catch(e){document.getElementById('tasks').innerHTML='<div class="card"><div class="empty">加载失败</div></div>'}
-try{const r=await(await fetch('/api/reminders')).json()
-document.getElementById('reminders').innerHTML='<div class="card"><h2>⏰ 提醒</h2>'+(r.length?'<table><thead><tr><th>名称</th><th>消息</th><th>时间</th><th>状态</th></tr></thead><tbody>'+r.map(x=>'<tr><td>'+x.name+'</td><td>'+x.message+'</td><td>'+(x.time||'-')+'</td><td><span class="badge '+(x.enabled?'badge-green':'badge-gray')+'">'+(x.enabled?'启用':'停用')+'</span></td></tr>').join('')+'</tbody></table>':'<div class="empty">暂无提醒</div>')+'</div>'}catch(e){document.getElementById('reminders').innerHTML='<div class="card"><div class="empty">加载失败</div></div>'}}
+async function loadTodos(){try{const r=await(await fetch('/api/todos')).json()
+let h='<div class="card"><div class="flex" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">待办列表</h2><button class="btn btn-primary btn-sm" onclick="showAdd()">+ 新建</button></div>'
+if(r.length){h+='<table><thead><tr><th>标题</th><th>优先级</th><th>截止</th><th>状态</th><th>操作</th></tr></thead><tbody>'+r.map(t=>'<tr><td>'+t.title+'</td><td>'+['低','中','高'][{low:0,mid:1,high:2}[t.priority]||1]+'</td><td>'+(t.due_date||'-')+'</td><td><span class="badge '+(t.status==='done'?'badge-green':'badge-gray')+'">'+(t.status==='done'?'已完成':t.status==='in_progress'?'进行中':'待办')+'</span></td><td><button class="btn btn-sm btn-secondary" onclick="toggleTodo('+t.id+')">'+(t.status==='done'?' reopen':'完成')+'</button> <button class="btn btn-sm btn-danger" onclick="delTodo('+t.id+')">删除</button></td></tr>').join('')+'</tbody></table>'}else{h+='<div class="empty">暂无待办</div>'}
+h+='</div>';document.getElementById('content').innerHTML=h}catch(e){document.getElementById('content').innerHTML='<div class="card"><div class="empty">加载失败</div></div>'}}
+async function toggleTodo(id){try{const r=await(await fetch('/api/todos/'+id)).json();await fetch('/api/todos/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:r.status==='done'?'pending':'done'})});loadTodos()}catch{}}
+async function delTodo(id){if(!confirm('确定删除？'))return;await fetch('/api/todos/'+id,{method:'DELETE'});loadTodos()}
+function showAdd(){document.getElementById('content').innerHTML='<div class="card"><h2>新建待办</h2><input id="tdTitle" placeholder="标题"><input id="tdDue" type="date" placeholder="截止日期"><select id="tdPri"><option value="low">低优先级</option><option value="mid" selected>中优先级</option><option value="high">高优先级</option></select><div class="flex"><button class="btn btn-primary" onclick="saveAdd()">保存</button><button class="btn btn-secondary" onclick="loadTodos()">取消</button></div></div>'}
+async function saveAdd(){const title=document.getElementById('tdTitle').value;if(!title)return alert('请输入标题');await fetch('/api/todos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,due_date:document.getElementById('tdDue').value,priority:document.getElementById('tdPri').value})});loadTodos()}
+loadTodos()
+</script></body></html>`;
+}
+
+function reportsPage() {
+  return "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>综合日报 - 笔灵 AI</title><style>PLACEHOLDER_CSS</style></head><body>\n<div class=\"container\">\n<a class=\"back\" href=\"/web\">← 返回</a>\n<h1>📊 综合日报</h1>\n<div id=\"latest-report\"></div>\n<div id=\"report-list\"></div>\n</div>\n<script>\nfunction renderMarkdown(t) {\n  if (!t) return \"\";\n  return t\n    .replace(/&/g,\"&amp;\").replace(/</g,\"&lt;\").replace(/>/g,\"&gt;\")\n    .replace(/^### (.*$)/gm,\"<h3>$1</h3>\")\n    .replace(/^## (.*$)/gm,\"<h2 style=\\\"font-size:16px;margin:12px 0 6px\\\">$1</h2>\")\n    .replace(/^# (.*$)/gm,\"<h1 style=\\\"font-size:18px;margin:16px 0 8px\\\">$1</h1>\")\n    .replace(/^---$/gm,\"<hr>\")\n    .replace(/^☀️ (.*$)/gm,\"<div style=\\\"font-size:20px;font-weight:700;margin:16px 0 8px\\\">☀️ $1</div>\")\n    .replace(/^📅 (.*$)/gm,\"<div style=\\\"font-size:14px;color:#64748b;margin-bottom:16px\\\">📅 $1</div>\")\n    .replace(/^✅ (.*$)/gm,\"<div style=\\\"font-size:15px;font-weight:600;margin:12px 0 6px;color:#16a34a\\\">✅ $1</div>\")\n    .replace(/^⚠️ (.*$)/gm,\"<div style=\\\"font-size:15px;font-weight:600;margin:12px 0 6px;color:#ef4444\\\">⚠️ $1</div>\")\n    .replace(/^📋 (.*$)/gm,\"<div style=\\\"font-size:15px;font-weight:600;margin:12px 0 6px\\\">📋 $1</div>\")\n    .replace(/^⏰ (.*$)/gm,\"<div style=\\\"font-size:15px;font-weight:600;margin:12px 0 6px\\\">⏰ $1</div>\")\n    .replace(/^💬 (.*$)/gm,\"<div style=\\\"font-size:15px;font-weight:600;margin:12px 0 6px\\\">💬 $1</div>\")\n    .replace(/^📝 (.*$)/gm,\"<div style=\\\"font-size:15px;font-weight:600;margin:12px 0 6px\\\">📝 $1</div>\")\n    .replace(/^🗂️ (.*$)/gm,\"<div style=\\\"font-size:15px;font-weight:600;margin:12px 0 6px\\\">🗂️ $1</div>\")\n    .replace(/^📊 (.*$)/gm,\"<div style=\\\"font-size:15px;font-weight:600;margin:12px 0 6px\\\">📊 $1</div>\")\n    .replace(/^🌅 (.*$)/gm,\"<div style=\\\"font-size:14px;color:#6366f1;margin:8px 0\\\">🌅 $1</div>\")\n    .replace(/^🌤️ (.*$)/gm,\"<div style=\\\"font-size:14px;color:#6366f1;margin:8px 0\\\">🌤️ $1</div>\")\n    .replace(/^🌇 (.*$)/gm,\"<div style=\\\"font-size:14px;color:#6366f1;margin:8px 0\\\">🌇 $1</div>\")\n    .replace(/^🌙 (.*$)/gm,\"<div style=\\\"font-size:14px;color:#6366f1;margin:8px 0\\\">🌙 $1</div>\")\n    .replace(/^💡 (.*$)/gm,\"<div style=\\\"font-size:13px;color:#94a3b8;margin-top:8px\\\">💡 $1</div>\")\n    .replace(/^  - 🔴 (.*$)/gm,\"<div style=\\\"padding:2px 0 2px 16px;color:#ef4444\\\">🔴 $1</div>\")\n    .replace(/^  - (.*$)/gm,\"<div style=\\\"padding:2px 0 2px 16px\\\">$1</div>\")\n    .replace(/\\n\\n/g,\"<br>\");\n}\n\nvar allReports = [];\n\nasync function loadReports() {\n  try {\n    var r = await (await fetch(\"/api/reports\")).json();\n    allReports = r;\n    renderLatest();\n    renderList();\n  } catch(e) {\n    document.getElementById(\"latest-report\").innerHTML = \"<div class=\\\"card\\\"><div class=\\\"empty\\\">加载失败</div></div>\";\n  }\n}\n\nfunction renderLatest() {\n  var el = document.getElementById(\"latest-report\");\n  if (!allReports.length) { el.innerHTML = \"\"; return; }\n  var latest = allReports[0];\n  el.innerHTML = \"<div class=\\\"card\\\"><div class=\\\"card-header\\\"><h2 style=\\\"font-size:16px;font-weight:600;margin:0\\\">📊 \" + (latest.report_date || \"最新日报\") + \"</h2><span style=\\\"font-size:12px;color:#94a3b8\\\">\" + (latest.created_at || \"\") + \"</span></div><div style=\\\"line-height:1.8;font-size:14px;margin-top:12px\\\">\" + renderMarkdown(latest.content || \"\") + \"</div></div>\";\n}\n\nfunction renderList() {\n  var el = document.getElementById(\"report-list\");\n  if (!allReports.length) {\n    el.innerHTML = \"<div class=\\\"card\\\"><div class=\\\"empty\\\">暂无日报</div><div class=\\\"empty-desc\\\" style=\\\"font-size:13px;color:#94a3b8;margin-top:4px\\\">每日 9:56 自动生成综合日报</div></div>\";\n    return;\n  }\n  var h = \"<div class=\\\"card\\\"><h2 style=\\\"font-size:16px;font-weight:600;margin:0 0 12px 0\\\">📋 历史日报</h2>\";\n  h += \"<div style=\\\"display:flex;flex-direction:column;gap:6px\\\">\";\n  for (var i = 0; i < allReports.length; i++) {\n    var x = allReports[i];\n    var isActive = i === 0;\n    h += \"<div style=\\\"padding:12px 14px;border:1px solid \" + (isActive ? \"#6366f1\" : \"#e2e8f0\") + \";border-radius:6px;cursor:pointer;transition:all 0.15s;background:\" + (isActive ? \"rgba(99,102,241,0.03)\" : \"#fff\") + \"\\\" onclick=\\\"switchReport(\" + i + \")\\\" onmouseover=\\\"this.style.borderColor='#6366f1'\\\" onmouseout=\\\"this.style.borderColor='\" + (isActive ? \"#6366f1\" : \"#e2e8f0\") + \"'\\\">\";\n    h += \"<div style=\\\"display:flex;align-items:center;justify-content:space-between\\\">\";\n    h += \"<span style=\\\"font-size:14px;font-weight:600;color:#6366f1\\\">\" + (x.report_date || \"日报\") + \"</span>\";\n    h += \"<span style=\\\"font-size:12px;color:#94a3b8\\\">\" + (x.created_at || \"\") + \"</span>\";\n    h += \"</div>\";\n    h += \"<div style=\\\"font-size:13px;color:#64748b;margin-top:4px;line-height:1.4\\\">\" + (x.summary || \"\").slice(0, 100) + \"</div>\";\n    h += \"</div>\";\n  }\n  h += \"</div></div>\";\n  el.innerHTML = h;\n}\n\nfunction switchReport(index) {\n  var report = allReports[index];\n  var el = document.getElementById(\"latest-report\");\n  el.innerHTML = \"<div class=\\\"card\\\"><div class=\\\"card-header\\\"><h2 style=\\\"font-size:16px;font-weight:600;margin:0\\\">📊 \" + (report.report_date || \"日报\") + \"</h2><span style=\\\"font-size:12px;color:#94a3b8\\\">\" + (report.created_at || \"\") + \"</span></div><div style=\\\"line-height:1.8;font-size:14px;margin-top:12px\\\">\" + renderMarkdown(report.content || \"\") + \"</div></div>\";\n  renderList();\n}\n\nloadReports();\n</script></body></html>".replace('PLACEHOLDER_CSS', LAYOUT_CSS);
+}
+
+function quicknotePage() {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>随手记 - 笔灵 AI</title><style>${LAYOUT_CSS}</style></head><body>
+<div class="container">
+<a class="back" href="/web">← 返回</a>
+<h1>✏️ 随手记</h1>
+<div id="content">加载中...</div>
+</div>
+<script>
+async function init(){try{const kbs=await(await fetch('/api/kbs')).json()
+let h='<div class="card"><h2>选择笔记库</h2>'
+kbs.forEach(k=>{h+='<label style="display:flex;align-items:center;gap:8px;padding:8px 0;cursor:pointer"><input type="radio" name="kb" value="'+k.id+'" '+(kbs.length===1?'checked':'')+'><span>'+k.name+'</span></label>'})
+h+='</div><div class="card"><h2>记录内容</h2><input id="noteTitle" placeholder="标题（可选，留空自动生成）"><textarea id="noteContent" placeholder="写点什么..." rows="8"></textarea><div class="flex"><button class="btn btn-primary" onclick="saveNote()">保存</button></div></div><div id="result"></div>'
+document.getElementById('content').innerHTML=h}catch(e){document.getElementById('content').innerHTML='<div class="card"><div class="empty">加载失败</div></div>'}}
+async function saveNote(){const kb=document.querySelector('input[name="kb"]:checked');if(!kb)return alert('请选择笔记库')
+const title=document.getElementById('noteTitle').value.trim()||'随手记_'+new Date().toISOString().slice(0,10)
+const content=document.getElementById('noteContent').value;if(!content)return alert('请输入内容')
+try{const r=await(await fetch('/api/notes/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kb_id:parseInt(kb.value),title,content})})).json()
+if(r.ok){document.getElementById('result').innerHTML='<div class="card" style="background:#f0fdf4;border:1px solid #bbf7d0"><span style="color:#16a34a">✅ 已保存</span><div class="preview" style="margin-top:8px;font-size:12px">'+r.path+'</div></div>';document.getElementById('noteContent').value=''}else{document.getElementById('result').innerHTML='<div class="card" style="background:#fef2f2;border:1px solid #fecaca"><span style="color:#dc2626">❌ 保存失败: '+r.error+'</span></div>'}
+}catch(e){alert('保存失败: '+e.message)}}
 init()
 </script></body></html>`;
 }
@@ -550,6 +593,8 @@ async function handleRequest(req, res) {
   if (pathname === '/web/notes') return html(res, notesPage());
   if (pathname === '/web/datacenter') return html(res, datacenterPage());
   if (pathname === '/web/planner') return html(res, plannerPage());
+  if (pathname === '/web/reports') return html(res, reportsPage());
+  if (pathname === '/web/quicknote') return html(res, quicknotePage());
   if (pathname === '/web/status') return html(res, statusPage());
 
   // API endpoints
@@ -591,6 +636,34 @@ async function handleRequest(req, res) {
   }
   if (remMatch && req.method === 'DELETE') {
     try { dbRef.reminder.remove(remMatch[1]); try { require('./scheduler').removeReminder(remMatch[1]); } catch {} return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); }
+  }
+  if (pathname === '/api/reports') {
+    try { return json(res, dbRef.q("SELECT id, type, report_date, content, substr(content, 1, 200) as summary, created_at FROM ai_analysis WHERE type = 'daily_report' ORDER BY created_at DESC LIMIT 30")); } catch { return json(res, []); }
+  }
+  if (pathname === '/api/reports/detail' && params.id) {
+    try { return json(res, dbRef.qOne('SELECT * FROM ai_analysis WHERE id = ?', parseInt(params.id))); } catch { return json(res, null); }
+  }
+  if (pathname === '/api/todos' && req.method === 'GET') {
+    try { return json(res, dbRef.todo.list()); } catch { return json(res, []); }
+  }
+  if (pathname === '/api/todos' && req.method === 'POST') {
+    try { const body = JSON.parse(await decodeBody(req)); return json(res, dbRef.todo.add(body)); } catch (e) { return json(res, { error: e.message }, 400); }
+  }
+  const todoMatch = pathname.match(/^\/api\/todos\/(\d+)$/);
+  if (todoMatch && req.method === 'PUT') {
+    try { const body = JSON.parse(await decodeBody(req)); dbRef.todo.update(parseInt(todoMatch[1]), body); return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); }
+  }
+  if (todoMatch && req.method === 'DELETE') {
+    try { dbRef.todo.remove(parseInt(todoMatch[1])); return json(res, { ok: true }); } catch (e) { return json(res, { error: e.message }, 400); }
+  }
+  if (pathname === '/api/notes/write' && req.method === 'POST') {
+    try { const body = JSON.parse(await decodeBody(req)); const kbId = body.kb_id; const content = body.content; const title = body.title || '随手记_' + Date.now();
+      const kb = dbRef.kb.get(kbId); if (!kb) return json(res, { error: '笔记库不存在' }, 404);
+      const kbPath = kb.path || kb.notes_dir; if (!kbPath || !fs.existsSync(kbPath)) return json(res, { error: '笔记库路径不存在' }, 404);
+      const filePath = path.join(kbPath, title + '.md');
+      fs.writeFileSync(filePath, content, 'utf-8');
+      return json(res, { ok: true, path: filePath });
+    } catch (e) { return json(res, { error: e.message }, 500); }
   }
   if (pathname === '/api/status') {
     let s = false, i = false, f = false;

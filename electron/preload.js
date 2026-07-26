@@ -121,6 +121,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     remove: (id) => ipcRenderer.invoke('todo:remove', id),
   },
 
+  // Insights
+  insights: {
+    stats: () => ipcRenderer.invoke('insights:stats'),
+    reports: () => ipcRenderer.invoke('insights:reports'),
+  },
+
   // Config
   config: {
     get: () => ipcRenderer.invoke('config:get'),

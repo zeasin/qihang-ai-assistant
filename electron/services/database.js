@@ -365,6 +365,11 @@ function migrate() {
     setSchemaVersion(2);
   }
 
+  if (version < 3) {
+    try { db.run("ALTER TABLE documents ADD COLUMN file_mtime INTEGER"); } catch {}
+    setSchemaVersion(3);
+  }
+
   // Ensure notify_feishu column exists (for tables created before the column was added)
   try { db.run("ALTER TABLE collector_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
 
@@ -372,7 +377,7 @@ function migrate() {
   try {
     const existing = qOne("SELECT id FROM collector_tasks WHERE task_type = 'daily_report'");
     if (!existing) {
-      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_daily_report', '综合日报', '0 9 * * *', 'daily_report', '{\"kb_id\":1}', 1, 1)");
+      db.run("INSERT INTO collector_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_daily_report', '综合日报', '56 9 * * *', 'daily_report', '{\"kb_id\":1}', 1, 1)");
     }
   } catch (e) { console.error('[DB] seed task error:', e); }
 
@@ -437,8 +442,8 @@ const kb = {
     run('DELETE FROM knowledge_bases WHERE id = ?', id);
   },
   docCount: (kbId) => { const r = qOne('SELECT COUNT(*) as c FROM documents WHERE kb_id = ?', kbId); return r ? r.c : 0; },
-  insertDoc: (kbId, pathVal, content) => {
-    run('INSERT OR REPLACE INTO documents (kb_id, path, content, indexed_at) VALUES (?, ?, ?, datetime(\'now\'))', kbId, pathVal, content);
+  insertDoc: (kbId, pathVal, content, fileMtime) => {
+    run("INSERT OR REPLACE INTO documents (kb_id, path, content, indexed_at, file_mtime) VALUES (?, ?, ?, datetime('now'), ?)", kbId, pathVal, content, fileMtime || null);
     const r = qOne('SELECT id FROM documents WHERE kb_id = ? AND path = ?', kbId, pathVal);
     return r.id;
   },
@@ -649,4 +654,4 @@ function close() {
   if (db) { saveDb(); db.close(); db = null; }
 }
 
-module.exports = { getDb, close, configGet, configSet, kb, dm, ds, chat, task, reminder, todo, project };
+module.exports = { getDb, close, q, qOne, run, runMany, configGet, configSet, kb, dm, ds, chat, task, reminder, todo, project };

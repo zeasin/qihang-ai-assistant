@@ -562,6 +562,16 @@ ipcMain.handle('todo:list', () => db.todo.list());
 ipcMain.handle('todo:add', (_, data) => db.todo.add(data));
 ipcMain.handle('todo:update', (_, id, data) => { db.todo.update(id, data); return true; });
 ipcMain.handle('todo:remove', (_, id) => { db.todo.remove(id); return true; });
+ipcMain.handle('insights:stats', () => {
+  const fileCount = (db.qOne("SELECT COUNT(*) as c FROM documents") || {}).c || 0;
+  const chunkCount = (db.qOne("SELECT COUNT(*) as c FROM chunks") || {}).c || 0;
+  const totalChats = (db.qOne("SELECT COUNT(*) as c FROM messages") || {}).c || 0;
+  const todayModified = (db.qOne("SELECT COUNT(*) as c FROM documents WHERE indexed_at >= date('now')") || {}).c || 0;
+  return { fileCount, chunkCount, totalChats, todayModified };
+});
+ipcMain.handle('insights:reports', () => {
+  return db.q("SELECT id, type, report_date, content, substr(content, 1, 100) as summary, created_at FROM ai_analysis WHERE type = 'daily_report' ORDER BY created_at DESC LIMIT 10");
+});
 ipcMain.handle('service:startIndexer', () => {
   indexer.start();
   updateTrayMenu(getServicesStatus());
