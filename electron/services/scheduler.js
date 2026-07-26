@@ -583,73 +583,64 @@ const executors = {
       }
       if (!kbId) { logger.warn('[Scheduler] daily_report: no kb available'); return; }
       const today = getChinaDate();
-      const yesterday = getChinaDate(-1);
-      const todayStart = getChinaMidnight();
-      const weekAgo = getChinaDate(-7);
       const kbName = kbId ? (db.qOne("SELECT name FROM knowledge_bases WHERE id = ?", kbId) || {}).name || '笔记库' : '笔记库';
-      // Read custom prompt from config (user-editable template append)
-      const taskPrompt = db.configGet('daily_report_prompt') || '';
 
-      const docs = db.q("SELECT path, substr(content, 1, 200) as snippet FROM documents WHERE kb_id = ? AND file_mtime >= ? AND path NOT LIKE '%node_modules%' AND path NOT LIKE '%.git%' AND path NOT LIKE '%.opencode%'", kbId, todayStart);
-      const recCount = (db.qOne("SELECT COUNT(*) as c FROM data_center_records WHERE created_at >= ?", today) || {}).c || 0;
-      const recs = db.q("SELECT data_json, dataset_id FROM data_center_records WHERE created_at >= ? ORDER BY created_at DESC LIMIT 15", today);
-      const todos = db.q("SELECT title, status, due_date, priority FROM todos ORDER BY created_at DESC LIMIT 30");
-      const pendingTodos = todos.filter(t => t.status !== 'done');
-      const doneToday = db.q("SELECT title, priority FROM todos WHERE status = 'done' AND updated_at >= ?", today);
-      const overdueTodos = pendingTodos.filter(t => t.due_date && t.due_date < today);
-      const reminders = db.q("SELECT name, type, time, day_of_week, day_of_month, enabled FROM reminders WHERE enabled = 1 ORDER BY created_at DESC LIMIT 10");
-      const chats = db.q("SELECT substr(content, 1, 150) as snippet, created_at FROM messages WHERE created_at >= ? AND role = 'user' ORDER BY created_at DESC LIMIT 12", today);
-      const workLogs = db.q("SELECT data_json FROM data_center_records WHERE dataset_id IN (SELECT dataset_id FROM data_center_datasets WHERE name LIKE '%工作日志%' OR name LIKE '%日志%') AND created_at >= ? ORDER BY created_at DESC LIMIT 8", today);
-      const allDatasets = db.q("SELECT dataset_id, name FROM data_center_datasets ORDER BY name");
-      const doneWeek = db.q("SELECT date(updated_at) as d, COUNT(*) as c FROM todos WHERE status = 'done' AND updated_at >= ? GROUP BY date(updated_at) ORDER BY d", weekAgo);
-      const chatCountToday = chats.length;
-      const chatCountWeek = (db.qOne("SELECT COUNT(*) as c FROM messages WHERE created_at >= ? AND role = 'user'", weekAgo) || {}).c || 0;
-      const docCountToday = docs.length;
-      const recCountWeek = (db.qOne("SELECT COUNT(*) as c FROM data_center_records WHERE created_at >= ?", weekAgo) || {}).c || 0;
-      const hour = new Date().getHours();
-      let greeting = '🌅 早上好';
-      if (hour >= 12 && hour < 14) greeting = '🌤️ 中午好';
-      else if (hour >= 14 && hour < 18) greeting = '🌇 下午好';
-      else if (hour >= 18) greeting = '🌙 晚上好';
+      // ========== System Prompt (hardcoded, not user-editable) ==========
+      const SYSTEM_PROMPT = '你是一个专业的智能办公助理，请基于本地数据生成一份今天的综合日报。\n\n## 可用工具\n- get_today_info(): 获取今天的日期、知识库名称等基本信息\n- query_todos(status, priority, date_from, date_to, limit): 查询待办事项\n  - status 可选: done(已完成) / in_progress(进行中) / pending(待办)\n  - priority 可选: high(高) / mid(中) / low(低)\n  - date 格式: YYYY-MM-DD\n- query_messages(date_from, date_to, role, limit): 查询对话记录\n  - role 可选: user(用户) / assistant(AI)\n- query_documents(kb_id, date_from, date_to, limit): 查询知识库文档更新\n- query_data_records(dataset_name, date_from, date_to, limit): 查询数据中心记录\n- query_reminders(): 查询所有已启用的提醒\n\n## 执行步骤\n1. 先调用 get_today_info() 获取今天的日期和知识库信息\n2. 调用 query_todos 查询今日完成的任务(status=done, date_from=today)\n3. 调用 query_todos 查询未完成的待办(status=in_progress 和 status=pending)\n4. 调用 query_messages 查询今日的用户对话(date_from=today, role=user)\n5. 调用 query_documents 查询今日更新的文档(date_from=today)\n6. 调用 query_data_records 查询今日新增的记录(date_from=today)\n7. 调用 query_reminders 查看今日提醒\n8. 根据获取到的所有数据，综合用户的要求，生成一份综合日报\n\n请严格按照用户要求的格式生成日报，不要偏离用户的格式要求。';
 
-      // Pre-compute dataset names for template
-      const dsNameMap = {};
-      const dsIds = [...new Set(recs.map(r => r.dataset_id))];
-      for (const dsId of dsIds) {
-        const d = db.qOne("SELECT name FROM data_center_datasets WHERE dataset_id = ?", dsId);
-        dsNameMap[dsId] = d ? d.name : '未分类';
-      }
+      // ========== Default User Prompt (editable in config page) ==========
+      const DEFAULT_USER_PROMPT = '请按以下格式生成日报：\n\n## 日报格式要求\n使用 Markdown 格式，包含以下板块：\n\n### 1️⃣ 今日概览\n- ✅ 完成任务数量、📋 待办数量、💬 对话次数、📝 笔记更新数、🗂️ 新增记录数\n\n### 2️⃣ 今日完成\n- 列出今日完成的任务，高优先级的用 ⭐ 标记\n\n### 3️⃣ 待办事项\n- 逾期的用 🔴 标记并注明逾期天数\n- 进行中的用 🔄 标记\n- 高优先级的用 🔴 标记\n\n### 4️⃣ 对话与沟通\n- 今日对话次数和简要摘要\n\n### 5️⃣ 笔记与记录\n- 更新的文档和新增的记录\n\n### 6️⃣ 今日提醒\n- 已启用的提醒（如有）\n\n### 7️⃣ 综合评估\n- 根据完成任务、待办处理、知识沉淀等维度给出今日效率评分（0-100分）\n- 给出具体的改进行动建议\n\n## 注意事项\n- 数据为空的部分可以略过，不要编造数据\n- 评分要合理，基于实际数据给出\n- 建议要具体、可执行\n- 语言简洁专业，使用中文';
 
-      // Build report using editable template
-      const { text: r, score } = renderReport({
-        today, yesterday, greeting, kbName,
-        doneToday, pendingTodos, overdueTodos,
-        reminders, chats, workLogs, recs, recCount,
-        docs, docCountToday, doneWeek,
-        chatCountToday, chatCountWeek, recCountWeek,
-        todos, allDatasets, dsNameMap,
-      });
+      // User-editable part (from DB or default)
+      const userPart = db.configGet('daily_report_prompt') || DEFAULT_USER_PROMPT;
 
-      // Append custom content from user-editable prompt
-      if (taskPrompt) {
-        r += '\n\n---\n' + taskPrompt;
-      }
+      // Combine: system (hardcoded) + user (editable)
+      const fullPrompt = SYSTEM_PROMPT + '\n\n=== 用户格式要求 ===\n\n' + userPart;
 
-      db.run("INSERT INTO ai_analysis (kb_id, type, content, prompt, report_date, created_at) VALUES (?, 'daily_report', ?, ?, ?, datetime('now', '+8 hours'))",
-        kbId, r, taskPrompt, today);
-      logger.info(`[Scheduler] daily report generated for kb ${kbId}`);
+      logger.info('[Scheduler] Calling AI to generate daily report...');
+      const orchestrator = require('./orchestrator');
+      const r = await orchestrator.generateDailyReport(fullPrompt, kbId);
+      logger.info(`[Scheduler] AI report generated, length: ${r.length}`);
+
+      db.run("INSERT INTO ai_analysis (kb_id, type, content, prompt, report_date, created_at, updated_at) VALUES (?, 'daily_report', ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
+        kbId, r, fullPrompt, today);
+      logger.info(`[Scheduler] daily report saved for kb ${kbId}`);
 
       // Cleanup: keep only last N days of reports
       const retentionDays = parseInt(db.configGet('daily_report_retention_days') || '30', 10);
       db.run("DELETE FROM ai_analysis WHERE type = 'daily_report' AND report_date < ?", getChinaDate(-retentionDays));
 
-      sendNotification('每日报告', '📋 ' + pendingTodos.length + ' 项待办 · ' + recCount + ' 条新数据 · 📊 评分 ' + score + '/100');
+      sendNotification('每日报告', '✅ AI 综合日报已生成 - ' + today);
       if (task.notify_feishu) {
-        const card = buildReportCard({ today, doneToday, overdueTodos, pendingTodos, reminders, chats, workLogs, recs, recCount, docs, docCount: docs.length, kbName, hour: new Date().getHours() });
-        await sendFeishu(card);
+        const cardContent = '📊 AI 综合日报 **' + today + '**\\n\\n' + r.slice(0, 1800);
+        await sendFeishu({
+          header: { title: { tag: 'plain_text', content: '📊 综合日报 ' + today } },
+          elements: [{ tag: 'div', text: { tag: 'lark_md', content: cardContent } }]
+        });
       }
     } catch (e) {
       logger.error(`[Scheduler] daily_report error: ${e.message}`);
+      // Fallback: try the old template system
+      try {
+        logger.info('[Scheduler] Falling back to template-based report...');
+        const fallbackData = {
+          today: getChinaDate(), yesterday: getChinaDate(-1),
+          greeting: '🌅 早上好', kbName: kbId ? (db.qOne("SELECT name FROM knowledge_bases WHERE id = ?", kbId) || {}).name || '笔记库' : '笔记库',
+          doneToday: db.q("SELECT title, priority FROM todos WHERE status = 'done' AND updated_at >= ?", getChinaDate()),
+          pendingTodos: [],
+          overdueTodos: [],
+          reminders: [], chats: [], workLogs: [], recs: [], recCount: 0,
+          docs: [], docCountToday: 0, doneWeek: [],
+          chatCountToday: 0, chatCountWeek: 0, recCountWeek: 0,
+          todos: [], allDatasets: [], dsNameMap: {},
+        };
+        const { text: fallbackText } = renderReport(fallbackData);
+        db.run("INSERT INTO ai_analysis (kb_id, type, content, report_date, created_at, updated_at) VALUES (?, 'daily_report', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
+          kbId, fallbackText, getChinaDate());
+        logger.info('[Scheduler] Fallback report saved');
+      } catch (fallbackErr) {
+        logger.error(`[Scheduler] Fallback also failed: ${fallbackErr.message}`);
+      }
     }
   },
   'reminder': async (task) => {

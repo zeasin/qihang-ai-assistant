@@ -93,7 +93,7 @@
         <div v-else class="empty-state">
           <div class="empty-icon">📊</div>
           <div class="empty-title">暂无日报</div>
-          <div class="empty-desc">每日 9:56 自动生成综合日报</div>
+          <div class="empty-desc">{{ reportScheduleText }}</div>
         </div>
       </div>
 
@@ -233,7 +233,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 
 const API = window.electronAPI;
 
@@ -252,6 +252,19 @@ const stats = ref({
 const reports = ref<any[]>([]);
 const expandedReport = ref<number | null>(null);
 const reportDetail = ref('');
+const reportCron = ref('');
+
+const reportScheduleText = computed(() => {
+  if (reportCron.value) {
+    const parts = reportCron.value.split(' ');
+    if (parts.length >= 2) {
+      const hour = parts[1].padStart(2, '0');
+      const min = parts[0].padStart(2, '0');
+      return `每日 ${hour}:${min} 自动生成综合日报`;
+    }
+  }
+  return '每日自动生成综合日报';
+});
 
 // ========== 项目、标签、热力图 ==========
 const projects = ref<any[]>([]);
@@ -267,8 +280,60 @@ const renderMarkdown = (text: string) => {
   if (!text) return '';
   const lines = text.split('\n');
   const out: string[] = [];
-  for (const line of lines) {
-    const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^> /.test(line)) {
+      let cnt = line.slice(2)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+        .replace(/`(.+?)`/g,'<code>$1</code>')
+        .replace(/\[(.+?)\]\((.+?)\)/g,'<a href="$2">$1</a>');
+      out.push('<blockquote style="border-left:3px solid #6366f1;padding:6px 12px;margin:8px 0;background:#f8fafc;border-radius:4px;color:#475569">' + cnt + '</blockquote>');
+      continue;
+    }
+    if (/^\|/.test(line)) {
+      const trows: string[] = [line];
+      while (i + 1 < lines.length && /^\|/.test(lines[i + 1])) { i++; trows.push(lines[i]); }
+      let thtml = '';
+      if (trows.length > 1 && /^\|[-:| ]+\|$/.test(trows[1])) {
+        thtml += '<thead><tr>';
+        const hcells = trows[0].split('|').filter(c => c.trim() !== '');
+        for (const hc of hcells) {
+          const hv = hc.trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          thtml += '<th style="padding:6px 10px;border:1px solid #d0d5dd;background:#f0f0f5;font-weight:600;text-align:left;font-size:13px">' + hv + '</th>';
+        }
+        thtml += '</tr></thead><tbody>';
+        for (let tj = 2; tj < trows.length; tj++) {
+          const dcells = trows[tj].split('|').filter(c => c.trim() !== '');
+          thtml += '<tr>';
+          for (const dc of dcells) {
+            const dv = dc.trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            thtml += '<td style="padding:6px 10px;border:1px solid #d0d5dd;font-size:13px">' + dv + '</td>';
+          }
+          thtml += '</tr>';
+        }
+        thtml += '</tbody>';
+      } else {
+        thtml += '<tbody>';
+        for (const row of trows) {
+          const dcells = row.split('|').filter(c => c.trim() !== '');
+          thtml += '<tr>';
+          for (const dc of dcells) {
+            const dv = dc.trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            thtml += '<td style="padding:6px 10px;border:1px solid #d0d5dd;font-size:13px">' + dv + '</td>';
+          }
+          thtml += '</tr>';
+        }
+        thtml += '</tbody>';
+      }
+      out.push('<table style="width:100%;border-collapse:collapse;margin:8px 0">' + thtml + '</table>');
+      continue;
+    }
+    const esc = line
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+      .replace(/`(.+?)`/g,'<code>$1</code>')
+      .replace(/\[(.+?)\]\((.+?)\)/g,'<a href="$2">$1</a>');
     if (/^### /.test(line)) { out.push('<h3>' + esc.slice(4) + '</h3>'); continue; }
     if (/^## /.test(line)) { out.push('<h2 style="font-size:16px;margin:12px 0 6px">' + esc.slice(3) + '</h2>'); continue; }
     if (/^# /.test(line)) { out.push('<h1 style="font-size:18px;margin:16px 0 8px">' + esc.slice(2) + '</h1>'); continue; }
@@ -374,6 +439,14 @@ onMounted(async () => {
     if (reports.value.length) {
       expandedReport.value = 0;
       reportDetail.value = reports.value[0].content || '无内容';
+    }
+  } catch {}
+  // Load task list to get daily report schedule time
+  try {
+    const tasks = await API.task.list();
+    const dailyReport = tasks.find((t: any) => t.task_type === 'daily_report');
+    if (dailyReport && dailyReport.cron_expression) {
+      reportCron.value = dailyReport.cron_expression;
     }
   } catch {}
 });

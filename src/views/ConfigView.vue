@@ -55,7 +55,6 @@
               <div class="agent-version" v-if="agentStatus.opencode.installed">v{{ agentStatus.opencode.version }}</div>
               <div class="agent-version" v-else>未安装</div>
               <div class="agent-meta" v-if="agentStatus.opencode.installed">
-                <span class="badge badge-primary">{{ agentStatus.opencode.totalModels || 0 }} 模型</span>
                 <span v-for="p in agentStatus.opencode.providers || []" :key="p.name" class="badge badge-gray">{{ p.name }}({{ p.models }})</span>
               </div>
               <div class="agent-meta" v-else>
@@ -65,8 +64,6 @@
           </div>
         </div>
       </div>
-
-
 
       <!-- Feishu Webhook -->
       <div class="card">
@@ -118,56 +115,40 @@
           </div>
           <button class="btn btn-primary" @click="saveReportSettings">保存</button>
         </div>
-        <div style="margin-top:12px;">
-          <label style="font-size:12px;display:block;margin-bottom:4px;">自定义附加内容（追加到日报末尾，支持 Markdown）</label>
-          <textarea v-model="reportPrompt" class="form-control" rows="3" placeholder="例如：&#10;📌 本周重点：完成项目上线&#10;🎯 明日目标：优化首页加载速度" style="font-size:13px;"></textarea>
-        </div>
         <span v-if="reportSettingsStatus" class="text-muted" :style="{ color: reportSettingsStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }" style="margin-top:8px;display:block;">{{ reportSettingsStatus }}</span>
       </div>
 
       <!-- Report Template Editor -->
       <div class="card">
-        <h2>📝 日报生成模板</h2>
+        <h2>🤖 日报 AI 提示词</h2>
         <div class="text-muted mb-2">
-          编辑下方 JavaScript 函数来自定义日报的全部生成逻辑。
-          函数接收 <code>data</code> 对象，返回 <code>{ text: string, score: number }</code>。
-          置空可恢复默认模板。
+          编辑下方提示词（Prompt），AI 会据此生成日报的格式和内容。
+        </div>
+        <div class="info-box" style="background:#f0f7ff;border:1px solid #b3d4f7;border-radius:6px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.6;">
+          <strong>💡 提示词分两级：</strong><br>
+          <strong>系统级</strong>（不可修改）：工具定义、执行步骤 — AI 会自动调用工具查询待办、对话、笔记等数据<br>
+          <strong>用户级</strong>（下方编辑）：日报格式要求、展示方式、注意事项 — 按你的偏好定制
         </div>
         <div class="template-help" @click="showTemplateHelp = !showTemplateHelp">
           <span>{{ showTemplateHelp ? '▼' : '▶' }}</span>
-          📖 查看 data 可用变量
+          📖 查看系统级工具说明（供参考）
         </div>
         <div v-if="showTemplateHelp" class="template-help-content">
           <table class="vars-table">
-            <thead><tr><th>变量</th><th>类型</th><th>说明</th></tr></thead>
+            <thead><tr><th>工具</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td><code>today</code></td><td>string</td><td>今日日期 YYYY-MM-DD（中国时区）</td></tr>
-              <tr><td><code>yesterday</code></td><td>string</td><td>昨日日期</td></tr>
-              <tr><td><code>greeting</code></td><td>string</td><td>根据时段生成的问候语（早上/中午/下午/晚上）</td></tr>
-              <tr><td><code>kbName</code></td><td>string</td><td>笔记库名称</td></tr>
-              <tr><td><code>doneToday</code></td><td>array</td><td>今日完成的任务列表 [{title, priority}]</td></tr>
-              <tr><td><code>pendingTodos</code></td><td>array</td><td>未完成的待办 [{title, status, due_date, priority}]</td></tr>
-              <tr><td><code>overdueTodos</code></td><td>array</td><td>逾期的待办</td></tr>
-              <tr><td><code>reminders</code></td><td>array</td><td>启用的提醒列表</td></tr>
-              <tr><td><code>chats</code></td><td>array</td><td>今日对话 snippets</td></tr>
-              <tr><td><code>workLogs</code></td><td>array</td><td>今日工作日志（含 data_json）</td></tr>
-              <tr><td><code>recs</code></td><td>array</td><td>今日新增记录（含 data_json）</td></tr>
-              <tr><td><code>recCount</code></td><td>number</td><td>新增记录总数</td></tr>
-              <tr><td><code>docs</code></td><td>array</td><td>今日更新的文档 [{path, snippet}]</td></tr>
-              <tr><td><code>docCountToday</code></td><td>number</td><td>更新的文档数</td></tr>
-              <tr><td><code>doneWeek</code></td><td>array</td><td>本周每日完成统计 [{d, c}]</td></tr>
-              <tr><td><code>chatCountToday</code></td><td>number</td><td>今日对话次数</td></tr>
-              <tr><td><code>chatCountWeek</code></td><td>number</td><td>本周对话次数</td></tr>
-              <tr><td><code>recCountWeek</code></td><td>number</td><td>本周新增记录数</td></tr>
-              <tr><td><code>todos</code></td><td>array</td><td>全部待办（近 30 条）</td></tr>
-              <tr><td><code>allDatasets</code></td><td>array</td><td>全部数据集 [{dataset_id, name}]</td></tr>
-              <tr><td><code>dsNameMap</code></td><td>object</td><td>数据集 ID → 名称 映射</td></tr>
+              <tr><td><code>get_today_info()</code></td><td>获取今天的日期、知识库名称等基本信息</td></tr>
+              <tr><td><code>query_todos(status, date_from)</code></td><td>查询待办事项，可按状态( done/in_progress/pending )和日期范围过滤</td></tr>
+              <tr><td><code>query_messages(date_from, role)</code></td><td>查询对话记录，可按日期和角色( user/assistant )过滤</td></tr>
+              <tr><td><code>query_documents(kb_id, date_from)</code></td><td>查询知识库文档更新记录</td></tr>
+              <tr><td><code>query_data_records(dataset_name, date_from)</code></td><td>查询数据中心记录，可按数据集名称过滤</td></tr>
+              <tr><td><code>query_reminders()</code></td><td>查询所有已启用的提醒</td></tr>
             </tbody>
           </table>
         </div>
-        <textarea v-model="reportTemplate" class="code-editor" rows="20" spellcheck="false" placeholder="（空 = 使用默认模板）"></textarea>
+        <textarea v-model="reportPrompt" class="code-editor" rows="20" spellcheck="false" placeholder="例如：&#10;请按以下格式生成日报：&#10;&#10;## 日报格式要求&#10;使用 Markdown 格式，包含今日概览、完成事项、待办事项、对话沟通、综合评估等板块。&#10;&#10;## 注意事项&#10;- 数据为空的部分略过&#10;- 给出效率评分和建议&#10;- 语言简洁专业"></textarea>
         <div class="flex" style="gap:8px;margin-top:8px;">
-          <button class="btn btn-primary" @click="saveReportTemplate">保存模板</button>
+          <button class="btn btn-primary" @click="saveReportTemplate">保存提示词</button>
           <button class="btn btn-secondary" @click="resetReportTemplate">恢复默认</button>
           <span v-if="templateStatus" class="text-muted" :style="{ color: templateStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }" style="margin-left:8px;">{{ templateStatus }}</span>
         </div>
@@ -227,7 +208,6 @@ const tasks = ref<any[]>([]);
 const reportRetentionDays = ref('30');
 const reportPrompt = ref('');
 const reportSettingsStatus = ref('');
-const reportTemplate = ref('');
 const showTemplateHelp = ref(false);
 const templateStatus = ref('');
 
@@ -320,7 +300,6 @@ async function loadConfig() {
     feishuAppSecret.value = cfg.feishuAppSecret || '';
     reportRetentionDays.value = cfg.dailyReportRetentionDays || '30';
     reportPrompt.value = cfg.dailyReportPrompt || '';
-    reportTemplate.value = cfg.dailyReportTemplate || '';
   } catch { console.warn('加载配置失败'); }
 }
 
@@ -328,7 +307,6 @@ async function saveReportSettings() {
   try {
     await API.config.set({
       daily_report_retention_days: reportRetentionDays.value,
-      daily_report_prompt: reportPrompt.value,
     });
     reportSettingsStatus.value = '✅ 已保存';
     setTimeout(() => reportSettingsStatus.value = '', 3000);
@@ -339,7 +317,7 @@ async function saveReportSettings() {
 
 async function saveReportTemplate() {
   try {
-    await API.config.set({ daily_report_template: reportTemplate.value });
+    await API.config.set({ daily_report_prompt: reportPrompt.value });
     templateStatus.value = '✅ 已保存';
     setTimeout(() => templateStatus.value = '', 3000);
   } catch (e: any) {
@@ -348,7 +326,7 @@ async function saveReportTemplate() {
 }
 
 async function resetReportTemplate() {
-  reportTemplate.value = '';
+  reportPrompt.value = '';
   await saveReportTemplate();
 }
 

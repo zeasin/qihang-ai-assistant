@@ -16,10 +16,6 @@ async function ensurePi() {
   return piSdk;
 }
 
-// ========== Model Runtime Setup ==========
-
-// ========== Custom Tool Definitions ==========
-
 let TypeBox = null;
 async function ensureTypeBox() {
   if (!TypeBox) TypeBox = await import('typebox');
@@ -135,8 +131,6 @@ async function createTools(dbRef) {
 
   return [queryDataset, searchKb, listDatasets, getScheduled, readProjectFile];
 }
-
-// ========== Orchestration ==========
 
 const SYSTEM_PROMPT = `你是一位智能办公助理，可以帮助用户处理各种任务。
 
@@ -292,4 +286,209 @@ async function checkStatus() {
   }
 }
 
-module.exports = { createSession, chat, checkStatus, createTools };
+// ========== Daily Report Generation (AI-driven) ==========
+
+function getChinaDate(offsetDays = 0) {
+  const d = new Date();
+  const china = new Date(d.getTime() + 8 * 3600 * 1000 + offsetDays * 86400 * 1000);
+  return china.toISOString().slice(0, 10);
+}
+
+async function createReportTools(kbId) {
+  const sdk = await ensurePi();
+  await ensureTypeBox();
+  const { Type } = TypeBox;
+
+  const today = getChinaDate();
+
+  return [
+    sdk.defineTool({
+      name: 'query_todos',
+      label: 'Query Todos',
+      description: '查询待办事项（todos），可按状态( done / in_progress / pending )、优先级、日期范围过滤。不传参数则返回最近的待办。',
+      parameters: Type.Object({
+        status: Type.Optional(Type.String({ description: '过滤状态: done / in_progress / pending' })),
+        priority: Type.Optional(Type.String({ description: '过滤优先级: high / mid / low' })),
+        date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
+        date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
+        limit: Type.Optional(Type.Number({ description: '返回条数上限，默认30' })),
+      }),
+      execute: async (callId, params) => {
+        let sql = 'SELECT * FROM todos WHERE 1=1';
+        const sqlParams = [];
+        if (params.status) { sql += ' AND status = ?'; sqlParams.push(params.status); }
+        if (params.priority) { sql += ' AND priority = ?'; sqlParams.push(params.priority); }
+        if (params.date_from) { sql += ' AND (created_at >= ? OR updated_at >= ?)'; sqlParams.push(params.date_from, params.date_from); }
+        if (params.date_to) { sql += ' AND (created_at <= ? OR updated_at <= ?)'; sqlParams.push(params.date_to, params.date_to); }
+        sql += ' ORDER BY created_at DESC LIMIT ?';
+        sqlParams.push(params.limit || 30);
+        const rows = db.q(sql, ...sqlParams);
+        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无待办数据' }], details: { count: rows.length } };
+      },
+    }),
+
+    sdk.defineTool({
+      name: 'query_messages',
+      label: 'Query Messages',
+      description: '查询聊天/对话记录（messages）。可过滤日期范围、角色( user / assistant )。',
+      parameters: Type.Object({
+        date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
+        date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
+        role: Type.Optional(Type.String({ description: '角色: user / assistant' })),
+        limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
+      }),
+      execute: async (callId, params) => {
+        let sql = "SELECT id, session_id, role, substr(content, 1, 200) as content, created_at FROM messages WHERE 1=1";
+        const sqlParams = [];
+        if (params.role) { sql += ' AND role = ?'; sqlParams.push(params.role); }
+        if (params.date_from) { sql += ' AND created_at >= ?'; sqlParams.push(params.date_from); }
+        if (params.date_to) { sql += ' AND created_at <= ?'; sqlParams.push(params.date_to); }
+        sql += ' ORDER BY created_at DESC LIMIT ?';
+        sqlParams.push(params.limit || 20);
+        const rows = db.q(sql, ...sqlParams);
+        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无对话数据' }], details: { count: rows.length } };
+      },
+    }),
+
+    sdk.defineTool({
+      name: 'query_documents',
+      label: 'Query Documents',
+      description: '查询知识库中文档更新记录（documents）。可过滤知识库ID、日期范围。',
+      parameters: Type.Object({
+        kb_id: Type.Optional(Type.Number({ description: '知识库ID' })),
+        date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
+        date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
+        limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
+      }),
+      execute: async (callId, params) => {
+        let sql = "SELECT id, kb_id, path, substr(content, 1, 300) as content, file_mtime FROM documents WHERE 1=1";
+        const sqlParams = [];
+        if (params.kb_id) { sql += ' AND kb_id = ?'; sqlParams.push(params.kb_id); }
+        if (params.date_from) { sql += ' AND file_mtime >= ?'; sqlParams.push(params.date_from); }
+        if (params.date_to) { sql += ' AND file_mtime <= ?'; sqlParams.push(params.date_to); }
+        sql += " AND path NOT LIKE '%node_modules%' AND path NOT LIKE '%.git%' ORDER BY file_mtime DESC LIMIT ?";
+        sqlParams.push(params.limit || 20);
+        const rows = db.q(sql, ...sqlParams);
+        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无文档更新' }], details: { count: rows.length } };
+      },
+    }),
+
+    sdk.defineTool({
+      name: 'query_data_records',
+      label: 'Query Data Records',
+      description: '查询数据中心记录（data_center_records）。可过滤数据集名称、日期范围。',
+      parameters: Type.Object({
+        dataset_name: Type.Optional(Type.String({ description: '数据集名称关键词（模糊匹配）' })),
+        date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
+        date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
+        limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
+      }),
+      execute: async (callId, params) => {
+        let sql = "SELECT r.*, d.name as dataset_name FROM data_center_records r LEFT JOIN data_center_datasets d ON r.dataset_id = d.dataset_id WHERE 1=1";
+        const sqlParams = [];
+        if (params.dataset_name) {
+          sql += ' AND (d.name LIKE ? OR r.dataset_id IN (SELECT dataset_id FROM data_center_datasets WHERE name LIKE ?))';
+          sqlParams.push('%' + params.dataset_name + '%', '%' + params.dataset_name + '%');
+        }
+        if (params.date_from) { sql += ' AND r.created_at >= ?'; sqlParams.push(params.date_from); }
+        if (params.date_to) { sql += ' AND r.created_at <= ?'; sqlParams.push(params.date_to); }
+        sql += ' ORDER BY r.created_at DESC LIMIT ?';
+        sqlParams.push(params.limit || 20);
+        const rows = db.q(sql, ...sqlParams);
+        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无数据中心记录' }], details: { count: rows.length } };
+      },
+    }),
+
+    sdk.defineTool({
+      name: 'query_reminders',
+      label: 'Query Reminders',
+      description: '查询已启用的提醒事项（reminders）。',
+      parameters: Type.Object({}),
+      execute: async () => {
+        const rows = db.q("SELECT * FROM reminders WHERE enabled = 1 ORDER BY created_at DESC");
+        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无提醒' }], details: { count: rows.length } };
+      },
+    }),
+
+    sdk.defineTool({
+      name: 'get_today_info',
+      label: 'Get Today Info',
+      description: '获取当前日期信息（今天的中国日期、知识库名称等）。',
+      parameters: Type.Object({}),
+      execute: async () => {
+        const info = { today: getChinaDate(), yesterday: getChinaDate(-1), weekAgo: getChinaDate(-7), kbId: kbId || null, kbName: kbId ? (db.qOne("SELECT name FROM knowledge_bases WHERE id = ?", kbId) || {}).name || '笔记库' : '笔记库' };
+        return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }], details: {} };
+      },
+    }),
+  ];
+}
+
+async function generateDailyReport(promptText, kbId) {
+  const sdk = await ensurePi();
+  logger.info('[Orchestrator] generateDailyReport: creating session with report tools');
+
+  const reportTools = await createReportTools(kbId);
+  const result = await sdk.createAgentSession({
+    cwd: process.cwd(),
+    tools: [],
+    sessionManager: sdk.SessionManager.inMemory(),
+  });
+  const session = result.session;
+  if (result.modelFallbackMessage) {
+    logger.warn('[Orchestrator] Report model fallback: %s', result.modelFallbackMessage);
+  }
+
+  // Manually register custom tools in the session's internal registry
+  const toolNames = [];
+  for (const tool of reportTools) {
+    tool.renderCall = tool.renderCall || (() => '');
+    tool.renderResult = tool.renderResult || (() => '');
+    tool.promptSnippet = tool.promptSnippet || tool.description || '';
+    tool.promptGuidelines = tool.promptGuidelines || '';
+    session._toolRegistry.set(tool.name, tool);
+    session._toolDefinitions[tool.name] = tool;
+    toolNames.push(tool.name);
+  }
+  session.setActiveToolsByName(toolNames);
+  logger.info(`[Orchestrator] Registered ${toolNames.length} report tools: ${toolNames.join(', ')}`);
+
+  return new Promise((resolve, reject) => {
+    let fullText = '';
+    let hasTools = false;
+    const startTime = Date.now();
+
+    session.subscribe((event) => {
+      switch (event.type) {
+        case 'message_update': {
+          const msg = event.assistantMessageEvent;
+          if (msg?.type === 'text_delta') {
+            fullText += msg.delta;
+          }
+          break;
+        }
+        case 'tool_execution_start':
+          hasTools = true;
+          logger.info(`[Orchestrator] Report tool: ${event.toolName}`);
+          break;
+        case 'tool_execution_end':
+          logger.info(`[Orchestrator] Report tool end: ${event.toolName}`);
+          break;
+      }
+    });
+
+    session.prompt(promptText)
+      .then(() => {
+        const elapsed = Date.now() - startTime;
+        logger.info(`[Orchestrator] Report generated in ${elapsed}ms, length: ${fullText.length}, usedTools: ${hasTools}`);
+        setTimeout(() => { try { session.dispose(); } catch {} }, 1000);
+        resolve(fullText);
+      })
+      .catch((err) => {
+        logger.error(`[Orchestrator] Report generation FAILED: ${err.message}`);
+        try { session.dispose(); } catch {}
+        reject(err);
+      });
+  });
+}
+
+module.exports = { createSession, chat, checkStatus, createTools, generateDailyReport };
