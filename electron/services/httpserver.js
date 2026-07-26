@@ -172,31 +172,155 @@ function remoteIndex() {
 }
 
 function notesPage() {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>笔记浏览 - 笔灵 AI</title><style>${LAYOUT_CSS}</style></head><body>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>笔记浏览 - 笔灵 AI</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>${LAYOUT_CSS}
+.split-view{display:flex;gap:16px;min-height:calc(100vh - 120px)}
+.split-left{width:320px;flex-shrink:0;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-md);padding:12px;background:var(--bg-card);max-height:calc(100vh - 140px)}
+.split-right{flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-md);padding:16px;background:var(--bg-card);max-height:calc(100vh - 140px)}
+.kb-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.kb-tag{padding:4px 10px;border-radius:12px;font-size:12px;cursor:pointer;border:1px solid var(--border);transition:all .15s;background:var(--bg);color:var(--text-secondary)}
+.kb-tag.active{border-color:var(--primary);background:var(--primary);color:#fff}
+.kb-tag:hover{border-color:var(--primary)}
+.file-tree{list-style:none;padding:0;margin:0;font-size:13px}
+.file-tree ul{list-style:none;padding-left:16px;margin:0}
+.file-tree li{margin:2px 0}
+.file-tree .folder,.file-tree .file{padding:3px 8px;border-radius:4px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-tree .folder:hover,.file-tree .file:hover{background:var(--hover);color:var(--primary)}
+.file-tree .file.active{background:rgba(99,102,241,0.1);color:var(--primary);font-weight:500}
+.file-tree .children{display:none}
+.file-tree .children.open{display:block}
+.preview{line-height:1.8;font-size:14px;max-width:800px;margin:0 auto}
+.preview h1{font-size:22px;margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.preview h2{font-size:18px;margin:16px 0 8px}
+.preview h3{font-size:15px;margin:12px 0 6px}
+.preview p{margin:8px 0}
+.preview ul,.preview ol{padding-left:24px;margin:6px 0}
+.preview li{margin:3px 0}
+.preview code{background:var(--hover);padding:2px 6px;border-radius:4px;font-size:13px;font-family:Consolas,monospace}
+.preview pre{background:var(--hover);padding:12px;border-radius:6px;overflow-x:auto;margin:10px 0}
+.preview pre code{padding:0;background:none}
+.preview blockquote{border-left:3px solid var(--primary);padding:4px 12px;margin:8px 0;color:var(--text-secondary);background:var(--hover);border-radius:0 6px 6px 0}
+.preview table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+.preview th,.preview td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+.preview th{background:var(--hover);font-weight:600}
+.preview img{max-width:100%;border-radius:6px;margin:8px 0}
+.preview a{color:var(--primary)}
+.preview hr{margin:16px 0}
+.preview .empty{color:var(--text-muted);text-align:center;padding:40px 0}
+.note-title{font-size:16px;font-weight:600;padding-bottom:12px;margin-bottom:16px;border-bottom:1px solid var(--border);color:var(--text-primary)}
+@media(max-width:768px){.split-view{flex-direction:column}.split-left{width:auto;max-height:40vh}}
+</style></head><body>
 <div class="container">
 <a class="back" href="/web">← 返回</a>
 <h1>📝 笔记浏览</h1>
 <div id="content">加载中...</div>
 </div>
 <script>
-async function init(){const r=await fetch('/api/kbs');const kbs=await r.json()
-if(!kbs.length){document.getElementById('content').innerHTML='<div class="empty">暂无笔记库</div>';return}
-let h='<div class="card"><h2>笔记库</h2>'+kbs.map(k=>'<p style="margin:4px 0"><a href="/web/notes?kbId='+k.id+'" style="color:#6366f1;text-decoration:none;font-weight:500">'+k.name+'</a> <span style="color:#94a3b8;font-size:12px">'+k.path+'</span></p>').join('')+'</div>'
-const kbId=new URLSearchParams(location.search).get('kbId')
-if(kbId){h+='<div class="card"><h2>文件浏览</h2><div id="tree">加载目录...</div></div><div id="file-view"></div>';loadTree(kbId)}
-document.getElementById('content').innerHTML=h}
-async function loadTree(kbId){const r=await fetch('/api/notes/tree?kbId='+kbId);renderTree(await r.json(),document.getElementById('tree'))}
-function renderTree(items,el){if(!items.length){el.innerHTML='<div class="empty">空目录</div>';return}
-const ul=document.createElement('ul');ul.className='file-tree'
-items.forEach(item=>{const li=document.createElement('li')
-if(item.type==='folder'){li.innerHTML='<div class="folder">📁 '+item.name+'</div>';const cu=document.createElement('ul');cu.className='children'
-li.querySelector('.folder').onclick=async()=>{const o=cu.classList.toggle('open')
-if(o&&!cu.children.length){(await(await fetch('/api/notes/tree?dir='+encodeURIComponent(item.path))).json()).forEach(k=>{const c=document.createElement('li');c.innerHTML=k.type==='folder'?'<div class="folder">📁 '+k.name+'</div>':'<div class="file" onclick="openFile(\''+encodeURIComponent(k.path)+'\')">📄 '+k.name+'</div>';cu.appendChild(c)})}}
-li.appendChild(cu)}else{li.innerHTML='<div class="file" onclick="openFile(\''+encodeURIComponent(item.path)+'\')">📄 '+item.name+'</div>'}
-ul.appendChild(li)});el.appendChild(ul)}
-async function openFile(p){const d=await(await fetch('/api/notes/read?path='+p)).json()
-document.getElementById('file-view').innerHTML=d.ok?'<div class="card"><h2>📄 '+decodeURIComponent(p).split('/').pop()+'</h2><div class="preview">'+d.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div></div>':'<div class="card"><p style="color:#dc2626">'+d.error+'</p></div>'}
-init()
+var treeEl = null;
+
+async function init() {
+  var r = await fetch('/api/kbs');
+  var kbs = await r.json();
+  if (!kbs.length) { document.getElementById('content').innerHTML = '<div class="empty">暂无笔记库</div>'; return; }
+  var kbId = new URLSearchParams(location.search).get('kbId') || (kbs.length ? kbs[0].id : '');
+  var h = '<div class="split-view">';
+  h += '<div class="split-left"><div class="kb-list">' + kbs.map(function(k) {
+    var active = String(k.id) === String(kbId) ? ' active' : '';
+    return '<span class="kb-tag' + active + '" data-kbid="' + k.id + '" onclick="switchKb(' + k.id + ')">' + k.name + '</span>';
+  }).join('') + '</div><div id="tree">加载目录...</div></div>';
+  h += '<div class="split-right"><div id="file-view"><div class="preview"><div class="empty">← 从左侧选择笔记</div></div></div></div>';
+  h += '</div>';
+  document.getElementById('content').innerHTML = h;
+  if (kbId) loadTree(kbId);
+}
+
+function switchKb(id) {
+  history.replaceState(null, '', '/web/notes?kbId=' + id);
+  document.querySelectorAll('.kb-tag').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelector('.kb-tag[data-kbid="' + id + '"]').classList.add('active');
+  document.getElementById('file-view').innerHTML = '<div class="preview"><div class="empty">← 从左侧选择笔记</div></div>';
+  loadTree(id);
+}
+
+async function loadTree(kbId) {
+  var r = await fetch('/api/notes/tree?kbId=' + kbId);
+  var items = await r.json();
+  treeEl = document.getElementById('tree');
+  renderTree(items, treeEl);
+}
+
+function renderTree(items, el) {
+  if (!items.length) { el.innerHTML = '<div class="empty">空目录</div>'; return; }
+  var ul = document.createElement('ul');
+  ul.className = 'file-tree';
+  items.forEach(function(item) {
+    var li = document.createElement('li');
+    if (item.type === 'folder') {
+      li.innerHTML = '<div class="folder">📁 ' + item.name + '</div>';
+      var cu = document.createElement('ul');
+      cu.className = 'children';
+      li.querySelector('.folder').onclick = async function() {
+        var o = cu.classList.toggle('open');
+        if (o && !cu.children.length) {
+          var kids = await (await fetch('/api/notes/tree?dir=' + encodeURIComponent(item.path))).json();
+          kids.forEach(function(k) {
+            var c = document.createElement('li');
+            if (k.type === 'folder') {
+              c.innerHTML = '<div class="folder">📁 ' + k.name + '</div>';
+            } else {
+              c.innerHTML = '<div class="file" data-path="' + encodeURIComponent(k.path) + '">📄 ' + k.name + '</div>';
+            }
+            cu.appendChild(c);
+          });
+        }
+      };
+      li.appendChild(cu);
+    } else {
+      li.innerHTML = '<div class="file" data-path="' + encodeURIComponent(item.path) + '">📄 ' + item.name + '</div>';
+    }
+    ul.appendChild(li);
+  });
+  el.appendChild(ul);
+  if (!el._listener) {
+    el._listener = true;
+    el.addEventListener('click', function(e) {
+      var f = e.target.closest('.file');
+      if (f && f.dataset.path) {
+        document.querySelectorAll('.file-tree .file').forEach(function(n) { n.classList.remove('active'); });
+        f.classList.add('active');
+        openFile(f.dataset.path);
+      }
+    });
+  }
+}
+
+async function openFile(p) {
+  var d = await (await fetch('/api/notes/read?path=' + p)).json();
+  var title = decodeURIComponent(p).split(/[\\/]/).pop();
+  if (!d.ok) { document.getElementById('file-view').innerHTML = '<div class="preview"><div class="empty">' + d.error + '</div></div>'; return; }
+  var html;
+  if (typeof marked !== 'undefined') {
+    html = marked.parse(d.content);
+  } else {
+    html = d.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').split(String.fromCharCode(10)).join('<br>');
+  }
+  document.getElementById('file-view').innerHTML = '<div class="note-title">📄 ' + title + '</div><div class="preview">' + html + '</div>';
+  if (typeof renderMathInElement === 'function') {
+    renderMathInElement(document.querySelector('.preview'), { delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}] });
+  }
+}
+
+var qkb = new URLSearchParams(location.search).get('kbId');
+if (qkb) init(); else {
+  fetch('/api/kbs').then(function(r){return r.json()}).then(function(kbs){
+    if (kbs.length) location.href = '/web/notes?kbId=' + kbs[0].id;
+    else init();
+  });
+}
 </script></body></html>`;
 }
 
