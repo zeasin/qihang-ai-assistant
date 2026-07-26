@@ -63,6 +63,8 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { marked } from 'marked';
+import hljs from 'highlight.js';
+import 'highlight.js/styles/github.css';
 import TreeNode from '@/components/TreeNode.vue';
 
 const API = window.electronAPI;
@@ -77,14 +79,15 @@ const fileContent = ref('');
 const leftCollapsed = ref(false);
 
 const renderedContent = computed(() => {
-  if (!fileContent.value) {
-    return '';
+  if (!fileContent.value) return '';
+  const name = selectedFile.value?.name || '';
+  if (name.endsWith('.md')) {
+    try { return marked(fileContent.value); } catch { return '<pre>' + escapeHtml(fileContent.value) + '</pre>'; }
   }
-  try {
-    return marked(fileContent.value);
-  } catch {
-    return '<pre>' + escapeHtml(fileContent.value) + '</pre>';
-  }
+  const ext = name.includes('.') ? name.split('.').pop() || '' : '';
+  const lang = hljs.getLanguage(ext) ? ext : '';
+  const highlighted = lang ? hljs.highlight(fileContent.value, { language: lang }).value : escapeHtml(fileContent.value);
+  return '<pre><code class="hljs ' + (lang ? 'language-' + lang : '') + '">' + highlighted + '</code></pre>';
 });
 
 // 从 URL 查询参数同步 kbId
