@@ -140,10 +140,10 @@ const renderedContent = computed(() => {
 
 // 从 URL 查询参数同步 kbId
 watch(() => route.query.kbId, (newId) => {
-  if (newId && newId !== selectedKbId.value) {
-    selectedKbId.value = newId as string;
+  if (newId && newId !== String(selectedKbId.value)) {
+    selectedKbId.value = Number(newId);
     loadFileTree();
-    loadIndexedState(newId as string);
+    loadIndexedState(selectedKbId.value);
   }
 });
 
@@ -163,7 +163,7 @@ async function loadKbList() {
     const list = await API.project.list();
     kbList.value = list;
     // 优先使用 URL 中的 kbId
-    const urlKbId = route.query.kbId as string;
+    const urlKbId = Number(route.query.kbId);
     if (urlKbId && list.find((k: any) => k.id === urlKbId)) {
       selectedKbId.value = urlKbId;
     } else if (list.length > 0) {
@@ -207,7 +207,7 @@ async function selectFile(item: TreeNode) {
   }
 }
 
-async function loadIndexedState(projectId: string) {
+async function loadIndexedState(projectId: number | string) {
   if (!projectId) return;
   const proj = kbList.value.find(k => k.id === projectId);
   if (!proj) return;
