@@ -104,39 +104,36 @@ async function indexProjectChunks(projectId, db, onProgress) {
   return embedded;
 }
 
+const CACHED_SEGMENTER = (() => {
+  try { return new Intl.Segmenter('zh', { granularity: 'word' }); } catch { return null; }
+})();
+
 function tokenize(text) {
-  const tokens = [];
-  try {
-    const segmenter = new Intl.Segmenter('zh', { granularity: 'word' });
-    for (const s of segmenter.segment(text)) {
-      if (s.isWordLike && s.segment.length >= 2) tokens.push(s.segment.toLowerCase());
-    }
-  } catch {}
-  if (tokens.length === 0) {
-    for (const s of text) {
-      if (/[\u4e00-\u9fff\w]/.test(s)) tokens.push(s.toLowerCase());
+  const words = [];
+  if (CACHED_SEGMENTER) {
+    for (const s of CACHED_SEGMENTER.segment(text)) {
+      if (s.isWordLike && s.segment.length >= 2) words.push(s.segment.toLowerCase());
     }
   }
-  const charBigrams = [];
+  if (words.length === 0) {
+    for (const ch of text) {
+      if (/[\u4e00-\u9fff\w]/.test(ch)) words.push(ch.toLowerCase());
+    }
+  }
   const cleaned = text.replace(/[^\u4e00-\u9fff\w]/g, '').toLowerCase();
-  for (let i = 0; i < cleaned.length - 1; i++) {
-    charBigrams.push(cleaned.slice(i, i + 2));
-  }
-  return { words: [...new Set(tokens)], bigrams: [...new Set(charBigrams)] };
+  return { words: [...new Set(words)], phrase: cleaned };
 }
 
 function computeBM25(termFreq, docLen, avgDocLen, totalDocs, docFreq) {
-  const k1 = 1.5, b = 0.75;
+  const k1 = 1.2, b = 0.75;
   const idf = Math.log(1 + (totalDocs - docFreq + 0.5) / (docFreq + 0.5));
   const tf = (termFreq * (k1 + 1)) / (termFreq + k1 * (1 - b + b * (docLen / avgDocLen)));
   return idf * tf;
 }
 
 function keywordSearch(projectId, query, topK = 10, db) {
-  const { words, bigrams } = tokenize(query);
-  const allTerms = [...words, ...bigrams];
-  const uniqueTerms = [...new Set(allTerms)];
-  if (uniqueTerms.length === 0) return [];
+  const { words, phrase } = tokenize(query);
+  if (words.length === 0 && !phrase) return [];
 
   let rows;
   if (projectId) {
@@ -147,7 +144,6 @@ function keywordSearch(projectId, query, topK = 10, db) {
     rows = db.q(`SELECT c.id, c.content, d.path, d.file_mtime
       FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id`);
   }
-
   if (!rows.length) return [];
 
   const docLenList = rows.map(r => r.content.length);
@@ -155,34 +151,73 @@ function keywordSearch(projectId, query, topK = 10, db) {
   const totalDocs = rows.length;
 
   const termDocFreq = {};
-  for (const term of uniqueTerms) {
+  for (const term of words) {
     termDocFreq[term] = rows.filter(r => r.content.toLowerCase().includes(term)).length;
   }
+
+  const queryLower = query.toLowerCase();
 
   const scored = [];
   for (const r of rows) {
     const content = r.content.toLowerCase();
-    let totalScore = 0;
-    for (const term of uniqueTerms) {
-      const termFreq = (content.match(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+    const pathLower = r.path ? r.path.toLowerCase() : '';
+
+    let contentScore = 0;
+    for (const term of words) {
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const termFreq = (content.match(new RegExp(escaped, 'g')) || []).length;
       if (termFreq > 0) {
-        totalScore += computeBM25(termFreq, r.content.length, avgDocLen, totalDocs, Math.max(1, termDocFreq[term]));
+        contentScore += computeBM25(termFreq, r.content.length, avgDocLen, totalDocs, Math.max(1, termDocFreq[term]));
       }
     }
-    if (totalScore > 0) {
-      scored.push({
-        text: r.content,
-        source: r.path,
-        score: totalScore,
-        title: r.path ? r.path.split(/[\\/]/).pop() : '未知',
-      });
+
+    if (contentScore > 0 && phrase.length >= 2 && content.includes(phrase)) {
+      contentScore *= 1.8;
+    }
+
+    let pathScore = 0;
+    let pathTermHits = 0;
+    for (const term of words) {
+      if (pathLower.includes(term)) {
+        pathTermHits++;
+        pathScore += 1;
+      }
+    }
+    if (pathLower.includes(phrase) && phrase.length >= 2) {
+      pathScore += 3;
+      pathTermHits += 2;
+    }
+
+    const totalScore = contentScore + pathScore * 2;
+    if (totalScore === 0) continue;
+
+    const title = r.path ? r.path.split(/[\\/]/).pop() : '未知';
+    scored.push({ text: r.content, source: r.path, score: totalScore, title, pathTermHits });
+  }
+
+  scored.sort((a, b) => {
+    if (b.pathTermHits !== a.pathTermHits) return b.pathTermHits - a.pathTermHits;
+    return b.score - a.score;
+  });
+
+  const seenFiles = new Map();
+  for (const s of scored) {
+    const key = s.source;
+    if (seenFiles.has(key)) {
+      if (s.score > seenFiles.get(key).score) seenFiles.set(key, s);
+    } else {
+      seenFiles.set(key, s);
     }
   }
 
-  scored.sort((a, b) => b.score - a.score);
-  const maxScore = scored.length > 0 ? scored[0].score : 1;
-  for (const s of scored) s.score = s.score / maxScore;
-  return scored.slice(0, topK).filter(c => c.score > 0.05);
+  const deduped = [...seenFiles.values()];
+  deduped.sort((a, b) => {
+    if (b.pathTermHits !== a.pathTermHits) return b.pathTermHits - a.pathTermHits;
+    return b.score - a.score;
+  });
+  const maxScore = deduped.length > 0 ? deduped[0].score : 1;
+  for (const s of deduped) s.score = s.score / maxScore;
+  return deduped.slice(0, topK).filter(c => c.score > 0.01);
 }
 
 async function hybridSearch(projectId, query, topK = 10, db) {
@@ -201,8 +236,7 @@ async function hybridSearch(projectId, query, topK = 10, db) {
     }
     if (rows.length) {
       vectorResults = rows.map(r => ({
-        text: r.content,
-        source: r.path,
+        text: r.content, source: r.path,
         score: cosineSimilarity(queryEmb, JSON.parse(r.embedding)),
         title: r.path ? r.path.split(/[\\/]/).pop() : '未知',
         _type: 'vector',
@@ -212,7 +246,7 @@ async function hybridSearch(projectId, query, topK = 10, db) {
     }
   } catch {}
 
-  const keywordResults = keywordSearch(projectId, query, topK * 2, db);
+  const keywordResults = keywordSearch(projectId, query, topK * 3, db);
   for (const r of keywordResults) r._type = 'keyword';
 
   if (!vectorResults.length) return keywordResults.slice(0, topK);
@@ -220,23 +254,32 @@ async function hybridSearch(projectId, query, topK = 10, db) {
 
   const merged = new Map();
   for (const r of vectorResults) {
-    const key = r.source + '::' + r.text.slice(0, 100);
-    merged.set(key, { ...r, score: r.score * 0.7, _types: ['vector'] });
-  }
-  for (const r of keywordResults) {
-    const key = r.source + '::' + r.text.slice(0, 100);
+    const key = r.source;
     if (merged.has(key)) {
       const existing = merged.get(key);
-      existing.score += r.score * 0.3;
-      existing._types.push('keyword');
+      if (r.score > existing.vScore) existing.vScore = r.score;
     } else {
-      merged.set(key, { ...r, score: r.score * 0.3, _types: ['keyword'] });
+      merged.set(key, { source: r.source, text: r.text, title: r.title, vScore: r.score, kScore: 0 });
     }
+  }
+  for (const r of keywordResults) {
+    const key = r.source;
+    if (merged.has(key)) {
+      merged.get(key).kScore = Math.max(merged.get(key).kScore, r.score);
+    } else {
+      merged.set(key, { source: r.source, text: r.text, title: r.title, vScore: 0, kScore: r.score });
+    }
+  }
+
+  for (const [k, v] of merged) {
+    const rankV = 1 / (2 + (1 - v.vScore) * 100);
+    const rankK = 1 / (2 + (1 - v.kScore) * 100);
+    v.score = rankV * 0.6 + rankK * 0.4;
   }
 
   const finalResults = [...merged.values()];
   finalResults.sort((a, b) => b.score - a.score);
-  return finalResults.slice(0, topK).filter(c => c.score > 0.05);
+  return finalResults.slice(0, topK).filter(c => c.score > 0.01);
 }
 
 /**

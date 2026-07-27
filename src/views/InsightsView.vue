@@ -305,11 +305,12 @@ const performSearch = async () => {
   try {
     searched.value = true;
       const results = await API.kb.search("", query);
+    const stripMarkdown = (s: string) => s.replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1').replace(/^#{1,6}\s+/gm, '').replace(/(\*{1,3}|_{1,3})/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/>\s+/g, '').replace(/\n{3,}/g, '\n\n').trim();
     searchResults.value = results.map((r: any, i: number) => ({
       id: i,
       title: r.source ? r.source.split(/[\\/]/).pop() : '未知',
       path: r.source || '',
-      preview: (r.text || '').slice(0, 200),
+      preview: stripMarkdown(r.text || '').slice(0, 200),
       score: r.score ? (r.score * 100).toFixed(1) + '%' : '0%'
     }));
   } catch {
