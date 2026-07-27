@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 
-const LOG_DIR = path.join(require('os').homedir(), '.biling-ai', 'logs');
+const LOG_DIR = path.join(require('os').homedir(), '.qihang-work-ai', 'logs');
 
 const MAX_SIZE = 5 * 1024 * 1024;
 const MAX_FILES = 5;

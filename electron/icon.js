@@ -60,7 +60,7 @@ function createTrayIcon() {
     }
   }
   const pngBuf = createPngBuffer(s, s, pixels);
-  const iconPath = path.join(require('os').homedir(), '.biling-ai', 'tray-icon.png');
+  const iconPath = path.join(require('os').homedir(), '.qihang-work-ai', 'tray-icon.png');
   try {
     if (!fs.existsSync(path.dirname(iconPath))) fs.mkdirSync(path.dirname(iconPath), { recursive: true });
     fs.writeFileSync(iconPath, pngBuf);

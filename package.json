@@ -1,14 +1,14 @@
 {
-  "name": "biling-ai",
+  "name": "qihang-work-ai",
   "version": "0.1.0",
-  "description": "笔灵 AI — 个人笔记智能体",
+  "description": "启航AI工作台",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"electron . --dev\"",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "vite build && npx electron-builder"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",
@@ -39,15 +39,11 @@
     "vue-tsc": "^2.2.0"
   },
   "build": {
-    "appId": "com.biling.biling-ai",
-    "productName": "笔灵 AI",
+    "appId": "com.qihang.qihang-ai-workbench",
+    "productName": "启航AI工作台",
     "directories": {
       "output": "release"
     },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*"
-    ],
     "win": {
       "target": "nsis"
     },
