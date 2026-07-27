@@ -53,7 +53,7 @@ async function embed(text, config) {
     if (data.embeddings && data.embeddings.length > 0) return data.embeddings[0];
     throw new Error('嵌入 API 返回格式异常');
   }
-  const ollama = require('ollama').default;
+  const ollama = require('ollama');
   const client = new ollama.Ollama({ host: config.host });
   const res = await client.embed({ model: config.model, input: text });
   return res.embeddings[0];

@@ -15,13 +15,11 @@
         >
           <div
             class="project-header"
-            @click="toggleProject(project.id)"
             :class="{ expanded: expandedProjects.has(project.id) }"
           >
-            <span class="project-arrow">{{ expandedProjects.has(project.id) ? '▼' : '▶' }}</span>
-            <span class="project-icon">📁</span>
-            <span class="project-name">{{ project.name }}</span>
-            <span class="project-badge" v-if="project.dir">{{ project.dir.split('/').pop() || project.dir.split('\\').pop() }}</span>
+            <span class="project-arrow" @click="toggleProject(project.id)">{{ expandedProjects.has(project.id) ? '▼' : '▶' }}</span>
+            <span class="project-icon" @click="selectProject(project)">📁</span>
+            <span class="project-name" @click="selectProject(project)">{{ project.name }}</span>
             <span class="project-actions">
               <span class="project-edit-btn" @click.stop="openEditProject(project)" title="编辑项目">✏️</span>
               <span class="project-delete-btn" @click.stop="deleteProject(project)" title="删除项目">🗑️</span>
@@ -175,7 +173,22 @@
             </div>
           </div>
         </div>
-      </template>
+<!-- 项目详情弹窗 -->
+  <div v-if="showDetailModal" class="modal-overlay" @click.self="closeDetailModal">
+    <div class="project-detail-modal">
+      <div class="project-detail-header">
+        <span class="project-detail-icon">📁</span>
+        <span class="project-detail-name">{{ detailProject?.name }}</span>
+        <button class="modal-close" @click="closeDetailModal">✕</button>
+      </div>
+      <div class="project-detail-body">
+        <div class="detail-row"><span class="detail-label">类型</span><span class="detail-value">{{ detailProject?.type }}</span></div>
+        <div class="detail-row"><span class="detail-label">文件夹</span><span class="detail-value">{{ detailProject?.dir || '未设置' }}</span></div>
+        <div class="detail-row" v-if="detailProject?.description"><span class="detail-label">描述</span><span class="detail-value">{{ detailProject?.description }}</span></div>
+      </div>
+    </div>
+  </div>
+</template>
     </div>
 
     <!-- ========== 新建/编辑项目弹窗 ========== -->
@@ -235,6 +248,9 @@ const API = window.electronAPI;
 
 // ========== 状态 ==========
 const projects = ref<any[]>([]);
+const selectedProject = ref<any>(null);
+const showDetailModal = ref(false);
+const detailProject = ref<any>(null);
 const expandedProjects = reactive(new Set<number>());
 const projectSessions = reactive<Record<number, any[]>>({});
 const currentSessionId = ref('');
@@ -304,6 +320,21 @@ async function loadMessages(sessionId: string) {
   scrollToBottom();
 }
 
+// ========== 项目选择 ==========
+function selectProject(project: any) {
+  selectedProject.value = project;
+  detailProject.value = project;
+  showDetailModal.value = true;
+  if (!projectSessions[project.id]) {
+    loadSessions(project.id);
+  }
+}
+
+function closeDetailModal() {
+  showDetailModal.value = false;
+  detailProject.value = null;
+}
+
 // ========== 项目展开/折叠 ==========
 function toggleProject(projectId: number) {
   if (expandedProjects.has(projectId)) {
@@ -337,8 +368,7 @@ async function newSession(projectId: number) {
     messages.value = [];
     inputText.value = '';
     await loadSessions(projectId);
-    // 自动展开项目并选中新对话
-    expandedProjects.add(projectId);
+    selectedProject.value = projects.value.find(p => p.id === projectId) || null;
     checkAgentStatus();
     nextTick(() => inputRef.value?.focus());
   } catch (e: any) {
@@ -421,7 +451,7 @@ async function restoreCodingState() {
     if (!project) return false;
     
     // 展开项目并加载对话列表
-    expandedProjects.add(projectId);
+    selectedProject.value = project;
     await loadSessions(projectId);
     
     // 找到对应的对话
@@ -500,7 +530,7 @@ async function sendMessage() {
       return;
     }
     const firstProject = projects.value[0];
-    expandedProjects.add(firstProject.id);
+    selectedProject.value = firstProject;
     await loadSessions(firstProject.id);
     await newSession(firstProject.id);
     // 等 session 创建完成后再发送
@@ -706,9 +736,10 @@ async function saveProject() {
     }
     closeProjectModal();
     await loadProjects();
-    // 自动展开新项目
+    // 选中新项目
     if (projects.value.length > 0 && !editingProject.value) {
-      expandedProjects.add(projects.value[0].id);
+      selectedProject.value = projects.value[0];
+      loadSessions(projects.value[0].id);
     }
   } catch (e: any) {
     alert('保存失败: ' + (e.message || ''));
@@ -726,7 +757,9 @@ async function deleteProject(project: any) {
       currentSession.value = null;
       messages.value = [];
     }
-    expandedProjects.delete(project.id);
+    if (selectedProject.value?.id === project.id) {
+      selectedProject.value = null;
+    }
     delete projectSessions[project.id];
     await loadProjects();
   } catch (e: any) {
@@ -811,13 +844,8 @@ onBeforeUnmount(() => {
 .project-header:hover {
   background: #f0f0f0;
 }
-
-.project-arrow {
-  font-size: 10px;
-  color: #94a3b8;
-  width: 12px;
-  text-align: center;
-  flex-shrink: 0;
+.project-header.active {
+  background: rgba(99,102,241,0.08);
 }
 
 .project-icon {
@@ -833,15 +861,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.project-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: #e2e8f0;
-  color: #64748b;
-  flex-shrink: 0;
 }
 
 .project-actions {
@@ -1534,4 +1553,15 @@ onBeforeUnmount(() => {
 .input-with-btn .form-control {
   flex: 1;
 }
+
+/* 项目详情卡片 */
+/* 项目详情弹窗 */
+.project-detail-modal { background: white; border-radius: var(--radius-lg); padding: 24px; width: 420px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
+.project-detail-modal .project-detail-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.project-detail-modal .project-detail-icon { font-size: 24px; }
+.project-detail-modal .project-detail-name { flex: 1; font-size: 18px; font-weight: 600; color: var(--text-primary); }
+.project-detail-modal .project-detail-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--hover); border-radius: var(--radius-sm); }
+.project-detail-modal .detail-row { display: flex; gap: 8px; font-size: 13px; }
+.project-detail-modal .detail-label { color: var(--text-muted); flex-shrink: 0; min-width: 56px; }
+.project-detail-modal .detail-value { color: var(--text-primary); word-break: break-all; }
 </style>

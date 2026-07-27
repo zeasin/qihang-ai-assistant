@@ -530,6 +530,7 @@ function handleWorkerMessages(worker, sendProgress, resolve, track) {
         worker.send({ type: 'embed', projectId: msg.projectId, chunks: rows, config: embedConfig });
       } else if (msg.type === 'embedding') {
         db.runRaw('UPDATE kb_chunks SET embedding = ? WHERE id = ?', [JSON.stringify(msg.vector), msg.chunkId]);
+        if (++_docBatchCount % 10 === 0) db.save();
       } else if (msg.type === 'embedDone') {
         db.save();
         if (track) track.embedded = msg.embedded;
@@ -906,7 +907,8 @@ ipcMain.handle('insights:stats', () => {
   const todoPending = (db.qOne("SELECT COUNT(*) as c FROM plan_todos WHERE status IN ('pending','in_progress')") || {}).c || 0;
   const todoOverdue = (db.qOne("SELECT COUNT(*) as c FROM plan_todos WHERE due_date != '' AND due_date < date('now','+8 hours') AND status IN ('pending','in_progress')") || {}).c || 0;
   const remindersActive = (db.qOne("SELECT COUNT(*) as c FROM plan_reminders WHERE enabled = 1") || {}).c || 0;
-  return { fileCount, chunkCount, totalChats, todayModified, projectCount, todoPending, todoOverdue, remindersActive };
+  const todayDataRecords = (db.qOne("SELECT COUNT(*) as c FROM data_center_records WHERE created_at >= datetime('now', '+8 hours', 'start of day')") || {}).c || 0;
+  return { fileCount, chunkCount, totalChats, todayModified, projectCount, todoPending, todoOverdue, remindersActive, todayDataRecords };
 });
 ipcMain.handle('insights:reports', () => {
   return db.q("SELECT id, type, report_date, content, substr(content, 1, 100) as summary, created_at FROM ai_analysis WHERE type = 'daily_report' ORDER BY created_at DESC LIMIT 10");
@@ -1041,6 +1043,16 @@ ipcMain.handle('insights:indexerInfo', () => {
   };
 });
 
+ipcMain.handle('insights:libraryStats', () => {
+  const projects = db.project.list('note');
+  return projects.map(p => {
+    const docCount = (db.qOne("SELECT COUNT(*) as c FROM kb_documents WHERE project_id = ?", p.id) || {}).c || 0;
+    const chunkCount = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)", p.id) || {}).c || 0;
+    const embeddedCount = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE embedding IS NOT NULL AND doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)", p.id) || {}).c || 0;
+    return { projectId: p.id, name: p.name, docCount, chunkCount, embeddedCount };
+  });
+});
+
 // --- Dialog ---
 ipcMain.handle('dialog:openDirectory', async () => {
   if (!mainWindow) return null;
@@ -1092,6 +1104,10 @@ ipcMain.handle('log:files', () => {
 });
 ipcMain.handle('log:readFile', (_, { fileName, options }) => {
   return logger.readFile(fileName, options || {});
+});
+ipcMain.handle('log:clear', () => {
+  logger.clearLog();
+  return true;
 });
 ipcMain.handle('log:dir', () => {
   return logger.getLogDir();

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     lines: (options) => ipcRenderer.invoke('log:lines', options),
     files: () => ipcRenderer.invoke('log:files'),
     readFile: (fileName, options) => ipcRenderer.invoke('log:readFile', { fileName, options }),
+    clear: () => ipcRenderer.invoke('log:clear'),
     dir: () => ipcRenderer.invoke('log:dir'),
   },
   feishu: {
@@ -137,6 +138,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     reports: () => ipcRenderer.invoke('insights:reports'),
     weeklyReports: () => ipcRenderer.invoke('insights:weeklyReports'),
     indexerInfo: () => ipcRenderer.invoke('insights:indexerInfo'),
+    libraryStats: () => ipcRenderer.invoke('insights:libraryStats'),
     clearIndex: () => ipcRenderer.invoke('insights:clearIndex'),
   },
 

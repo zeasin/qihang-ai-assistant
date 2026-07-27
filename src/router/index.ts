@@ -37,7 +37,7 @@ const routes = [
   {
     path: '/coding',
     name: 'Coding',
-    component: () => import('@/views/CodingWorkbenchView.vue')
+    component: () => import('@/views/ProjectWorkbenchView.vue')
   },
   {
     path: '/config',

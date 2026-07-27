@@ -6,35 +6,45 @@
     <div class="content-body">
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-icon" style="background:rgba(139,92,246,0.1);color:#8b5cf6;">📦</div><div class="stat-num">{{ stats.projectCount }}</div><div class="stat-label">笔记库</div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">📄</div><div class="stat-num">{{ indexerInfo.docCount }}</div><div class="stat-label">文件</div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:rgba(251,146,60,0.1);color:#fb923c;">🧩</div><div class="stat-num">{{ indexerInfo.chunkCount }}</div><div class="stat-label">片段</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.1);color:#22c55e;">✅</div><div class="stat-num">{{ stats.todoPending }}</div><div class="stat-label">待办 {{ stats.todoOverdue ? '(' + stats.todoOverdue + ' 逾期)' : '' }}</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,0.1);color:#ef4444;">🔔</div><div class="stat-num">{{ stats.remindersActive }}</div><div class="stat-label">提醒</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(99,102,241,0.1);color:#6366f1;">💬</div><div class="stat-num">{{ stats.totalChats }}</div><div class="stat-label">对话</div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:rgba(251,146,60,0.1);color:#fb923c;">📊</div><div class="stat-num">{{ stats.todayDataRecords }}</div><div class="stat-label">今日数据</div></div>
       </div>
 
-      <!-- 索引管理卡片 -->
+      <!-- 索引管理 -->
       <div class="card index-card">
         <div class="index-card-header">
-          <h2>📇 索引管理</h2>
           <span class="index-model">{{ indexerInfo.model }} @ {{ indexerInfo.host }}</span>
         </div>
-        <div class="index-summary">
-          <div class="index-stat"><span class="index-stat-num">{{ indexerInfo.docCount }}</span><span class="index-stat-label">文档</span></div>
-          <div class="index-stat"><span class="index-stat-num">{{ indexerInfo.chunkCount }}</span><span class="index-stat-label">片段</span></div>
-          <div class="index-stat"><span class="index-stat-num">{{ indexerInfo.embeddedCount }}/{{ indexerInfo.chunkCount }}</span><span class="index-stat-label">已嵌入</span></div>
-          <div class="index-stat"><span class="index-stat-num" :style="{ color: indexerInfo.embeddedCount < indexerInfo.chunkCount ? '#ef4444' : '#22c55e' }">{{ indexerInfo.embeddedCount < indexerInfo.chunkCount ? '⚠️' : '✅' }}</span><span class="index-stat-label">嵌入状态</span></div>
-        </div>
-        <div v-if="noteProjects.length" class="index-project-list">
-          <div v-for="p in noteProjects" :key="p.id" class="index-project-item">
-            <span class="index-project-name">{{ p.name }}</span>
-            <div class="index-project-actions">
-              <button class="index-btn" :disabled="indexing" @click="indexProject(p.id)">{{ indexing && indexingId === p.id ? '⏳' : '📇' }} 索引</button>
+        <div v-if="noteProjects.length">
+          <div class="index-lib-list">
+            <div v-for="p in noteProjects" :key="p.id" class="index-lib-section">
+              <div class="index-lib-header">
+                <span class="index-lib-name">{{ p.name }}</span>
+                <div class="index-lib-header-actions">
+                  <button class="index-lib-btn" :disabled="indexing" @click="indexProject(p.id)">{{ indexing && indexingId === p.id ? '⏳' : (libStats(p.id)?.docCount ? '🔄 重新索引' : '📇 索引') }}</button>
+                </div>
+              </div>
+              <div class="index-lib-summary">
+                <div class="index-stat-card"><div class="index-stat-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">📄</div><div class="index-stat-lib-num">{{ libStats(p.id)?.docCount || 0 }}</div><div class="index-stat-lib-label">文件</div></div>
+                <div class="index-stat-card"><div class="index-stat-icon" style="background:rgba(251,146,60,0.1);color:#fb923c;">🧩</div><div class="index-stat-lib-num">{{ libStats(p.id)?.chunkCount || 0 }}</div><div class="index-stat-lib-label">片段</div></div>
+                <div class="index-stat-card"><div class="index-stat-icon" style="background:rgba(99,102,241,0.1);color:#6366f1;">🔗</div><div class="index-stat-lib-num">{{ libStats(p.id)?.embeddedCount || 0 }}/{{ libStats(p.id)?.chunkCount || 0 }}</div><div class="index-stat-lib-label">已嵌入</div></div>
+                <div class="index-stat-card"><div class="index-stat-icon" :style="{ background: embedStatusBg(p.id), color: embedStatusColor(p.id) }">{{ embedStatusIcon(p.id) }}</div><div class="index-stat-lib-num" :style="{ color: embedStatusColor(p.id) }">{{ embedStatusText(p.id) }}</div><div class="index-stat-lib-label">嵌入状态</div></div>
+              </div>
             </div>
           </div>
-          <div class="index-actions">
-            <button class="index-all-btn" :disabled="indexing" @click="startIndex">{{ indexing ? '⏳ 索引中...' : '🔄 全部重新索引' }}</button>
-            <span v-if="indexProgress" class="index-progress-text">{{ indexProgress }}</span>
+          <div v-if="indexing" class="index-progress-area">
+            <div class="index-progress-phase">
+              <span class="index-phase-label">📄 文件索引分片</span>
+              <div class="index-progress-bar"><div class="index-progress-fill" :style="{ width: indexScanPercent + '%' }"></div></div>
+              <span class="index-progress-text">{{ indexScanText }}</span>
+            </div>
+            <div class="index-progress-phase">
+              <span class="index-phase-label">🧠 嵌入</span>
+              <div class="index-progress-bar"><div class="index-progress-fill" :style="{ width: indexEmbedPercent + '%' }"></div></div>
+              <span class="index-progress-text">{{ indexEmbedText }}</span>
+            </div>
           </div>
         </div>
         <div v-else class="index-empty">
@@ -167,14 +177,29 @@
       </div>
     </div>
   </div>
+
+  <!-- 新建笔记库名称输入 -->
+  <div class="modal-overlay" :class="{ visible: showNamePrompt }" @click.self="showNamePrompt = false">
+    <div class="prompt-box">
+      <div class="prompt-title">新建笔记库</div>
+      <input v-model="newProjectName" class="prompt-input" placeholder="请输入笔记库名称" @keyup.enter="confirmAddProject" ref="nameInputRef">
+      <div class="prompt-actions">
+        <button class="btn btn-secondary" @click="showNamePrompt = false">取消</button>
+        <button class="btn btn-primary" @click="confirmAddProject">确定</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, nextTick } from 'vue';
 
 const API = window.electronAPI;
 
 const kbList = ref<any[]>([]);
+const showNamePrompt = ref(false);
+const newProjectName = ref('');
+const nameInputRef = ref<HTMLInputElement | null>(null);
 const searchKbId = ref('');
 const searchQuery = ref('');
 const searchResults = ref<any[]>([]);
@@ -182,8 +207,22 @@ const showSearchResults = ref(false);
 const lastQuery = ref('');
 const indexing = ref(false);
 const indexingId = ref<number | null>(null);
-const indexProgress = ref('');
+const indexScanText = ref('');
+const indexScanCurrent = ref(0);
+const indexScanTotal = ref(0);
+const indexScanPercent = computed(() => {
+  if (indexScanTotal.value === 0) return 0;
+  return Math.min(100, Math.round((indexScanCurrent.value / indexScanTotal.value) * 100));
+});
+const indexEmbedText = ref('');
+const indexEmbedCurrent = ref(0);
+const indexEmbedTotal = ref(0);
+const indexEmbedPercent = computed(() => {
+  if (indexEmbedTotal.value === 0) return 0;
+  return Math.min(100, Math.round((indexEmbedCurrent.value / indexEmbedTotal.value) * 100));
+});
 const indexerInfo = ref({ model: '', host: '', docCount: 0, chunkCount: 0, embeddedCount: 0, running: false });
+const libraryStats = ref<any[]>([]);
 const showPreview = ref(false);
 const previewTitle = ref('');
 const previewHtml = ref('');
@@ -193,7 +232,7 @@ const pendingRecords = ref<any[]>([]);
 const todayStr = ref('');
 
 const stats = ref({
-  fileCount: 0, chunkCount: 0, todayModified: 0, projectCount: 0, totalChats: 0, todoPending: 0, todoOverdue: 0, remindersActive: 0
+  fileCount: 0, chunkCount: 0, todayModified: 0, projectCount: 0, totalChats: 0, todoPending: 0, todoOverdue: 0, remindersActive: 0, todayDataRecords: 0
 });
 
 const noteProjects = computed(() => kbList.value.filter(k => k.type === 'note'));
@@ -385,15 +424,49 @@ async function loadDailyReports() {
   } catch { reports.value = []; }
 }
 
+function libStats(projectId: number) {
+  return libraryStats.value.find(s => s.projectId === projectId) || null;
+}
+
+function embedStatusBg(id: number) {
+  const s = libStats(id);
+  if (!s || s.chunkCount === 0) return 'rgba(156,163,175,0.1)';
+  return s.embeddedCount < s.chunkCount ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)';
+}
+function embedStatusColor(id: number) {
+  const s = libStats(id);
+  if (!s || s.chunkCount === 0) return '#9ca3af';
+  return s.embeddedCount < s.chunkCount ? '#ef4444' : '#22c55e';
+}
+function embedStatusIcon(id: number) {
+  const s = libStats(id);
+  if (!s || s.chunkCount === 0) return '⚪';
+  return s.embeddedCount < s.chunkCount ? '⚠️' : '✅';
+}
+function embedStatusText(id: number) {
+  const s = libStats(id);
+  if (!s || s.chunkCount === 0) return '未嵌入';
+  return s.embeddedCount < s.chunkCount ? '未完成' : '已完成';
+}
+
 async function loadIndexerInfo() {
   try {
     indexerInfo.value = await API.insights.indexerInfo();
+    libraryStats.value = await API.insights.libraryStats();
   } catch {}
 }
 
 async function addNoteProject() {
-  const name = prompt('请输入笔记库名称：');
+  showNamePrompt.value = true;
+  newProjectName.value = '';
+  await nextTick();
+  nameInputRef.value?.focus();
+}
+
+async function confirmAddProject() {
+  const name = newProjectName.value.trim();
   if (!name) return;
+  showNamePrompt.value = false;
   const dir = await API.dialog.openDirectory();
   if (!dir) return;
   try {
@@ -409,17 +482,41 @@ async function indexProject(id: number) {
   if (indexing.value) return;
   indexing.value = true;
   indexingId.value = id;
-  indexProgress.value = '索引中...';
+  indexScanText.value = '扫描中...';
+  indexScanCurrent.value = 0;
+  indexScanTotal.value = 0;
+  indexEmbedText.value = '';
+  indexEmbedCurrent.value = 0;
+  indexEmbedTotal.value = 0;
   API.on('kb:scan-progress', (data: any) => {
-    if (data.file) indexProgress.value = `[${data.current}/${data.total}] ${data.file}`;
-    if (data.phase === 'done') indexProgress.value = '完成';
+    if (data.phase === 'embed') {
+      if (data.total) indexEmbedTotal.value = data.total;
+      if (data.current) indexEmbedCurrent.value = data.current;
+      indexEmbedText.value = `嵌入中... [${data.current}/${data.total}]`;
+    } else {
+      if (data.total) indexScanTotal.value = data.total;
+      if (data.current) indexScanCurrent.value = data.current;
+      if (data.file) indexScanText.value = `[${data.current}/${data.total}] ${data.file}`;
+    }
+    if (data.phase === 'done') {
+      indexScanText.value = '完成';
+      indexScanCurrent.value = indexScanTotal.value;
+      indexEmbedText.value = '完成';
+      indexEmbedCurrent.value = indexEmbedTotal.value;
+    }
   });
   try {
     await API.kb.scan(id);
+    indexScanText.value = '完成';
+    indexScanCurrent.value = indexScanTotal.value;
+    indexEmbedText.value = '完成';
+    indexEmbedCurrent.value = indexEmbedTotal.value;
     await loadIndexerInfo();
   } catch {}
-  indexing.value = false;
-  indexingId.value = null;
+  setTimeout(() => {
+    indexing.value = false;
+    indexingId.value = null;
+  }, 1500);
   API.removeAllListeners('kb:scan-progress');
 }
 
@@ -427,17 +524,41 @@ async function startIndex() {
   if (indexing.value) return;
   indexing.value = true;
   indexingId.value = null;
-  indexProgress.value = '全部索引中...';
+  indexScanText.value = '扫描中...';
+  indexScanCurrent.value = 0;
+  indexScanTotal.value = 0;
+  indexEmbedText.value = '';
+  indexEmbedCurrent.value = 0;
+  indexEmbedTotal.value = 0;
   API.on('indexer:progress', (data: any) => {
-    if (data.file) indexProgress.value = `[${data.current}/${data.total}] ${data.file}`;
-    if (data.phase === 'done') indexProgress.value = '完成';
+    if (data.phase === 'embed') {
+      if (data.total) indexEmbedTotal.value = data.total;
+      if (data.current) indexEmbedCurrent.value = data.current;
+      indexEmbedText.value = `嵌入中... [${data.current}/${data.total}]`;
+    } else {
+      if (data.total) indexScanTotal.value = data.total;
+      if (data.current) indexScanCurrent.value = data.current;
+      if (data.file) indexScanText.value = `[${data.current}/${data.total}] ${data.file}`;
+    }
+    if (data.phase === 'done') {
+      indexScanText.value = '完成';
+      indexScanCurrent.value = indexScanTotal.value;
+      indexEmbedText.value = '完成';
+      indexEmbedCurrent.value = indexEmbedTotal.value;
+    }
   });
-  try {
+try {
     await API.service.indexAll();
+    indexScanText.value = '完成';
+    indexScanCurrent.value = indexScanTotal.value;
+    indexEmbedText.value = '完成';
+    indexEmbedCurrent.value = indexEmbedTotal.value;
     await loadIndexerInfo();
   } catch {}
-  indexing.value = false;
-  indexProgress.value = '';
+  setTimeout(() => {
+    indexing.value = false;
+    indexingId.value = null;
+  }, 1500);
   API.removeAllListeners('indexer:progress');
 }
 
@@ -466,13 +587,10 @@ onMounted(async () => {
 .content-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
 
 /* stats 卡片网格 */
-.stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 14px; }
-.stat-card { background: white; border-radius: var(--radius-md); border: 1px solid var(--border); padding: 14px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; transition: 0.15s; }
-.stat-card:hover { box-shadow: var(--shadow-sm); }
-.stat-card-action { cursor: pointer; }
-.stat-card-action:hover { border-color: var(--primary); }
-.stat-icon { width: 36px; height: 36px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-size: 18px; }
-.stat-num { font-size: 22px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
+.stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px; }
+.stat-card { background: white; border-radius: var(--radius-sm); border: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; transition: 0.15s; }
+.stat-icon { width: 28px; height: 28px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.stat-num { font-size: 18px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
 .stat-label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
 .reindex-btn { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: pointer; line-height: 1.4; color: var(--text-muted); }
 .reindex-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
@@ -484,24 +602,34 @@ onMounted(async () => {
 /* 索引管理卡片 */
 .index-card { margin-bottom: 14px; }
 .index-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.index-card-header h2 { font-size: 15px; font-weight: 600; margin: 0; }
-.index-model { font-size: 11px; color: var(--text-muted); }
-.index-summary { display: flex; gap: 16px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.index-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.index-stat-num { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.index-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.index-stat-card { background: white; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; }
+.index-stat-icon { width: 32px; height: 32px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.index-stat-num { font-size: 16px; font-weight: 700; color: var(--text-primary); }
 .index-stat-label { font-size: 11px; color: var(--text-muted); }
-.index-project-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-.index-project-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.index-project-name { font-size: 13px; color: var(--text-primary); }
-.index-project-actions { display: flex; gap: 6px; }
-.index-btn { font-size: 11px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 4px; background: white; cursor: pointer; color: var(--text-primary); }
-.index-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
-.index-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.index-actions { display: flex; align-items: center; gap: 10px; }
+.index-lib-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.index-lib-section { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; }
+.index-lib-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.index-lib-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.index-lib-header-actions { display: flex; gap: 4px; }
+.index-lib-btn { font-size: 11px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 4px; background: white; cursor: pointer; color: var(--text-primary); }
+.index-lib-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.index-lib-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.index-lib-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.index-stat-lib-num { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.index-stat-lib-label { font-size: 10px; color: var(--text-muted); }
 .index-all-btn { padding: 6px 14px; background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; transition: 0.15s; }
 .index-all-btn:hover:not(:disabled) { background: var(--primary-dark); }
 .index-all-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.index-progress-text { font-size: 12px; color: var(--text-muted); }
+.index-model { font-size: 11px; color: var(--text-muted); }
+.stat-mini-bar { width: 100%; height: 3px; background: var(--border); border-radius: 2px; margin-top: 2px; overflow: hidden; }
+.stat-mini-fill { height: 100%; background: var(--primary); border-radius: 2px; transition: width 0.3s ease; }
+.index-progress-area { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.index-progress-phase { display: flex; align-items: center; gap: 8px; }
+.index-phase-label { font-size: 12px; color: var(--text-primary); flex-shrink: 0; min-width: 100px; }
+.index-progress-bar { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.index-progress-fill { height: 100%; background: var(--primary); border-radius: 3px; transition: width 0.2s ease; }
+.index-progress-text { font-size: 11px; color: var(--text-muted); flex-shrink: 0; min-width: 120px; text-align: right; }
 
 .index-empty { text-align: center; padding: 24px 20px; }
 .index-empty-icon { font-size: 36px; margin-bottom: 8px; opacity: 0.5; }
@@ -557,6 +685,7 @@ onMounted(async () => {
 /* 搜索结果弹窗 */
 .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.35); z-index: 1000; align-items: flex-start; justify-content: center; padding-top: 60px; }
 .modal-overlay.active { display: flex; }
+.modal-overlay.visible { display: flex; }
 .modal { background: white; border-radius: var(--radius-lg); width: 90%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .modal-title { font-size: 15px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -593,4 +722,11 @@ onMounted(async () => {
 .report-time { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
 .report-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .report-detail .preview { font-size: 13px; line-height: 1.7; }
+
+/* 新建笔记库名称输入弹窗 */
+.prompt-box { background: white; border-radius: var(--radius-lg); padding: 24px; width: 360px; box-shadow: 0 20px 60px rgba(0,0,0,0.15); display: flex; flex-direction: column; gap: 12px; margin-top: 80px; }
+.prompt-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.prompt-input { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 14px; outline: none; }
+.prompt-input:focus { border-color: var(--primary); }
+.prompt-actions { display: flex; gap: 8px; justify-content: flex-end; }
 </style>

@@ -7,12 +7,12 @@
     <div class="content-body">
       <div style="margin-bottom:24px;">
         <h2 style="font-size:22px;font-weight:600;margin-bottom:4px;">帮助中心</h2>
-        <p class="text-muted">AI 助理 — 功能指南与常见问题</p>
+        <p class="text-muted">启航AI工作台 — 功能指南与常见问题</p>
       </div>
 
       <div class="card">
         <h2>🚀 快速开始</h2>
-        <p class="text-muted mb-2">Electron + Vue 3 桌面端 AI 助理，支持笔记知识库管理、AI 对话、数据管理、定时日报等功能。后端基于 Node.js + SQLite，语义检索使用 Ollama 或兼容 API。</p>
+        <p class="text-muted mb-2">Electron + Vue 3 桌面端 启航AI工作台，支持笔记知识库管理、AI 对话、数据管理、定时日报等功能。后端基于 Node.js + SQLite，语义检索使用 Ollama 或兼容 API。</p>
         <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">启动步骤</h3>
         <pre class="code-block"># 1. 安装依赖
 npm install

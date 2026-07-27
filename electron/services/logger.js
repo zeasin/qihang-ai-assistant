@@ -119,6 +119,15 @@ const logger = {
     try { console.error(line); } catch (e) { if (e && e.code !== 'EPIPE') throw e; }
   },
 
+  clearLog() {
+    ensureDir();
+    const files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.log'));
+    for (const f of files) {
+      try { fs.unlinkSync(path.join(LOG_DIR, f)); } catch {}
+    }
+    currentSize = 0;
+  },
+
   getLogDir() {
     return LOG_DIR;
   },

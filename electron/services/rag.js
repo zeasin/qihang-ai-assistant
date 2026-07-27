@@ -1,4 +1,4 @@
-const ollama = require('ollama').default;
+const ollama = require('ollama');
 const logger = require('./logger');
 
 // 嵌入模型配置（可通过 configure() 修改）
