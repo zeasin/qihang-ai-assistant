@@ -1,33 +1,8 @@
-/**
- * 索引工作进程 - 在子进程中执行索引，不阻塞主线程
- */
 const path = require('path');
 const fs = require('fs');
-const initSqlJs = require('sql.js');
 
-const DB_PATH = path.join(require('os').homedir(), '.biling-ai', 'biling.db');
 const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.opencode', '__pycache__', '.cache']);
-
-let db = null;
-
-async function initDb() {
-  const SQL = await initSqlJs();
-  const buf = fs.readFileSync(DB_PATH);
-  db = new SQL.Database(buf);
-}
-
-function saveDb() {
-  fs.writeFileSync(DB_PATH, Buffer.from(db.export()));
-}
-
-// sql.js 的 db.run() 需要参数数组，包装一下
-function runSql(sql, params = []) {
-  db.run(sql, params);
-}
-
-function q(sql) {
-  return db.exec(sql);
-}
+let _pendingProjects = [];
 
 function walkDir(dir, files, ignoreDirs = [], ignoreFiles = []) {
   if (!fs.existsSync(dir)) return;
@@ -84,108 +59,80 @@ async function embed(text, config) {
   return res.embeddings[0];
 }
 
-async function indexProject(projectId) {
-  // 读取项目信息
-  const proj = q(`SELECT id, name, dir, ignore_dirs, ignore_files FROM prj_projects WHERE id = ${projectId}`);
-  if (!proj.length || !proj[0].values.length) throw new Error(`项目 ${projectId} 不存在`);
-  const cols = proj[0].values[0];
-  const p = { id: cols[0], name: cols[1], dir: cols[2],
-    ignore_dirs: cols[3] || '', ignore_files: cols[4] || '' };
+async function scanProject(project) {
+  const { id, dir, ignore_dirs, ignore_files } = project;
+  console.log(`[IndexWorker] 开始扫描: ${project.name} (${dir})`);
 
-  // 读取嵌入配置
-  const cfgRows = q("SELECT key, value FROM sys_config WHERE key IN ('embedModel','embeddingBaseUrl','embeddingApiKey')");
-  const config = { model: 'bge-m3', host: 'http://127.0.0.1:11434', apiKey: '' };
-  if (cfgRows.length && cfgRows[0].values) {
-    for (const r of cfgRows[0].values) {
-      if (r[0] === 'embedModel') config.model = r[1];
-      if (r[0] === 'embeddingBaseUrl') config.host = r[1];
-      if (r[0] === 'embeddingApiKey') config.apiKey = r[1];
-    }
-  }
+  const ignoreDirs = ignore_dirs ? ignore_dirs.split(',').map(s => s.trim()) : [];
+  const ignoreFiles = ignore_files ? ignore_files.split(',').map(s => s.trim()) : [];
 
-  const ignoreDirs = p.ignore_dirs ? p.ignore_dirs.split(',').map(s => s.trim()) : [];
-  const ignoreFiles = p.ignore_files ? p.ignore_files.split(',').map(s => s.trim()) : [];
-
-  // 清空旧索引
-  console.log(`[IndexWorker] 开始索引项目: ${p.name} (${p.dir})`);
-  runSql('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', [projectId]);
-  runSql('DELETE FROM kb_documents WHERE project_id = ?', [projectId]);
-  saveDb();
-
-  // 扫描文件
   const files = [];
-  walkDir(p.dir, files, ignoreDirs, ignoreFiles);
-  const total = files.length;
-  console.log(`[IndexWorker] 扫描到 ${total} 个 .md 文件`);
+  walkDir(dir, files, ignoreDirs, ignoreFiles);
+  console.log(`[IndexWorker] 扫描到 ${files.length} 个 .md 文件`);
 
-  // 写入文档和 chunk
-  const startTime = Date.now();
-  for (let i = 0; i < total; i++) {
+  process.send({ type: 'deleteOld', projectId: id });
+
+  for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    if (i === 0 || i === total - 1 || i % 5 === 0) {
-      process.send({ type: 'progress', phase: 'scan', current: i + 1, total, file: path.basename(file) });
-    }
     const content = fs.readFileSync(file, 'utf-8');
     const stat = fs.statSync(file);
     const title = path.basename(file, '.md');
-    console.log(`[IndexWorker]   [${i + 1}/${total}] ${path.basename(file)}`);
-    const escPath = file.replace(/'/g, "''");
-    runSql('INSERT INTO kb_documents (project_id, path, content, indexed_at, file_mtime, title) VALUES (?, ?, ?, datetime(\'now\', \'+8 hours\'), ?, ?)',
-      [projectId, file, content, stat.mtimeMs, title]);
-    const docRows = q(`SELECT id FROM kb_documents WHERE project_id = ${projectId} AND path = '${escPath}'`);
-    if (!docRows.length || !docRows[0].values.length) continue;
-    const docId = docRows[0].values[0][0];
     const chunks = chunkText(content);
-    console.log(`[IndexWorker]   → ${chunks.length} chunks`);
-    for (const chunk of chunks) {
-      runSql('INSERT INTO kb_chunks (doc_id, content) VALUES (?, ?)', [docId, chunk]);
+
+    process.send({
+      type: 'doc', projectId: id, path: file, content,
+      fileMtime: stat.mtimeMs, title,
+      chunks: chunks.map(c => ({ content: c })),
+    });
+
+    if (i === 0 || i === files.length - 1 || i % 5 === 0) {
+      process.send({ type: 'progress', phase: 'scan', current: i + 1, total: files.length, file: path.basename(file) });
     }
-    if (i % 5 === 0) saveDb();
+    console.log(`[IndexWorker]   [${i + 1}/${files.length}] ${path.basename(file)} → ${chunks.length} chunks`);
   }
-  saveDb();
 
-  // 获取所有未嵌入的 chunk
-  const chunkRows = q(`SELECT id, content FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ${projectId}) AND embedding IS NULL`);
-  const allChunks = chunkRows.length && chunkRows[0].values ? chunkRows[0].values : [];
-  const chunkTotal = allChunks.length;
-  console.log(`[IndexWorker] 生成嵌入向量: 共 ${chunkTotal} 个 chunk, 模型=${config.model} @ ${config.host}`);
-  if (chunkTotal === 0) console.log(`[IndexWorker] 无新 chunk 需嵌入，跳过`);
+  process.send({ type: 'scanDone', projectId: id, fileCount: files.length });
+}
 
-  // 生成向量嵌入
+async function embedChunks(msg) {
+  const { projectId, chunks, config } = msg;
+  const total = chunks.length;
+  console.log(`[IndexWorker] 生成嵌入向量: ${total} 个 chunk, 模型=${config.model} @ ${config.host}`);
+
   let embedded = 0;
-  for (const row of allChunks) {
+  for (const chunk of chunks) {
     try {
-      const emb = await embed(row[1], config);
-      runSql('UPDATE kb_chunks SET embedding = ? WHERE id = ?', [JSON.stringify(emb), row[0]]);
+      const vector = await embed(chunk.content, config);
+      process.send({ type: 'embedding', projectId, chunkId: chunk.id, vector });
       embedded++;
-      if (embedded === chunkTotal || embedded % 10 === 0) {
-        process.send({ type: 'progress', phase: 'embed', current: embedded, total: chunkTotal, file: '' });
+      if (embedded === total || embedded % 10 === 0) {
+        process.send({ type: 'progress', phase: 'embed', current: embedded, total, file: '' });
       }
-      if (embedded % 20 === 0) console.log(`[IndexWorker]   嵌入进度: ${embedded}/${chunkTotal}`);
+      if (embedded % 20 === 0) console.log(`[IndexWorker]   嵌入进度: ${embedded}/${total}`);
     } catch (e) {
-      console.log(`[IndexWorker]   嵌入失败 chunk ${row[0]}: ${e.message}`);
+      console.log(`[IndexWorker]   嵌入失败 chunk ${chunk.id}: ${e.message}`);
     }
-    if (embedded % 10 === 0) saveDb();
   }
-  saveDb();
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`[IndexWorker] 完成: ${total} 文件, ${embedded} 嵌入 (耗时 ${elapsed}s)`);
 
-  return { projectId: p.id, name: p.name, files: total, chunks: chunkTotal, embedded };
+  console.log(`[IndexWorker] 嵌入完成: ${embedded}/${total}`);
+  process.send({ type: 'embedDone', projectId, embedded });
+}
+
+function startNextProject() {
+  if (_pendingProjects.length === 0) {
+    process.send({ type: 'done' });
+    return;
+  }
+  const project = _pendingProjects.shift();
+  scanProject(project).catch(e => process.send({ type: 'error', message: e.message }));
 }
 
 process.on('message', async (msg) => {
   if (msg.type === 'start') {
-    try {
-      await initDb();
-      const results = [];
-      for (const pid of msg.projectIds) {
-        const r = await indexProject(pid);
-        results.push(r);
-      }
-      process.send({ type: 'done', results });
-    } catch (e) {
-      process.send({ type: 'error', message: e.message });
-    }
+    _pendingProjects = msg.projects.slice();
+    startNextProject();
+  } else if (msg.type === 'embed') {
+    await embedChunks(msg);
+    startNextProject();
   }
 });

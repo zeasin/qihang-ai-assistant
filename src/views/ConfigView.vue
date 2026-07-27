@@ -63,6 +63,20 @@
               </div>
             </div>
           </div>
+          <div class="agent-card" :class="agentStatus.claude.installed ? 'installed' : 'missing'">
+            <div class="agent-icon">🤖</div>
+            <div class="agent-info">
+              <div class="agent-name">Claude Code CLI</div>
+              <div class="agent-version" v-if="agentStatus.claude.installed">v{{ agentStatus.claude.version }}</div>
+              <div class="agent-version" v-else>未安装</div>
+              <div class="agent-meta" v-if="agentStatus.claude.installed && agentStatus.claude.apiKeyConfigured">
+                <span class="badge badge-success">✅ API Key 已配置</span>
+              </div>
+              <div class="agent-meta" v-else>
+                <span class="badge badge-gray">需要 npm install @anthropic-ai/claude-agent-sdk</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -238,7 +252,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 const API = window.electronAPI;
 
 const projects = ref<any[]>([]);
-const agentStatus = ref({ pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null }, opencode: { installed: false, version: null, providers: [], totalModels: 0 } });
+const agentStatus = ref({ pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null }, opencode: { installed: false, version: null, providers: [], totalModels: 0 }, claude: { installed: false, version: null, apiKeyConfigured: false, apiKeyHint: null } });
 const showHelp = ref(false);
 
 const webhookUrl = ref('');
@@ -311,7 +325,7 @@ async function checkAgentStatus() {
   try {
     const s = await API.agent.status();
     agentStatus.value = s;
-  } catch { agentStatus.value = { pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null }, opencode: { installed: false, version: null, providers: [], totalModels: 0 } }; }
+  } catch { agentStatus.value = { pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null }, opencode: { installed: false, version: null, providers: [], totalModels: 0 }, claude: { installed: false, version: null, apiKeyConfigured: false, apiKeyHint: null } }; }
 }
 
 async function saveWebhook() {

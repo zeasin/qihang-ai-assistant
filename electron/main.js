@@ -497,6 +497,61 @@ ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
 ipcMain.handle('kb:remove', (_, { id }) => db.project.remove(id));
 let _indexingLock = false;
 
+let _docBatchCount = 0;
+
+function handleWorkerMessages(worker, sendProgress, resolve, track) {
+  _docBatchCount = 0;
+  worker.on('message', (msg) => {
+    try {
+      if (msg.type === 'progress') {
+        sendProgress(msg);
+      } else if (msg.type === 'deleteOld') {
+        db.runRaw('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', [msg.projectId]);
+        db.runRaw('DELETE FROM kb_documents WHERE project_id = ?', [msg.projectId]);
+        db.save();
+      } else if (msg.type === 'doc') {
+        db.runRaw("INSERT INTO kb_documents (project_id, path, content, indexed_at, file_mtime, title) VALUES (?, ?, ?, datetime('now', '+8 hours'), ?, ?)", [msg.projectId, msg.path, msg.content, msg.fileMtime || null, msg.title || '']);
+        const docRow = db.qOne('SELECT id FROM kb_documents WHERE project_id = ? AND path = ?', msg.projectId, msg.path);
+        if (docRow) {
+          for (const c of msg.chunks) {
+            db.runRaw('INSERT INTO kb_chunks (doc_id, content) VALUES (?, ?)', [docRow.id, c.content]);
+          }
+        }
+        if (track) { track.fileCount++; track.chunkCount += msg.chunks.length; }
+        if (++_docBatchCount % 10 === 0) db.save();
+      } else if (msg.type === 'scanDone') {
+        db.save();
+        const embedConfig = {
+          model: db.configGet('embedModel') || 'bge-m3',
+          host: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
+          apiKey: db.configGet('embeddingApiKey') || '',
+        };
+        const rows = db.q(`SELECT c.id, c.content FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id WHERE d.project_id = ? AND c.embedding IS NULL`, msg.projectId);
+        worker.send({ type: 'embed', projectId: msg.projectId, chunks: rows, config: embedConfig });
+      } else if (msg.type === 'embedding') {
+        db.runRaw('UPDATE kb_chunks SET embedding = ? WHERE id = ?', [JSON.stringify(msg.vector), msg.chunkId]);
+      } else if (msg.type === 'embedDone') {
+        db.save();
+        if (track) track.embedded = msg.embedded;
+      } else if (msg.type === 'done') {
+        sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
+        worker.kill();
+        _indexingLock = false;
+        resolve(track ? { files: track.fileCount, totalChunks: track.chunkCount } : true);
+      } else if (msg.type === 'error') {
+        sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
+        worker.kill();
+        _indexingLock = false;
+        resolve({ error: msg.message });
+      }
+    } catch (e) {
+      logger.error(`[IndexWorker] handler error: ${e.message}`);
+    }
+  });
+  worker.on('error', () => { sendProgress({ phase: 'done' }); _indexingLock = false; resolve({ error: 'worker error' }); });
+  worker.on('exit', () => { _indexingLock = false; resolve({}); });
+}
+
 ipcMain.handle('kb:scan', async (_, { id }) => {
   if (_indexingLock) return { error: '正在索引中，请稍后再试' };
   try {
@@ -514,25 +569,9 @@ ipcMain.handle('kb:scan', async (_, { id }) => {
     const worker = fork(path.join(__dirname, 'services', 'index-worker.js'));
 
     return new Promise((resolve) => {
-      worker.on('message', (msg) => {
-        if (msg.type === 'progress') {
-          sendProgress(msg);
-        } else if (msg.type === 'done') {
-          const r = msg.results && msg.results.length > 0 ? msg.results[0] : {};
-          sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
-          worker.kill();
-          _indexingLock = false;
-          resolve({ totalChunks: r.chunks || 0, files: r.files || 0 });
-        } else if (msg.type === 'error') {
-          sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
-          worker.kill();
-          _indexingLock = false;
-          resolve({ error: msg.message });
-        }
-      });
-      worker.on('error', () => { sendProgress({ phase: 'done' }); _indexingLock = false; resolve({ error: 'worker error' }); });
-      worker.on('exit', () => { _indexingLock = false; resolve({}); });
-      worker.send({ type: 'start', projectIds: [id] });
+      const track = { fileCount: 0, chunkCount: 0, embedded: 0 };
+      handleWorkerMessages(worker, sendProgress, resolve, track);
+      worker.send({ type: 'start', projects: [{ id: project.id, name: project.name, dir: project.dir, ignore_dirs: project.ignore_dirs, ignore_files: project.ignore_files }] });
     });
   } catch (e) {
     _indexingLock = false;
@@ -978,22 +1017,11 @@ ipcMain.handle('service:indexAll', async () => {
   const worker = fork(path.join(__dirname, 'services', 'index-worker.js'));
 
   const noteProjects = db.project.list('note');
-  const projectIds = noteProjects.map(p => p.id);
+  const projects = noteProjects.map(p => ({ id: p.id, name: p.name, dir: p.dir, ignore_dirs: p.ignore_dirs, ignore_files: p.ignore_files }));
 
   return new Promise((resolve) => {
-    worker.on('message', (msg) => {
-      if (msg.type === 'progress') {
-        sendProgress(msg);
-      } else if (msg.type === 'done' || msg.type === 'error') {
-        sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
-        worker.kill();
-        _indexingLock = false;
-        resolve(true);
-      }
-    });
-    worker.on('error', () => { sendProgress({ phase: 'done', current: 0, total: 0, file: '' }); _indexingLock = false; resolve(true); });
-    worker.on('exit', () => { _indexingLock = false; resolve(true); });
-    worker.send({ type: 'start', projectIds });
+    handleWorkerMessages(worker, sendProgress, resolve, null);
+    worker.send({ type: 'start', projects });
   });
 });
 ipcMain.handle('insights:clearIndex', () => {

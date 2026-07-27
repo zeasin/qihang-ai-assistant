@@ -7,77 +7,90 @@
     <div class="content-body">
       <div style="margin-bottom:24px;">
         <h2 style="font-size:22px;font-weight:600;margin-bottom:4px;">帮助中心</h2>
-        <p class="text-muted">笔灵AI助理 — 功能指南与常见问题</p>
+        <p class="text-muted">AI 助理 — 功能指南与常见问题</p>
       </div>
 
       <div class="card">
         <h2>🚀 快速开始</h2>
-        <p class="text-muted mb-2">笔灵AI助理基于 Spring AI 2.0 + Spring Boot 4.1，直连 LLM API，无需外部编排服务。启动后访问设置页面配置 LLM API Key 和笔记库即可使用全部功能。</p>
-        <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">前置依赖</h3>
-        <table class="help-table">
-          <tr><th>依赖</th><th>说明</th><th>必须</th></tr>
-          <tr><td>Java 17+</td><td>运行时环境</td><td style="color:#2b8a3e;">✅</td></tr>
-          <tr><td>LLM API Key</td><td>DeepSeek / 商汤 / 智谱等兼容 API</td><td style="color:#2b8a3e;">✅</td></tr>
-          <tr><td>语义检索</td><td>Ollama 本地 或 API（硅基流动等）</td><td style="color:#909296;">🔘 可选</td></tr>
-        </table>
+        <p class="text-muted mb-2">Electron + Vue 3 桌面端 AI 助理，支持笔记知识库管理、AI 对话、数据管理、定时日报等功能。后端基于 Node.js + SQLite，语义检索使用 Ollama 或兼容 API。</p>
         <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">启动步骤</h3>
-        <pre class="code-block"># 1. 编译
-mvn package -q
-# 2. 启动
-java -jar target/ai-assistant-1.0.0.jar
-# 3. 在设置页面配置 LLM API Key + 笔记库路径</pre>
-        <p class="tip">提示：先配 API Key 和笔记库路径，否则 AI 功能和文件操作不可用。支持多 LLM 模型同时配置，可在对话页切换。</p>
+        <pre class="code-block"># 1. 安装依赖
+npm install
+
+# 2. 启动开发模式（前后端）
+npm run electron:dev
+
+# 3. 打包构建
+npm run electron:build</pre>
+        <p class="tip">提示：首次使用请先到设置页配置 AI 模型、嵌入模型，并在总览页添加笔记库。</p>
       </div>
 
       <div class="card">
         <h2>🧭 页面导航</h2>
         <table class="help-table">
-          <tr><th>菜单</th><th>功能</th></tr>
-          <tr><td>💬 对话</td><td>AI 对话（笔记库/创作模式），支持语义检索、工具调用、对话导出</td></tr>
-          <tr><td>📝 笔记</td><td>笔记管理，支持 Markdown 编辑、目录浏览、文件操作</td></tr>
-          <tr><td>🗂️ 数据中心</td><td>多数据集管理、Schema 定义、Excel/JSON 导入导出</td></tr>
-          <tr><td>📊 洞察</td><td>数据洞察分析、AI 分析报告</td></tr>
-          <tr><td>📋 提醒</td><td>待办 + 提醒统一管理</td></tr>
-          <tr><td>🔧 工具箱</td><td>图片识别、识题、数据导入等工具集合</td></tr>
-          <tr><td>⚙️ 设置</td><td>系统配置：多 LLM 模型、语义向量模型、飞书、字段标签等</td></tr>
-          <tr><td>📝 日志</td><td>操作日志查看</td></tr>
+          <tr><th>菜单</th><th>说明</th></tr>
+          <tr><td>📊 总览</td><td>全局看板：数据统计、语义搜索、笔记库索引管理</td></tr>
+          <tr><td>💻 项目</td><td>AI 编程工作台，辅助代码开发</td></tr>
+          <tr><td>📁 文件</td><td>Markdown 笔记管理，目录树浏览、编辑器、Zen 模式</td></tr>
+          <tr><td>🗃️ 数据</td><td>多数据集管理，Excel/JSON 批量导入，AI 智能填充</td></tr>
+          <tr><td>🔔 提醒</td><td>待办 + 定时提醒统一管理</td></tr>
+          <tr><td>⚙️ 设置</td><td>系统配置：LLM 模型、嵌入模型、Agent、飞书、定时任务等</td></tr>
+          <tr><td>📋 日志</td><td>操作日志查看</td></tr>
+          <tr><td>❓ 帮助</td><td>使用指南（当前页面）</td></tr>
         </table>
+        <p class="text-muted">侧边栏底部还有 🔧 工具箱（图片识别、识题、Markdown 预览等）通过路由 <code>/tools</code> 访问。</p>
       </div>
 
       <div class="card">
-        <h2>💬 AI 对话</h2>
-        <p class="text-muted mb-2">连续对话模式，按当前笔记库加载聊天历史，SSE 流式输出。AI 可自主调用工具操作笔记库。</p>
-        <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">工作模式</h3>
+        <h2>📁 文件管理</h2>
+        <p class="text-muted mb-2">Markdown 笔记/文件的目录树浏览、编辑、索引与搜索。</p>
         <ul>
-          <li><strong>笔记库对话</strong>（默认）— 注入历史上下文 + 语义检索，适合基于笔记库的问答</li>
-          <li><strong>创作式对话</strong> — 无历史上下文，适合独立创作或开放讨论</li>
+          <li><strong>目录树</strong> — 侧边栏树状结构浏览，右键新建/重命名/删除文件或目录</li>
+          <li><strong>编辑器</strong> — 分屏实时 Markdown 预览，支持 Zen 模式全屏写作、标签管理</li>
+          <li><strong>索引</strong> — 在总览页按笔记库名称逐库索引，系统自动分段并生成向量嵌入</li>
+          <li><strong>搜索</strong> — 文件名关键词搜索 + 语义搜索（基于向量相似度，需配置嵌入模型）</li>
         </ul>
-        <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">AI 工具（自动编排）</h3>
+      </div>
+
+      <div class="card">
+        <h2>🗃️ 数据</h2>
+        <p class="text-muted mb-2">模块化数据集管理，支持自定义 Schema。</p>
+        <ul>
+          <li><strong>模块管理</strong> — 按模块分组管理数据集，可新建/编辑/删除模块</li>
+          <li><strong>数据集 Schema</strong> — 自定义字段列表、类型选项、状态选项</li>
+          <li><strong>记录管理</strong> — 基于 Schema 动态生成表单，支持增删改查、搜索、分页</li>
+          <li>上次选中的数据集自动恢复</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>🧠 语义检索与索引</h2>
+        <p class="text-muted mb-2">笔记库通过嵌入模型建立向量索引，实现语义级搜索。</p>
+        <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">工作原理</h3>
+        <ul>
+          <li>扫描笔记库 Markdown 文件，按段落/标题分块</li>
+          <li>调用嵌入模型生成向量（默认 <code>bge-m3</code>）</li>
+          <li>支持 Ollama 本地或 OpenAI 兼容 API（如硅基流动）</li>
+          <li>搜索时按关键词 + 向量相似度综合排序</li>
+        </ul>
+        <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">在总览页管理</h3>
+        <ul>
+          <li>查看文档数、片段数、嵌入进度</li>
+          <li>按笔记库单独索引或全部重新索引</li>
+          <li>在搜索栏测试语义搜索效果</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>🤖 Agent 系统</h2>
+        <p class="text-muted mb-2">内置多个 AI Agent，各有不同能力定位。</p>
         <table class="help-table">
-          <tr><th>工具</th><th>功能</th><th>触发场景</th></tr>
-          <tr><td><code>readFile</code></td><td>读取笔记库文件内容</td><td>AI 需要了解数据格式或历史内容</td></tr>
-          <tr><td><code>writeFile</code></td><td>写入文件（先读后写，防覆盖）</td><td>创建/更新记录、文档</td></tr>
-          <tr><td><code>listDir</code></td><td>列出目录内容</td><td>AI 需要探索笔记库结构</td></tr>
-          <tr><td><code>searchFiles</code></td><td>按文件名关键词搜索</td><td>查找特定文件</td></tr>
+          <tr><th>Agent</th><th>用途</th><th>安装方式</th></tr>
+          <tr><td>🧠 pi agent</td><td>AI 代码编排 agent，负责工具调用和任务编排</td><td><code>npm install @earendil-works/pi-coding-agent</code></td></tr>
+          <tr><td>🔧 opencode</td><td>通用 AI agent SDK，适合通用对话任务</td><td><code>npm install @opencode-ai/sdk</code></td></tr>
+          <tr><td>🤖 Claude Code CLI</td><td>Anthropic 官方 Agent SDK，流式对话</td><td><code>npm install @anthropic-ai/claude-agent-sdk</code></td></tr>
         </table>
-        <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">语义检索 / 长期记忆</h3>
-        <ul>
-          <li><strong>Ollama 本地</strong> — 不填 API Key，使用本地 Ollama（推荐 <code>bge-m3</code>）</li>
-          <li><strong>API 模式</strong> — 填入 API Key，支持硅基流动等 OpenAI 兼容服务</li>
-        </ul>
-      </div>
-
-      <div class="card">
-        <h2>🗂️ 数据中心</h2>
-        <p class="text-muted mb-2">集中管理结构化数据集，支持多数据集、Schema 定义、批量导入。</p>
-        <ul>
-          <li>创建数据集（定义 Schema：字段名、类型、描述、必填、默认值）</li>
-          <li><strong>Excel 导入</strong> — 自动检测列头、模糊匹配字段映射，支持 AI 智能归一化</li>
-          <li><strong>JSON 导入</strong> — 直接粘贴或上传 JSON 数据</li>
-          <li><strong>URL 导入</strong> — AI 自动访问 URL 并提取结构化数据</li>
-          <li>记录浏览、搜索、删除，自动 MD5 去重</li>
-          <li>可将数据集导出到笔记库目录</li>
-        </ul>
+        <p class="text-muted">状态和版本信息在设置页查看。API Key 通过环境变量配置。</p>
       </div>
 
       <div class="card">
@@ -85,48 +98,42 @@ java -jar target/ai-assistant-1.0.0.jar
         <p class="text-muted mb-2">所有配置通过设置页面管理，无需手动编辑文件。</p>
         <table class="help-table">
           <tr><th>配置项</th><th>说明</th></tr>
-          <tr><td>AI 模型</td><td>多 LLM 模型管理（名称、API Key、地址、模型名、超时、类型），支持文本/多模态/向量模型</td></tr>
-          <tr><td>语义向量模型</td><td>配置用于语义检索的向量模型（Ollama 本地 或 API）</td></tr>
+          <tr><td>嵌入模型</td><td>语义检索用的向量模型（Ollama 或 API）</td></tr>
+          <tr><td>Agent 状态</td><td>查看 pi agent / opencode / Claude Code CLI 安装状态</td></tr>
+          <tr><td>定时任务</td><td>管理内置定时任务（日报、消息汇总等），支持飞书通知</td></tr>
           <tr><td>飞书 Webhook</td><td>消息推送 URL</td></tr>
-          <tr><td>飞书消息接收</td><td>App ID / Secret / Chat ID，WebSocket 长连接接收消息</td></tr>
-          <tr><td>字段标签</td><td>英文 key → 中文标签映射</td></tr>
-          <tr><td>编程 AI</td><td>可选开启，独立飞书机器人</td></tr>
+          <tr><td>飞书 Bot</td><td>App ID / Secret，WebSocket 长连接接收消息</td></tr>
+          <tr><td>日报设置</td><td>每日 AI 综合日报，自定义提示词和保留天数</td></tr>
+          <tr><td>笔记库索引配置</td><td>每个笔记库可单独配置排除目录和文件</td></tr>
         </table>
-        <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">支持的 LLM 提供商</h3>
-        <table class="help-table">
-          <tr><th>提供商</th><th>Base URL</th><th>示例模型</th></tr>
-          <tr><td>DeepSeek</td><td><code>https://api.deepseek.com</code></td><td>deepseek-chat</td></tr>
-          <tr><td>商汤 SenseNova</td><td><code>https://token.sensenova.cn/v1</code></td><td>SenseChat</td></tr>
-          <tr><td>智谱 GLM</td><td><code>https://open.bigmodel.cn/api/paas/v4</code></td><td>glm-4</td></tr>
-          <tr><td>本地 Ollama</td><td><code>http://127.0.0.1:11434/v1</code></td><td>qwen2.5</td></tr>
-        </table>
+
       </div>
 
       <div class="card">
         <h2>❓ 常见问题</h2>
         <table class="help-table">
           <tr><th>问题</th><th>原因</th><th>解决</th></tr>
-          <tr><td>AI 回复"API Key 未配置"</td><td>未在设置页面填写 API Key</td><td>设置页填写 LLM API Key</td></tr>
-          <tr><td>AI 回复为空</td><td>LLM 超时或返回空</td><td>检查网络，超时设为 600s</td></tr>
-          <tr><td>"未配置笔记库"</td><td>未添加笔记库或未配置路径</td><td>在笔记库管理页添加笔记库</td></tr>
-          <tr><td>语义检索不可用</td><td>Ollama 未启动或向量模型未配置</td><td>启动 Ollama 或配置 API 模式的向量模型</td></tr>
-          <tr><td>飞书消息收不到</td><td>WebSocket 未连接或 Webhook 未配置</td><td>在设置页检查飞书凭据</td></tr>
-          <tr><td>对话记录丢失</td><td>切换了笔记库</td><td>每个笔记库的对话是独立的，切换回对应笔记库即可</td></tr>
+          <tr><td>对话为空或超时</td><td>LLM 地址或网络不可达</td><td>检查 API 地址和网络，超时设 600s</td></tr>
+          <tr><td>语义搜索无结果</td><td>笔记库未索引或嵌入模型未配置</td><td>在总览页点击索引按钮，检查嵌入模型配置</td></tr>
+          <tr><td>索引失败</td><td>嵌入模型服务未启动</td><td>确认 Ollama 运行或 API 地址正确</td></tr>
+          <tr><td>飞书消息收不到</td><td>Webhook 未配置或 Bot 未启动</td><td>在设置页检查飞书配置</td></tr>
+          <tr><td>定时任务未执行</td><td>调度器未开启</td><td>在设置页确认调度器运行中</td></tr>
         </table>
       </div>
 
       <div class="card">
         <h2>🏗️ 技术架构</h2>
         <table class="help-table">
-          <tr><th>组件</th><th>技术</th></tr>
-          <tr><td>框架</td><td>Spring Boot 4.1.0 + Spring AI 2.0.0 + Java 17</td></tr>
-          <tr><td>AI 引擎</td><td>ChatClient 直连 LLM（OpenAI 兼容协议）</td></tr>
-          <tr><td>工具编排</td><td>@Tool 注解 + ToolCallingAdvisor（自动路由）</td></tr>
-          <tr><td>语义检索</td><td>Ollama（bge-m3 等）</td></tr>
-          <tr><td>会话存储</td><td>SQLite — prj_sessions / prj_messages</td></tr>
-          <tr><td>笔记库存储</td><td>JSON / Markdown 文件（本地文件系统）</td></tr>
-          <tr><td>前端</td><td>Vue 3 + Electron</td></tr>
-          <tr><td>飞书集成</td><td>OpenAPI SDK（WebSocket）+ HttpURLConnection（Webhook）</td></tr>
+          <tr><th>层</th><th>技术</th></tr>
+          <tr><td>前端框架</td><td>Vue 3 + TypeScript + Vite</td></tr>
+          <tr><td>桌面壳</td><td>Electron</td></tr>
+          <tr><td>后端</td><td>Node.js（主进程）</td></tr>
+          <tr><td>数据库</td><td>SQLite（better-sqlite3）</td></tr>
+          <tr><td>AI Agent</td><td>pi-coding-agent / opencode SDK / claude-agent-sdk</td></tr>
+          <tr><td>语义检索</td><td>Ollama / OpenAI 兼容 API（bge-m3）</td></tr>
+          <tr><td>LLM 接入</td><td>OpenAI 兼容协议（直连）</td></tr>
+          <tr><td>飞书集成</td><td>Webhook + WebSocket Bot</td></tr>
+          <tr><td>IPC 通信</td><td>Electron ipcMain / ipcRenderer</td></tr>
         </table>
       </div>
     </div>

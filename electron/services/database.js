@@ -190,11 +190,6 @@ function initSchema() {
     );
 
   `);
-  // 确保 kb_chunks 有 embedding 列（兼容旧表）
-  try { db.run("ALTER TABLE kb_chunks ADD COLUMN embedding TEXT"); } catch {}
-  try { db.run("ALTER TABLE kb_documents ADD COLUMN title TEXT DEFAULT ''"); } catch {}
-  try { db.run("DROP TABLE IF EXISTS kb_file_index_meta"); } catch {}
-  try { db.run("DROP TABLE IF EXISTS kb_code_index"); } catch {}
   saveDb();
 }
 
@@ -335,27 +330,8 @@ const chat = {
     } catch { return []; }
   },
   createSession: (id, projectId, title, mode, agent, source) => {
-    // 确保 sessions 表有 project_id 和 active_agent 列
-    for (const col of ['project_id', 'active_agent']) {
-      try {
-        const info = q("PRAGMA table_info('prj_sessions')");
-        const hasCol = info.some(r => r.name === col);
-        if (!hasCol) {
-          const type = col === 'project_id' ? 'INTEGER' : "TEXT DEFAULT 'pi'";
-          db.run(`ALTER TABLE prj_sessions ADD COLUMN ${col} ${type}`);
-          saveDb();
-          logger.info('[DB] Added column %s to sessions via createSession', col);
-        }
-      } catch (_) {}
-    }
-    try {
-      run("INSERT OR IGNORE INTO prj_sessions (id, source, title, mode, project_id, active_agent) VALUES (?, ?, ?, ?, ?, ?)",
-        id, source || 'ui', title || '新对话', mode || 'general', projectId || null, agent || 'pi');
-    } catch (e) {
-      logger.error('[DB] createSession fallback: %s', e.message);
-      run("INSERT OR IGNORE INTO prj_sessions (id, source, title, mode, active_agent) VALUES (?, ?, ?, ?, ?)",
-        id, source || 'ui', title || '新对话', mode || 'general', agent || 'pi');
-    }
+    run("INSERT OR IGNORE INTO prj_sessions (id, source, title, mode, project_id, active_agent) VALUES (?, ?, ?, ?, ?, ?)",
+      id, source || 'ui', title || '新对话', mode || 'general', projectId || null, agent || 'pi');
     return qOne('SELECT * FROM prj_sessions WHERE id = ?', id);
   },
   getSession: (id) => qOne('SELECT * FROM prj_sessions WHERE id = ?', id),

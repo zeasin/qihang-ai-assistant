@@ -23,6 +23,6 @@ import AppSidebar from './components/AppSidebar.vue';
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-width: 1000px;
+  min-width: 1500px;
 }
 </style>

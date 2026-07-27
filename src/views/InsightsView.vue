@@ -6,7 +6,7 @@
     <div class="content-body">
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-icon" style="background:rgba(139,92,246,0.1);color:#8b5cf6;">📦</div><div class="stat-num">{{ stats.projectCount }}</div><div class="stat-label">笔记库</div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">📄</div><div class="stat-num">{{ indexerInfo.docCount }}</div><div class="stat-label">文件 <button class="reindex-btn" :disabled="indexing" @click.stop="startIndex">{{ indexing ? '⏳' : '🔄' }}</button></div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">📄</div><div class="stat-num">{{ indexerInfo.docCount }}</div><div class="stat-label">文件</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(251,146,60,0.1);color:#fb923c;">🧩</div><div class="stat-num">{{ indexerInfo.chunkCount }}</div><div class="stat-label">片段</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.1);color:#22c55e;">✅</div><div class="stat-num">{{ stats.todoPending }}</div><div class="stat-label">待办 {{ stats.todoOverdue ? '(' + stats.todoOverdue + ' 逾期)' : '' }}</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,0.1);color:#ef4444;">🔔</div><div class="stat-num">{{ stats.remindersActive }}</div><div class="stat-label">提醒</div></div>
@@ -25,17 +25,23 @@
           <div class="index-stat"><span class="index-stat-num">{{ indexerInfo.embeddedCount }}/{{ indexerInfo.chunkCount }}</span><span class="index-stat-label">已嵌入</span></div>
           <div class="index-stat"><span class="index-stat-num" :style="{ color: indexerInfo.embeddedCount < indexerInfo.chunkCount ? '#ef4444' : '#22c55e' }">{{ indexerInfo.embeddedCount < indexerInfo.chunkCount ? '⚠️' : '✅' }}</span><span class="index-stat-label">嵌入状态</span></div>
         </div>
-        <div class="index-project-list">
-          <div v-for="p in kbList.filter(k => k.type === 'note')" :key="p.id" class="index-project-item">
+        <div v-if="noteProjects.length" class="index-project-list">
+          <div v-for="p in noteProjects" :key="p.id" class="index-project-item">
             <span class="index-project-name">{{ p.name }}</span>
             <div class="index-project-actions">
               <button class="index-btn" :disabled="indexing" @click="indexProject(p.id)">{{ indexing && indexingId === p.id ? '⏳' : '📇' }} 索引</button>
             </div>
           </div>
+          <div class="index-actions">
+            <button class="index-all-btn" :disabled="indexing" @click="startIndex">{{ indexing ? '⏳ 索引中...' : '🔄 全部重新索引' }}</button>
+            <span v-if="indexProgress" class="index-progress-text">{{ indexProgress }}</span>
+          </div>
         </div>
-        <div class="index-actions">
-          <button class="index-all-btn" :disabled="indexing" @click="startIndex">{{ indexing ? '⏳ 索引中...' : '🔄 全部重新索引' }}</button>
-          <span v-if="indexProgress" class="index-progress-text">{{ indexProgress }}</span>
+        <div v-else class="index-empty">
+          <div class="index-empty-icon">📭</div>
+          <div class="index-empty-text">没有配置笔记库</div>
+          <div class="index-empty-desc">请先添加一个笔记库目录，系统会自动索引其中的 Markdown 文件</div>
+          <button class="index-add-btn" @click="addNoteProject">➕ 添加笔记库</button>
         </div>
       </div>
 
@@ -189,6 +195,8 @@ const todayStr = ref('');
 const stats = ref({
   fileCount: 0, chunkCount: 0, todayModified: 0, projectCount: 0, totalChats: 0, todoPending: 0, todoOverdue: 0, remindersActive: 0
 });
+
+const noteProjects = computed(() => kbList.value.filter(k => k.type === 'note'));
 
 const reports = ref<any[]>([]);
 const expandedReport = ref<number | null>(null);
@@ -383,6 +391,20 @@ async function loadIndexerInfo() {
   } catch {}
 }
 
+async function addNoteProject() {
+  const name = prompt('请输入笔记库名称：');
+  if (!name) return;
+  const dir = await API.dialog.openDirectory();
+  if (!dir) return;
+  try {
+    await API.kb.add(name, dir);
+    const list = await API.kb.list();
+    kbList.value = list;
+  } catch (e) {
+    alert('添加失败: ' + (e.message || e));
+  }
+}
+
 async function indexProject(id: number) {
   if (indexing.value) return;
   indexing.value = true;
@@ -441,10 +463,10 @@ onMounted(async () => {
 .insights-view { display: flex; flex-direction: column; height: 100%; }
 .content-header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: white; }
 .content-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.content-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px 20px; }
+.content-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
 
 /* stats 卡片网格 */
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 14px; }
 .stat-card { background: white; border-radius: var(--radius-md); border: 1px solid var(--border); padding: 14px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; transition: 0.15s; }
 .stat-card:hover { box-shadow: var(--shadow-sm); }
 .stat-card-action { cursor: pointer; }
@@ -480,6 +502,13 @@ onMounted(async () => {
 .index-all-btn:hover:not(:disabled) { background: var(--primary-dark); }
 .index-all-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .index-progress-text { font-size: 12px; color: var(--text-muted); }
+
+.index-empty { text-align: center; padding: 24px 20px; }
+.index-empty-icon { font-size: 36px; margin-bottom: 8px; opacity: 0.5; }
+.index-empty-text { font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+.index-empty-desc { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.5; }
+.index-add-btn { padding: 8px 18px; background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; transition: 0.15s; }
+.index-add-btn:hover { background: var(--primary-dark); }
 
 /* 搜索栏 */
 .search-card { background: white; border-radius: var(--radius-md); border: 1px solid var(--border); box-shadow: var(--shadow-sm); padding: 12px 16px; margin-bottom: 12px; }
