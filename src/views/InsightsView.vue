@@ -70,7 +70,8 @@
             v-model="searchQuery"
             class="search-input"
             placeholder="输入关键词搜索笔记..."
-            
+            @keyup.enter="performSearch"
+            @input="onSearchInput"
           >
           <button class="search-btn" @click="performSearch">搜索</button>
         </div>
@@ -290,6 +291,11 @@ const renderMarkdown = (text: string) => {
 };
 
 // ========== 搜索 ==========
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+const onSearchInput = () => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => performSearch(), 300);
+};
 const performSearch = async () => {
   const query = searchQuery.value.trim();
   if (!query) {
