@@ -458,6 +458,8 @@ ipcMain.handle('notes:read', (_, { projectId, filePath }) => {
     return { ok: false, error: e.message };
   }
 });
+
+
 ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
   return db.project.add(name, 'note', dirPath);
 });

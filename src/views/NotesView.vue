@@ -18,7 +18,22 @@
           </select>
           <button class="btn-icon" @click="refreshTree" title="刷新文件树">↻</button>
         </div>
+        <div class="search-bar">
+          <input v-model="searchQuery" class="search-input" placeholder="搜索当前项目..." @keydown.enter="doSearch" />
+          <button class="btn-icon" @click="doSearch" title="搜索">🔍</button>
+          <button v-if="searchActive" class="btn-icon" @click="clearSearch" title="返回文件树">✕</button>
+        </div>
         <div class="tree-container">
+          <div v-if="searchActive" class="search-results">
+            <div v-if="searchResults.length === 0 && searched" class="tree-placeholder"><span class="placeholder-text">未找到结果</span></div>
+            <div v-for="(r,i) in searchResults" :key="i" class="search-result-item" @click="openSearchResult(r)">
+              <div class="search-result-name">{{ r.name }}</div>
+              <div class="search-result-path">{{ r.path.replace(selectedProject?.dir||"","") }}</div>
+              <div v-if="r.match" class="search-result-match">{{ r.match }}</div>
+            </div>
+          </div>
+
+          <template v-if="!searchActive">
           <div v-if="!selectedKbId" class="tree-placeholder">
             <div class="placeholder-text">请选择笔记库</div>
           </div>
@@ -34,6 +49,7 @@
             :kb-id="selectedKbId"
             @select="selectFile"
           />
+          </template>
         </div>
       </div>
 
@@ -77,6 +93,11 @@ const treeData = ref<TreeNode[]>([]);
 const selectedFile = ref<any>(null);
 const fileContent = ref('');
 const leftCollapsed = ref(false);
+const searchQuery = ref('');
+const searchActive = ref(false);
+const searched = ref(false);
+const searchResults = ref<any[]>([]);
+const selectedProject = computed(() => kbList.value.find(k => k.id === selectedKbId.value));
 
 const renderedContent = computed(() => {
   if (!fileContent.value) return '';
@@ -173,6 +194,31 @@ function escapeHtml(text: string): string {
   const d = document.createElement('div');
   d.textContent = String(text);
   return d.innerHTML;
+}
+
+
+async function doSearch() {
+  const q = searchQuery.value.trim();
+  if (!q) { searchActive.value = false; return; }
+  searchActive.value = true;
+  searched.value = true;
+  try {
+    const results = await API.kb.search(selectedKbId.value, q);
+    searchResults.value = results.map((r: any) => ({
+      path: r.source, name: r.title, score: r.score, match: (r.text || '').slice(0, 200),
+    }));
+  } catch { searchResults.value = []; }
+}
+
+function clearSearch() {
+  searchActive.value = false;
+  searchQuery.value = '';
+  searchResults.value = [];
+  searched.value = false;
+}
+
+function openSearchResult(r: any) {
+  selectFile({ name: r.name, path: r.path, type: 'file' });
 }
 
 onMounted(() => {
@@ -455,6 +501,16 @@ onMounted(() => {
 }
 
 .text-muted { color: var(--text-muted); font-size: 13px; }
+
+/* 搜索 */
+.search-bar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.search-bar .search-input { flex:1; padding:5px 8px; border:1px solid var(--border); border-radius:6px; font-size:13px; outline:none; background:white; }
+.search-bar .search-input:focus { border-color:var(--primary); }
+.search-result-item { padding: 8px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.search-result-item:hover { background: var(--hover); }
+.search-result-name { font-size:13px; font-weight:500; color:var(--text-primary); }
+.search-result-path { font-size:11px; color:var(--text-muted); margin-top:2px; word-break:break-all; }
+.search-result-match { font-size:12px; color:var(--text-secondary); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* Modal */
 .modal-overlay {
