@@ -336,7 +336,7 @@ const feishuMessageHandler = async (msg) => {
         const rag = require('./services/rag');
         let allResults = [];
         for (const projectId of context.projectIds) {
-          const docs = await rag.searchByVector(projectId, context.cleanText, 5, db);
+          const docs = await rag.hybridSearch(projectId, context.cleanText, 5, db);
           allResults.push(...docs);
         }
         allResults.sort((a, b) => b.score - a.score);
@@ -476,26 +476,10 @@ ipcMain.handle('kb:getDefault', () => db.project.getDefault());
 ipcMain.handle('kb:search', async (_, { id, query }) => {
   try {
     if (!query) return [];
-    // 向量搜索（嵌入模型 + kb_chunks.embedding）
-    try {
-      const rag = require('./services/rag');
-      const results = await rag.searchByVector(id, query, 5, db);
-      if (results.length > 0) return results;
-    } catch {}
-    // 向量不可用时回退 SQL LIKE
-    const like = `%${query}%`;
-    let sql = `SELECT DISTINCT d.path, c.content
-      FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
-      WHERE c.content LIKE ?`;
-    const params = [like];
-    if (id) { sql += ' AND d.project_id = ?'; params.push(id); }
-    sql += ' ORDER BY d.file_mtime DESC LIMIT 20';
-    const rows = db.q(sql, ...params);
-    return rows.map(r => ({
-      source: r.path, text: r.content, score: 0,
-      title: r.path ? r.path.split(/[\\/]/).pop() : '未知',
-    }));
-  } catch (e) {
+    const rag = require('./services/rag');
+    const results = await rag.hybridSearch(id, query, 10, db);
+    return results;
+  } catch {
     return [];
   }
 });

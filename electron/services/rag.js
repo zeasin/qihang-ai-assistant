@@ -104,6 +104,141 @@ async function indexProjectChunks(projectId, db, onProgress) {
   return embedded;
 }
 
+function tokenize(text) {
+  const tokens = [];
+  try {
+    const segmenter = new Intl.Segmenter('zh', { granularity: 'word' });
+    for (const s of segmenter.segment(text)) {
+      if (s.isWordLike && s.segment.length >= 2) tokens.push(s.segment.toLowerCase());
+    }
+  } catch {}
+  if (tokens.length === 0) {
+    for (const s of text) {
+      if (/[\u4e00-\u9fff\w]/.test(s)) tokens.push(s.toLowerCase());
+    }
+  }
+  const charBigrams = [];
+  const cleaned = text.replace(/[^\u4e00-\u9fff\w]/g, '').toLowerCase();
+  for (let i = 0; i < cleaned.length - 1; i++) {
+    charBigrams.push(cleaned.slice(i, i + 2));
+  }
+  return { words: [...new Set(tokens)], bigrams: [...new Set(charBigrams)] };
+}
+
+function computeBM25(termFreq, docLen, avgDocLen, totalDocs, docFreq) {
+  const k1 = 1.5, b = 0.75;
+  const idf = Math.log(1 + (totalDocs - docFreq + 0.5) / (docFreq + 0.5));
+  const tf = (termFreq * (k1 + 1)) / (termFreq + k1 * (1 - b + b * (docLen / avgDocLen)));
+  return idf * tf;
+}
+
+function keywordSearch(projectId, query, topK = 10, db) {
+  const { words, bigrams } = tokenize(query);
+  const allTerms = [...words, ...bigrams];
+  const uniqueTerms = [...new Set(allTerms)];
+  if (uniqueTerms.length === 0) return [];
+
+  let rows;
+  if (projectId) {
+    rows = db.q(`SELECT c.id, c.content, d.path, d.file_mtime
+      FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
+      WHERE d.project_id = ?`, projectId);
+  } else {
+    rows = db.q(`SELECT c.id, c.content, d.path, d.file_mtime
+      FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id`);
+  }
+
+  if (!rows.length) return [];
+
+  const docLenList = rows.map(r => r.content.length);
+  const avgDocLen = docLenList.reduce((a, b) => a + b, 0) / docLenList.length;
+  const totalDocs = rows.length;
+
+  const termDocFreq = {};
+  for (const term of uniqueTerms) {
+    termDocFreq[term] = rows.filter(r => r.content.toLowerCase().includes(term)).length;
+  }
+
+  const scored = [];
+  for (const r of rows) {
+    const content = r.content.toLowerCase();
+    let totalScore = 0;
+    for (const term of uniqueTerms) {
+      const termFreq = (content.match(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+      if (termFreq > 0) {
+        totalScore += computeBM25(termFreq, r.content.length, avgDocLen, totalDocs, Math.max(1, termDocFreq[term]));
+      }
+    }
+    if (totalScore > 0) {
+      scored.push({
+        text: r.content,
+        source: r.path,
+        score: totalScore,
+        title: r.path ? r.path.split(/[\\/]/).pop() : '未知',
+      });
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  const maxScore = scored.length > 0 ? scored[0].score : 1;
+  for (const s of scored) s.score = s.score / maxScore;
+  return scored.slice(0, topK).filter(c => c.score > 0.05);
+}
+
+async function hybridSearch(projectId, query, topK = 10, db) {
+  let vectorResults = [];
+  try {
+    const queryEmb = await embed(query);
+    let rows;
+    if (projectId) {
+      rows = db.q(`SELECT c.id, c.content, c.embedding, d.path
+        FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
+        WHERE d.project_id = ? AND c.embedding IS NOT NULL`, projectId);
+    } else {
+      rows = db.q(`SELECT c.id, c.content, c.embedding, d.path
+        FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
+        WHERE c.embedding IS NOT NULL`);
+    }
+    if (rows.length) {
+      vectorResults = rows.map(r => ({
+        text: r.content,
+        source: r.path,
+        score: cosineSimilarity(queryEmb, JSON.parse(r.embedding)),
+        title: r.path ? r.path.split(/[\\/]/).pop() : '未知',
+        _type: 'vector',
+      }));
+      const maxVS = Math.max(...vectorResults.map(r => r.score), 0.01);
+      for (const r of vectorResults) r.score = r.score / maxVS;
+    }
+  } catch {}
+
+  const keywordResults = keywordSearch(projectId, query, topK * 2, db);
+  for (const r of keywordResults) r._type = 'keyword';
+
+  if (!vectorResults.length) return keywordResults.slice(0, topK);
+  if (!keywordResults.length) return vectorResults.slice(0, topK);
+
+  const merged = new Map();
+  for (const r of vectorResults) {
+    const key = r.source + '::' + r.text.slice(0, 100);
+    merged.set(key, { ...r, score: r.score * 0.7, _types: ['vector'] });
+  }
+  for (const r of keywordResults) {
+    const key = r.source + '::' + r.text.slice(0, 100);
+    if (merged.has(key)) {
+      const existing = merged.get(key);
+      existing.score += r.score * 0.3;
+      existing._types.push('keyword');
+    } else {
+      merged.set(key, { ...r, score: r.score * 0.3, _types: ['keyword'] });
+    }
+  }
+
+  const finalResults = [...merged.values()];
+  finalResults.sort((a, b) => b.score - a.score);
+  return finalResults.slice(0, topK).filter(c => c.score > 0.05);
+}
+
 /**
  * 在指定项目中按向量相似度搜索
  * @param {number} projectId
@@ -136,7 +271,9 @@ async function searchByVector(projectId, query, topK = 5, db) {
   }));
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, topK).filter(c => c.score > 0.3);
+  const maxScore = scored.length > 0 ? scored[0].score : 1;
+  for (const s of scored) s.score = s.score / maxScore;
+  return scored.slice(0, topK).filter(c => c.score > 0.2);
 }
 
 /** 测试嵌入模型连接是否正常 */
@@ -179,4 +316,4 @@ async function testConnection(opts = {}) {
   }
 }
 
-module.exports = { configure, chunkText, embed, cosineSimilarity, indexProjectChunks, searchByVector, testConnection };
+module.exports = { configure, chunkText, embed, cosineSimilarity, indexProjectChunks, searchByVector, hybridSearch, keywordSearch, tokenize, testConnection };

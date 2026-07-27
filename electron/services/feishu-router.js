@@ -95,7 +95,7 @@ async function handleQuery(ctx, deps) {
   // search knowledge base projects
   const noteProjects = deps.db.project.list('note');
   for (const p of noteProjects) {
-    const results = await rag.searchByVector(p.id, text, 3, deps.db);
+    const results = await rag.hybridSearch(p.id, text, 3, deps.db);
     if (results.length > 0) {
       reply += `📚 **${p.name}** 中找到以下内容：\n`;
       results.slice(0, 3).forEach(r => {

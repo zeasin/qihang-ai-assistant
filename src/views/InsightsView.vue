@@ -168,6 +168,7 @@ const selectedKb = ref('');
 const kbList = ref<any[]>([]);
 const searchQuery = ref('');
 const searchResults = ref<any[]>([]);
+const searched = ref(false);
 const indexing = ref(false);
 const indexProgress = ref('就绪');
 const indexPhase = ref('idle');
@@ -296,7 +297,8 @@ const performSearch = async () => {
     return;
   }
   try {
-    const results = await API.kb.search("", query);
+    searched.value = true;
+      const results = await API.kb.search("", query);
     searchResults.value = results.map((r: any, i: number) => ({
       id: i,
       title: r.source ? r.source.split(/[\\/]/).pop() : '未知',

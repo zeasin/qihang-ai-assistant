@@ -71,7 +71,7 @@ async function createTools(dbRef) {
       let results = [];
       for (const p of targetProjects) {
         try {
-          const docs = await rag.searchByVector(p.id, params.query, 5, db);
+          const docs = await rag.hybridSearch(p.id, params.query, 5, db);
           results.push(...docs.map(d => ({ ...d, kbName: p.name })));
         } catch (e) {
           logger.warn(`[Orchestrator] KB search error for ${p.name}: ${e.message}`);
