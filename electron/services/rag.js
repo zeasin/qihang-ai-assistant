@@ -137,11 +137,11 @@ function keywordSearch(projectId, query, topK = 10, db) {
 
   let rows;
   if (projectId) {
-    rows = db.q(`SELECT c.id, c.content, d.path, d.file_mtime
+    rows = db.q(`SELECT c.id, c.content, d.path, d.file_mtime, d.project_id
       FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
       WHERE d.project_id = ?`, projectId);
   } else {
-    rows = db.q(`SELECT c.id, c.content, d.path, d.file_mtime
+    rows = db.q(`SELECT c.id, c.content, d.path, d.file_mtime, d.project_id
       FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id`);
   }
   if (!rows.length) return [];
@@ -192,7 +192,7 @@ function keywordSearch(projectId, query, topK = 10, db) {
     if (totalScore === 0) continue;
 
     const title = r.path ? r.path.split(/[\\/]/).pop() : '未知';
-    scored.push({ text: r.content, source: r.path, score: totalScore, title, pathTermHits });
+    scored.push({ text: r.content, source: r.path, score: totalScore, title, pathTermHits, project_id: r.project_id });
   }
 
   scored.sort((a, b) => {
@@ -226,17 +226,17 @@ async function hybridSearch(projectId, query, topK = 10, db) {
     const queryEmb = await embed(query);
     let rows;
     if (projectId) {
-      rows = db.q(`SELECT c.id, c.content, c.embedding, d.path
+      rows = db.q(`SELECT c.id, c.content, c.embedding, d.path, d.project_id
         FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
         WHERE d.project_id = ? AND c.embedding IS NOT NULL`, projectId);
     } else {
-      rows = db.q(`SELECT c.id, c.content, c.embedding, d.path
+      rows = db.q(`SELECT c.id, c.content, c.embedding, d.path, d.project_id
         FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
         WHERE c.embedding IS NOT NULL`);
     }
     if (rows.length) {
       vectorResults = rows.map(r => ({
-        text: r.content, source: r.path,
+        text: r.content, source: r.path, project_id: r.project_id,
         score: cosineSimilarity(queryEmb, JSON.parse(r.embedding)),
         title: r.path ? r.path.split(/[\\/]/).pop() : '未知',
         _type: 'vector',
