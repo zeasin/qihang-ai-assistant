@@ -2,25 +2,13 @@
   <div class="insights-view">
     <div class="content-header">
       <h1 class="content-title">洞察</h1>
-      <div class="kb-select-wrapper">
-        <select class="kb-select" v-model="selectedKb" @change="onKbChange">
-          <option value="">全部笔记库</option>
-          <option v-for="kb in kbList" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
-        </select>
-      </div>
     </div>
-    
     <div class="content-body">
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-icon" style="background:rgba(99,102,241,0.1);color:#6366f1;">📚</div>
-          <div class="stat-value">{{ stats.fileCount }}</div>
-          <div class="stat-label">笔记文件数</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="background:rgba(34,197,94,0.1);color:#22c55e;">🔍</div>
-          <div class="stat-value">{{ stats.chunkCount }}</div>
-          <div class="stat-label">索引片段数</div>
+          <div class="stat-icon" style="background:rgba(139,92,246,0.1);color:#8b5cf6;">📦</div>
+          <div class="stat-value">{{ stats.projectCount }}</div>
+          <div class="stat-label">笔记库数</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">💬</div>
@@ -34,17 +22,55 @@
         </div>
       </div>
 
-      <!-- 搜索 -->
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">🔍 智能搜索</h3>
+      <!-- 索引状态 -->
+      <div class="indexer-card">
+        <div class="indexer-row">
+          <span class="indexer-label">嵌入模型</span>
+          <span class="indexer-value">{{ indexerInfo.model }} @ {{ indexerInfo.host }}</span>
         </div>
+        <div class="indexer-row">
+          <span class="indexer-label">索引状态</span>
+          <span class="indexer-value">
+            <span v-if="indexing">
+              <span class="badge badge-running">{{ indexPhase === 'scan' ? '📄 扫描中' : '🧠 向量化' }}</span>
+              <span class="indexer-stats">{{ indexProgress }}</span>
+            </span>
+            <span v-else class="badge badge-idle">就绪</span>
+            <span class="indexer-stats">{{ indexerInfo.docCount }} 文件 / {{ indexerInfo.chunkCount }} 片段</span>
+          </span>
+        </div>
+        <button class="indexer-btn" :disabled="indexing" @click="startIndex">
+          {{ indexing ? '⏳ 索引中...' : '🔄 手动索引' }}
+        </button>
+      </div>
+
+      <!-- 标签页切换 -->
+      <div class="tabs">
+        <div
+          class="tab"
+          :class="{ active: activeTab === 'search' }"
+          @click="activeTab = 'search'"
+        >🔍 搜索</div>
+        <div
+          class="tab"
+          :class="{ active: activeTab === 'daily' }"
+          @click="activeTab = 'daily'"
+        >📊 日报</div>
+        <div
+          class="tab"
+          :class="{ active: activeTab === 'weekly' }"
+          @click="activeTab = 'weekly'"
+        >📅 周报</div>
+      </div>
+
+      <!-- 搜索 -->
+      <div v-show="activeTab === 'search'" class="card">
         <div class="search-box">
           <input
             v-model="searchQuery"
             class="search-input"
-            placeholder="输入关键词搜索..."
-            @keydown.enter="performSearch"
+            placeholder="输入关键词搜索笔记..."
+            
           >
           <button class="search-btn" @click="performSearch">搜索</button>
         </div>
@@ -61,15 +87,15 @@
             <div class="search-item-title">{{ result.title }}</div>
             <div class="search-item-path">{{ result.path }}</div>
             <div class="search-item-preview">{{ result.preview }}</div>
-            <div class="search-score">匹配度: {{ result.score }}</div>
           </div>
         </div>
       </div>
 
-      <!-- 综合日报 -->
-      <div class="card">
-        <div class="card-header">
+      <!-- 日报 -->
+      <div v-show="activeTab === 'daily'" class="card">
+        <div class="report-header-bar">
           <h3 class="card-title">📊 综合日报</h3>
+          <span class="report-schedule">{{ reportScheduleText }}</span>
         </div>
         <div v-if="reports.length" class="report-list">
           <div
@@ -97,134 +123,34 @@
         </div>
       </div>
 
-      <!-- 子项目分析 -->
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">📂 子项目分析</h3>
-          <span style="font-size:12px;color:#94a3b8;">共 {{ projects.length }} 个项目</span>
+      <!-- 周报 -->
+      <div v-show="activeTab === 'weekly'" class="card">
+        <div class="report-header-bar">
+          <h3 class="card-title">📅 综合周报</h3>
         </div>
-        <div class="project-list">
+        <div v-if="weeklyReports.length" class="report-list">
           <div
-            v-for="(project, index) in projects"
-            :key="index"
-            class="project-card"
-            @click="toggleProject(index)"
+            v-for="(r, i) in weeklyReports"
+            :key="r.id"
+            class="report-item"
+            :class="{ active: expandedWeeklyReport === i }"
+            @click="toggleWeeklyReport(i, r)"
           >
-            <div class="project-header">
-              <span class="project-name">{{ project.name }}</span>
-              <span class="project-status" :class="project.hasAnalysis ? 'analyzed' : 'not-analyzed'">
-                {{ project.hasAnalysis ? '已分析' : '未分析' }}
-              </span>
+            <div class="report-header">
+              <span class="report-date">{{ r.report_date || '周报' }}</span>
+              <span class="report-toggle">{{ expandedWeeklyReport === i ? '▾' : '▸' }}</span>
             </div>
-            <div class="project-info">
-              <span>📄 {{ project.fileCount }} 文件</span>
-              <span>📁 {{ formatSize(project.totalSize) }}</span>
-            </div>
-            <div class="project-detail" :class="{ active: expandedProject === index }">
-              <div v-if="project.analysis" class="project-analysis" v-html="renderMarkdown(project.analysis)"></div>
-              <button
-                v-else
-                class="project-btn primary"
-                @click.stop="analyzeProject(project.name)"
-              >
-                🔍 AI分析
-              </button>
+            <div class="report-summary">{{ (r.summary || '').slice(0, 100) }}</div>
+            <div class="report-time">{{ r.created_at }}</div>
+            <div v-if="expandedWeeklyReport === i" class="report-detail">
+              <div class="preview" v-html="renderMarkdown(weeklyReportDetail)"></div>
             </div>
           </div>
         </div>
-        <div v-if="projects.length === 0" class="empty-state">
-          <div class="empty-icon">📂</div>
-          <div class="empty-title">暂无子项目</div>
-          <div class="empty-desc">在笔记库中创建文件夹即可作为子项目</div>
-        </div>
-      </div>
-
-      <!-- 标签云 -->
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">🏷️ 知识标签</h3>
-        </div>
-        <div class="tag-cloud">
-          <span
-            v-for="(tag, index) in tags"
-            :key="index"
-            class="tag-item"
-            :style="getTagStyle(tag.count)"
-            @click="searchQuery = tag.name; performSearch()"
-          >
-            {{ tag.name }}
-          </span>
-        </div>
-        <div v-if="tags.length === 0" class="empty-state">
-          <div class="empty-icon">🏷️</div>
-          <div class="empty-title">暂无标签</div>
-          <div class="empty-desc">标签将从笔记内容中自动提取</div>
-        </div>
-      </div>
-
-      <!-- 热力图 -->
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">🔥 活动热力图</h3>
-        </div>
-        <div class="heatmap-grid">
-          <div
-            v-for="(count, date) in heatmap"
-            :key="date"
-            class="heatmap-cell"
-            :style="{ background: getHeatmapColor(count) }"
-            :title="date + ': ' + count + '次修改'"
-          ></div>
-        </div>
-        <div class="heatmap-legend">
-          <span>少</span>
-          <div class="heatmap-legend-cell" style="background:#ebedf0;"></div>
-          <div class="heatmap-legend-cell" style="background:#c6e48b;"></div>
-          <div class="heatmap-legend-cell" style="background:#7bc96f;"></div>
-          <div class="heatmap-legend-cell" style="background:#239a3b;"></div>
-          <div class="heatmap-legend-cell" style="background:#196127;"></div>
-          <span>多</span>
-        </div>
-      </div>
-
-      <!-- AI 快速操作 -->
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">🎯 AI 学习助手</h3>
-        </div>
-        <div class="action-grid">
-          <div class="action-card" @click="runQuickAction('summarize-week')">
-            <div class="action-icon">📅</div>
-            <div class="action-title">周总结</div>
-            <div class="action-desc">自动生成本周学习总结</div>
-            <div class="action-result" :class="{ active: quickActionResult['summarize-week'] }">
-              <div v-html="renderMarkdown(quickActionResult['summarize-week'])"></div>
-            </div>
-          </div>
-          <div class="action-card" @click="runQuickAction('extract-key-points')">
-            <div class="action-icon">🔑</div>
-            <div class="action-title">知识提取</div>
-            <div class="action-desc">提取笔记中的关键知识点</div>
-            <div class="action-result" :class="{ active: quickActionResult['extract-key-points'] }">
-              <div v-html="renderMarkdown(quickActionResult['extract-key-points'])"></div>
-            </div>
-          </div>
-          <div class="action-card" @click="runQuickAction('generate-review-plan')">
-            <div class="action-icon">📋</div>
-            <div class="action-title">复习计划</div>
-            <div class="action-desc">生成个性化复习计划</div>
-            <div class="action-result" :class="{ active: quickActionResult['generate-review-plan'] }">
-              <div v-html="renderMarkdown(quickActionResult['generate-review-plan'])"></div>
-            </div>
-          </div>
-          <div class="action-card" @click="runQuickAction('find-related')">
-            <div class="action-icon">🔗</div>
-            <div class="action-title">知识关联</div>
-            <div class="action-desc">发现相关知识点和主题</div>
-            <div class="action-result" :class="{ active: quickActionResult['find-related'] }">
-              <div v-html="renderMarkdown(quickActionResult['find-related'])"></div>
-            </div>
-          </div>
+        <div v-else class="empty-state">
+          <div class="empty-icon">📅</div>
+          <div class="empty-title">暂无周报</div>
+          <div class="empty-desc">周报功能待启用</div>
         </div>
       </div>
     </div>
@@ -237,15 +163,21 @@ import { ref, computed, onMounted } from 'vue';
 
 const API = window.electronAPI;
 
+const activeTab = ref('search');
 const selectedKb = ref('');
 const kbList = ref<any[]>([]);
 const searchQuery = ref('');
 const searchResults = ref<any[]>([]);
+const indexing = ref(false);
+const indexProgress = ref('就绪');
+const indexPhase = ref('idle');
+const indexerInfo = ref({ model: '', host: '', docCount: 0, chunkCount: 0, running: false });
 
 const stats = ref({
   fileCount: 0,
   chunkCount: 0,
   todayModified: 0,
+  projectCount: 0,
   totalChats: 0
 });
 
@@ -253,6 +185,10 @@ const reports = ref<any[]>([]);
 const expandedReport = ref<number | null>(null);
 const reportDetail = ref('');
 const reportCron = ref('');
+
+const weeklyReports = ref<any[]>([]);
+const expandedWeeklyReport = ref<number | null>(null);
+const weeklyReportDetail = ref('');
 
 const reportScheduleText = computed(() => {
   if (reportCron.value) {
@@ -265,15 +201,6 @@ const reportScheduleText = computed(() => {
   }
   return '每日自动生成综合日报';
 });
-
-// ========== 项目、标签、热力图 ==========
-const projects = ref<any[]>([]);
-const tags = ref<any[]>([]);
-const heatmap = ref<any>({});
-const expandedProject = ref<number | null>(null);
-
-// ========== 快速操作 ==========
-const quickActionResult = ref<Record<string, string>>({});
 
 // ========== 工具函数 ==========
 const renderMarkdown = (text: string) => {
@@ -361,37 +288,25 @@ const renderMarkdown = (text: string) => {
   return out.join('\n');
 };
 
-function formatSize(bytes: number): string {
-  if (!bytes) return '0 B';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-}
-
-function getTagStyle(count: number) {
-  const maxCount = tags.value.length > 0 ? Math.max(...tags.value.map(t => t.count)) : 1;
-  const ratio = count / maxCount;
-  const fontSize = `${12 + ratio * 6}px`;
-  const hue = 250 + ratio * 30;
-  const saturation = 40 + ratio * 20;
-  const lightness = 90 - ratio * 15;
-  return {
-    fontSize,
-    background: `hsl(${hue}, ${saturation}%, ${lightness}%)`,
-    color: ratio > 0.5 ? '#6366f1' : '#64748b'
-  };
-}
-
-function getHeatmapColor(count: number): string {
-  if (count === 0) return '#ebedf0';
-  if (count <= 2) return '#c6e48b';
-  if (count <= 5) return '#7bc96f';
-  if (count <= 10) return '#239a3b';
-  return '#196127';
-}
-
 // ========== 搜索 ==========
 const performSearch = async () => {
+  const query = searchQuery.value.trim();
+  if (!query) {
+    searchResults.value = [];
+    return;
+  }
+  try {
+    const results = await API.kb.search("", query);
+    searchResults.value = results.map((r: any, i: number) => ({
+      id: i,
+      title: r.source ? r.source.split(/[\\/]/).pop() : '未知',
+      path: r.source || '',
+      preview: (r.text || '').slice(0, 200),
+      score: r.score ? (r.score * 100).toFixed(1) + '%' : '0%'
+    }));
+  } catch {
+    searchResults.value = [];
+  }
 };
 
 const openResult = (result: any) => {
@@ -400,14 +315,11 @@ const openResult = (result: any) => {
 // ========== 笔记库切换 ==========
 const onKbChange = async () => {
   searchResults.value = [];
-  expandedProject.value = null;
+  await loadDailyReports();
+  await loadWeeklyReports();
 };
 
-// ========== 项目折叠/展开 ==========
-function toggleProject(index: number) {
-  expandedProject.value = expandedProject.value === index ? null : index;
-}
-
+// ========== 日报折叠/展开 ==========
 function toggleReport(i: number, r: any) {
   if (expandedReport.value === i) {
     expandedReport.value = null;
@@ -417,13 +329,78 @@ function toggleReport(i: number, r: any) {
   }
 }
 
-// ========== AI 分析项目 ==========
-async function analyzeProject(projectName: string) {
+// ========== 周报折叠/展开 ==========
+function toggleWeeklyReport(i: number, r: any) {
+  if (expandedWeeklyReport.value === i) {
+    expandedWeeklyReport.value = null;
+  } else {
+    expandedWeeklyReport.value = i;
+    weeklyReportDetail.value = r.content || '无内容';
+  }
 }
 
-// ========== AI 快速操作 ==========
-async function runQuickAction(action: string) {
-  quickActionResult.value[action] = '功能不可用（后端未连接）';
+// ========== 加载数据 ==========
+async function loadDailyReports() {
+  try {
+    reports.value = await API.insights.reports();
+    if (reports.value.length && expandedReport.value === null) {
+      expandedReport.value = 0;
+      reportDetail.value = reports.value[0].content || '无内容';
+    }
+  } catch { reports.value = []; }
+}
+
+async function loadWeeklyReports() {
+  try {
+    weeklyReports.value = await API.insights.weeklyReports();
+  } catch { weeklyReports.value = []; }
+}
+
+async function clearIndex() {
+  if (!confirm('确定清空所有索引数据？')) return;
+  try {
+    await API.insights.clearIndex();
+    stats.value = { fileCount: 0, chunkCount: 0, projectCount: stats.value.projectCount, totalChats: stats.value.totalChats, todayModified: 0 };
+    indexerInfo.value.docCount = 0;
+    indexerInfo.value.chunkCount = 0;
+  } catch {}
+}
+
+async function loadIndexerInfo() {
+  try {
+    indexerInfo.value = await API.insights.indexerInfo();
+  } catch {}
+}
+
+async function startIndex() {
+  indexing.value = true;
+  indexPhase.value = 'scan';
+  indexProgress.value = '准备开始...';
+
+  const onProgress = (data: any) => {
+    if (data.phase === 'scan') {
+      indexPhase.value = 'scan';
+      indexProgress.value = `扫描文件 ${data.current}/${data.total}: ${data.file}`;
+      stats.value.fileCount = data.total;
+      indexerInfo.value.docCount = data.total;
+    } else if (data.phase === 'embed') {
+      indexPhase.value = 'embed';
+      indexProgress.value = `向量化 ${data.current}/${data.total} 片段`;
+      stats.value.chunkCount = data.total;
+    } else if (data.phase === 'done') {
+      indexPhase.value = 'idle';
+      indexProgress.value = '索引完成 ✓';
+    }
+  };
+  API.on('indexer:progress', onProgress);
+
+  try {
+    await API.service.indexAll();
+    await loadIndexerInfo();
+  } catch {}
+  indexing.value = false;
+  API.removeAllListeners('indexer:progress');
+  setTimeout(() => { indexProgress.value = '就绪'; }, 3000);
 }
 
 onMounted(async () => {
@@ -434,13 +411,9 @@ onMounted(async () => {
     const list = await API.kb.list();
     kbList.value = list;
   } catch {}
-  try {
-    reports.value = await API.insights.reports();
-    if (reports.value.length) {
-      expandedReport.value = 0;
-      reportDetail.value = reports.value[0].content || '无内容';
-    }
-  } catch {}
+  await loadDailyReports();
+  await loadWeeklyReports();
+  await loadIndexerInfo();
   // Load task list to get daily report schedule time
   try {
     const tasks = await API.task.list();
@@ -641,6 +614,108 @@ onMounted(async () => {
   margin-bottom: 6px;
 }
 
+/* 标签页 */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: var(--bg-main);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  border: 1px solid var(--border);
+}
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tab:hover { color: var(--text-primary); background: rgba(0,0,0,0.03); }
+.tab.active { background: white; color: var(--primary); box-shadow: var(--shadow-sm); }
+
+/* 报告头部 */
+.report-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.report-schedule {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 索引信息 */
+.indexer-card {
+  background: white;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.indexer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.indexer-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.indexer-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.indexer-stats {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.badge-running {
+  background: rgba(251, 191, 36, 0.15);
+  color: #d97706;
+}
+.badge-gray { background: rgba(148,163,184,0.1); color: #94a3b8; }
+.badge-idle {
+  background: rgba(34, 197, 94, 0.1);
+  color: #16a34a;
+}
+.indexer-btn {
+  margin-left: auto;
+  padding: 8px 16px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: white;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.indexer-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.indexer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .search-item-preview {
   font-size: 13px;
   color: var(--text-secondary);
@@ -680,13 +755,6 @@ onMounted(async () => {
   color: var(--text-muted);
 }
 
-/* 项目分析 */
-.project-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
-}
-
 /* 日报列表 */
 .report-list { display: flex; flex-direction: column; gap: 6px; }
 .report-item { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s; }
@@ -700,189 +768,4 @@ onMounted(async () => {
 .report-detail { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 .report-detail .preview { font-size: 13px; line-height: 1.8; }
 
-.project-card {
-  background: white;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  padding: 16px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.project-card:hover {
-  border-color: var(--primary);
-  box-shadow: var(--shadow-md);
-}
-
-.project-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.project-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.project-status {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.project-status.analyzed {
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
-}
-
-.project-status.not-analyzed {
-  background: rgba(148, 163, 184, 0.1);
-  color: #94a3b8;
-}
-
-.project-info {
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.project-detail {
-  display: none;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.project-detail.active {
-  display: block;
-}
-
-.project-analysis {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.6;
-}
-
-.project-btn {
-  padding: 6px 12px;
-  font-size: 12px;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.project-btn.primary {
-  background: var(--primary);
-  color: white;
-}
-
-.project-btn.primary:hover {
-  background: var(--primary-dark);
-}
-
-/* 标签云 */
-.tag-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tag-item {
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.tag-item:hover {
-  transform: scale(1.05);
-}
-
-/* 热力图 */
-.heatmap-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-
-.heatmap-cell {
-  width: 14px;
-  height: 14px;
-  border-radius: 2px;
-}
-
-.heatmap-legend {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 12px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.heatmap-legend-cell {
-  width: 14px;
-  height: 14px;
-  border-radius: 2px;
-}
-
-/* AI 快速操作 */
-.action-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
-}
-
-.action-card {
-  background: white;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  padding: 16px;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-align: center;
-}
-
-.action-card:hover {
-  border-color: var(--primary);
-  box-shadow: var(--shadow-md);
-}
-
-.action-icon {
-  font-size: 32px;
-  margin-bottom: 8px;
-}
-
-.action-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
-  margin-bottom: 4px;
-}
-
-.action-desc {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.action-result {
-  margin-top: 12px;
-  padding: 12px;
-  background: var(--bg-main);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  display: none;
-}
-
-.action-result.active {
-  display: block;
-}
 </style>

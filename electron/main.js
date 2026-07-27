@@ -16,6 +16,12 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (err) => {
   if (err && err.code === 'EPIPE') return;
 });
+// 流层面的 EPIPE 不会被 uncaughtException 捕获，需要直接绑定 error listener
+for (const s of [process.stdout, process.stderr]) {
+  if (s && typeof s.on === 'function') {
+    s.on('error', (err) => { if (err && err.code === 'EPIPE') {} });
+  }
+}
 
 // Polyfill for Electron: undici v6 (bundled with pi-agent) expects worker_threads.markAsUncloneable
 try {
@@ -330,7 +336,7 @@ const feishuMessageHandler = async (msg) => {
         const rag = require('./services/rag');
         let allResults = [];
         for (const projectId of context.projectIds) {
-          const docs = await rag.searchKnowledgeBase(projectId, context.cleanText);
+          const docs = await rag.searchByVector(projectId, context.cleanText, 5, db);
           allResults.push(...docs);
         }
         allResults.sort((a, b) => b.score - a.score);
@@ -469,15 +475,34 @@ ipcMain.handle('kb:setDefault', (_, { id }) => db.project.setDefault(id));
 ipcMain.handle('kb:getDefault', () => db.project.getDefault());
 ipcMain.handle('kb:search', async (_, { id, query }) => {
   try {
-    const rag = require('./services/rag');
-    return await rag.searchKnowledgeBase(id, query);
+    if (!query) return [];
+    // 向量搜索（嵌入模型 + kb_chunks.embedding）
+    try {
+      const rag = require('./services/rag');
+      const results = await rag.searchByVector(id, query, 5, db);
+      if (results.length > 0) return results;
+    } catch {}
+    // 向量不可用时回退 SQL LIKE
+    const like = `%${query}%`;
+    let sql = `SELECT DISTINCT d.path, c.content
+      FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
+      WHERE c.content LIKE ?`;
+    const params = [like];
+    if (id) { sql += ' AND d.project_id = ?'; params.push(id); }
+    sql += ' ORDER BY d.file_mtime DESC LIMIT 20';
+    const rows = db.q(sql, ...params);
+    return rows.map(r => ({
+      source: r.path, text: r.content, score: 0,
+      title: r.path ? r.path.split(/[\\/]/).pop() : '未知',
+    }));
   } catch (e) {
     return [];
   }
 });
 ipcMain.handle('kb:status', (_, { id }) => {
-  const rag = require('./services/rag');
-  return rag.getIndexStatus(id);
+  const total = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)", id) || {}).c || 0;
+  const embedded = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE embedding IS NOT NULL AND doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)", id) || {}).c || 0;
+  return { indexed: total > 0, chunks: total, embedded };
 });
 
 // --- Module ---
@@ -771,10 +796,93 @@ ipcMain.handle('insights:stats', () => {
   const chunkCount = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks") || {}).c || 0;
   const totalChats = (db.qOne("SELECT COUNT(*) as c FROM prj_messages") || {}).c || 0;
   const todayModified = (db.qOne("SELECT COUNT(*) as c FROM kb_documents WHERE indexed_at >= date('now')") || {}).c || 0;
-  return { fileCount, chunkCount, totalChats, todayModified };
+  const projectCount = (db.qOne("SELECT COUNT(*) as c FROM prj_projects WHERE type = 'note'") || {}).c || 0;
+  return { fileCount, chunkCount, totalChats, todayModified, projectCount };
 });
 ipcMain.handle('insights:reports', () => {
   return db.q("SELECT id, type, report_date, content, substr(content, 1, 100) as summary, created_at FROM ai_analysis WHERE type = 'daily_report' ORDER BY created_at DESC LIMIT 10");
+});
+ipcMain.handle('insights:weeklyReports', () => {
+  return db.q("SELECT id, type, report_date, content, substr(content, 1, 100) as summary, created_at FROM ai_analysis WHERE type = 'weekly_report' ORDER BY created_at DESC LIMIT 10");
+});
+ipcMain.handle('insights:subProjects', (_, { projectId }) => {
+  const rows = db.q("SELECT path, content, file_mtime FROM kb_documents WHERE project_id = ?", projectId);
+  const dirMap = {};
+  for (const row of rows) {
+    const dir = row.path ? row.path.split(/[\\/]/).slice(-2, -1)[0] || '根目录' : '根目录';
+    if (!dirMap[dir]) dirMap[dir] = { name: dir, fileCount: 0, totalSize: 0, files: [] };
+    dirMap[dir].fileCount++;
+    dirMap[dir].totalSize += (row.content || '').length;
+    dirMap[dir].files.push(row.path);
+  }
+  const result = Object.values(dirMap);
+  const analyses = db.q("SELECT dir_path, content FROM ai_analysis WHERE type = 'project_analysis' AND project_id = ?", projectId);
+  for (const p of result) {
+    const a = analyses.find(a => a.dir_path === p.name);
+    if (a) p.analysis = a.content;
+    p.hasAnalysis = !!a;
+  }
+  return result;
+});
+ipcMain.handle('insights:tags', (_, { projectId }) => {
+  const rows = db.q("SELECT content FROM kb_documents WHERE project_id = ?", projectId);
+  const tagCount = {};
+  for (const row of rows) {
+    const content = row.content || '';
+    const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
+    if (frontmatter) {
+      const tagsMatch = frontmatter[1].match(/tags\s*:\s*\[([^\]]*)\]/);
+      if (tagsMatch) {
+        tagsMatch[1].split(',').forEach(t => {
+          const tag = t.trim().replace(/['"]/g, '');
+          if (tag) tagCount[tag] = (tagCount[tag] || 0) + 1;
+        });
+      }
+    }
+    const hashtags = content.match(/#([\p{L}\p{N}_\-\u4e00-\u9fff]+)/gu);
+    if (hashtags) {
+      hashtags.forEach(t => {
+        const tag = t.slice(1);
+        if (tag) tagCount[tag] = (tagCount[tag] || 0) + 1;
+      });
+    }
+  }
+  return Object.entries(tagCount).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+});
+ipcMain.handle('insights:heatmap', (_, { projectId }) => {
+  const rows = db.q("SELECT file_mtime FROM kb_documents WHERE project_id = ? AND file_mtime IS NOT NULL", projectId);
+  const dateCount = {};
+  const now = Date.now();
+  for (const row of rows) {
+    const d = new Date(row.file_mtime);
+    const key = d.toISOString().slice(0, 10);
+    dateCount[key] = (dateCount[key] || 0) + 1;
+  }
+  const heatmap = {};
+  for (let i = 364; i >= 0; i--) {
+    const d = new Date(now - i * 86400000);
+    const key = d.toISOString().slice(0, 10);
+    heatmap[key] = dateCount[key] || 0;
+  }
+  return heatmap;
+});
+ipcMain.handle('insights:analyzeProject', async (_, { projectId, projectName }) => {
+  const rows = db.q("SELECT path, content FROM kb_documents WHERE project_id = ? AND path LIKE ?", projectId, `%${projectName}%`);
+  if (!rows.length) return { error: '该项目没有可分析的文件' };
+  try {
+    const orchestrator = require('./services/orchestrator');
+    const text = await orchestrator.generateProjectAnalysis(projectName, projectId, rows);
+    db.run("INSERT INTO ai_analysis (project_id, type, content, dir_path, created_at, updated_at) VALUES (?, 'project_analysis', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
+      projectId, text, projectName);
+    return { text };
+  } catch (e) {
+    const fileList = rows.map((r, i) => `${i + 1}. ${r.path.split(/[\\/]/).pop()} (${(r.content || '').length} 字符)`).join('\n');
+    const totalSize = rows.reduce((s, r) => s + (r.content || '').length, 0);
+    const text = `## ${projectName} 分析报告\n\n由于 AI 服务不可用，以下为基于文件元数据的统计：\n\n- 文件数量: ${rows.length}\n- 总大小: ${(totalSize / 1024).toFixed(1)} KB\n\n### 文件列表\n\n${fileList}`;
+    db.run("INSERT INTO ai_analysis (project_id, type, content, dir_path, created_at, updated_at) VALUES (?, 'project_analysis', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
+      projectId, text, projectName);
+    return { text };
+  }
 });
 ipcMain.handle('service:startIndexer', () => {
   indexer.start();
@@ -787,8 +895,49 @@ ipcMain.handle('service:stopIndexer', () => {
   return true;
 });
 ipcMain.handle('service:indexAll', async () => {
-  await indexer.indexAll();
+  const sendProgress = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('indexer:progress', data);
+    }
+  };
+  sendProgress({ phase: 'scan', current: 0, total: 0, file: '' });
+
+  // 在子进程中执行索引，避免阻塞主线程
+  const { fork } = require('child_process');
+  const worker = fork(path.join(__dirname, 'services', 'index-worker.js'));
+
+  const noteProjects = db.project.list('note');
+  const projectIds = noteProjects.map(p => p.id);
+
+  return new Promise((resolve) => {
+    worker.on('message', (msg) => {
+      if (msg.type === 'progress') {
+        sendProgress(msg);
+      } else if (msg.type === 'done' || msg.type === 'error') {
+        sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
+        worker.kill();
+        resolve(true);
+      }
+    });
+    worker.on('error', () => { sendProgress({ phase: 'done', current: 0, total: 0, file: '' }); resolve(true); });
+    worker.on('exit', () => { resolve(true); });
+    worker.send({ type: 'start', projectIds });
+  });
+});
+ipcMain.handle('insights:clearIndex', () => {
+  db.run('DELETE FROM kb_chunks');
+  db.run('DELETE FROM kb_documents');
   return true;
+});
+
+ipcMain.handle('insights:indexerInfo', () => {
+  return {
+    running: indexer.isRunning(),
+    model: db.configGet('embedModel') || 'nomic-embed-text',
+    host: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
+    docCount: (db.qOne("SELECT COUNT(*) as c FROM kb_documents") || {}).c || 0,
+    chunkCount: (db.qOne("SELECT COUNT(*) as c FROM kb_chunks") || {}).c || 0,
+  };
 });
 
 // --- Dialog ---

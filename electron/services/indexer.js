@@ -7,17 +7,26 @@ const logger = require('./logger');
 let watchers = new Map();
 let running = false;
 
-async function indexSingle(projectId) {
+async function indexSingle(projectId, onProgress) {
   const project = db.project.get(projectId);
   if (!project) throw new Error(`项目 ${projectId} 不存在`);
   if (project.type !== 'note') throw new Error(`项目 ${project.name} 不是笔记库类型`);
   logger.info(`[Indexer] indexing: ${project.name} (${project.dir})`);
-  const result = await rag.indexKnowledgeBase(projectId, project.dir);
+
+  // 读取项目级忽略配置
+  const ignoreDirs = project.ignore_dirs ? project.ignore_dirs.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const ignoreFiles = project.ignore_files ? project.ignore_files.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  // 清空旧索引
   db.project.deleteDocs(projectId);
 
+  // 扫描文件，写入 kb_documents 和 kb_chunks（纯文本）
   const files = [];
-  walkDir(project.dir, files);
-  for (const file of files) {
+  walkDir(project.dir, files, ignoreDirs, ignoreFiles);
+  const total = files.length;
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    if (onProgress) onProgress({ phase: 'scan', current: i + 1, total, file: path.basename(file) });
     const content = fs.readFileSync(file, 'utf-8');
     const stat = fs.statSync(file);
     const docId = db.project.insertDoc(projectId, file, content, stat.mtimeMs);
@@ -26,15 +35,20 @@ async function indexSingle(projectId) {
       db.project.insertChunk(docId, chunk);
     }
   }
-  logger.info(`[Indexer] indexed ${result.totalChunks} chunks from ${files.length} files`);
-  return result;
+  logger.info(`[Indexer] indexed ${total} files, generating embeddings...`);
+
+  // 为所有新 chunk 生成向量嵌入
+  if (onProgress) onProgress({ phase: 'embed', current: 0, total: 0, file: '' });
+  const embedded = await rag.indexProjectChunks(projectId, db, onProgress);
+  logger.info(`[Indexer] done: ${total} files, ${embedded} chunks embedded`);
+  return { totalChunks: embedded, files: total };
 }
 
-async function indexAll() {
+async function indexAll(onProgress) {
   const noteProjects = db.project.list('note');
   for (const p of noteProjects) {
     try {
-      await indexSingle(p.id);
+      await indexSingle(p.id, onProgress);
     } catch (e) {
       logger.error(`[Indexer] error indexing ${p.name}:`, e.message);
     }
@@ -98,13 +112,16 @@ function isRunning() { return running; }
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.opencode', '__pycache__', '.cache']);
 
-function walkDir(dir, files) {
+function walkDir(dir, files, ignoreDirs = [], ignoreFiles = []) {
   if (!fs.existsSync(dir)) return;
+  const skipDirs = new Set([...IGNORED_DIRS, ...ignoreDirs.map(d => d.trim()).filter(Boolean)]);
+  const skipFilePatterns = ignoreFiles.map(f => f.trim()).filter(Boolean).map(f => new RegExp(f.replace(/\*/g, '.*').replace(/\?/g, '.')));
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      if (IGNORED_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
-      walkDir(path.join(dir, entry.name), files);
+      if (skipDirs.has(entry.name) || entry.name.startsWith('.')) continue;
+      walkDir(path.join(dir, entry.name), files, ignoreDirs, ignoreFiles);
     } else if (entry.name.endsWith('.md')) {
+      if (skipFilePatterns.some(p => p.test(entry.name))) continue;
       files.push(path.join(dir, entry.name));
     }
   }

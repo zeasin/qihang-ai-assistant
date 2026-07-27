@@ -71,7 +71,7 @@ async function createTools(dbRef) {
       let results = [];
       for (const p of targetProjects) {
         try {
-          const docs = await rag.searchKnowledgeBase(p.id, params.query);
+          const docs = await rag.searchByVector(p.id, params.query, 5, db);
           results.push(...docs.map(d => ({ ...d, kbName: p.name })));
         } catch (e) {
           logger.warn(`[Orchestrator] KB search error for ${p.name}: ${e.message}`);
@@ -562,4 +562,53 @@ async function generateDailyReport(promptText, kbId) {
   });
 }
 
-module.exports = { createSession, chat, checkStatus, createTools, generateDailyReport };
+async function generateProjectAnalysis(projectName, kbId, files) {
+  const sdk = await ensurePi();
+  logger.info('[Orchestrator] generateProjectAnalysis: project=%s', projectName);
+
+  const result = await sdk.createAgentSession({
+    cwd: process.cwd(),
+    tools: [],
+    sessionManager: sdk.SessionManager.inMemory(),
+  });
+  const session = result.session;
+
+  const fileList = files.map(f => `- ${f.path}\n\`\`\`\n${(f.content || '').slice(0, 2000)}\n\`\`\``).join('\n\n');
+  const promptText = `请对以下项目"${projectName}"进行详细分析，包括：
+1. 项目概述：该项目的主要内容和目的
+2. 技术/主题分析：涉及的技术栈、知识领域、核心概念
+3. 内容质量评估：文件数量、内容深度、完整性
+4. 改进建议：如何优化或扩展该项目
+
+项目文件列表（共 ${files.length} 个文件）：
+${fileList}
+
+请用中文回答，使用 Markdown 格式。`;
+
+  return new Promise((resolve, reject) => {
+    let fullText = '';
+    const startTime = Date.now();
+
+    session.subscribe((event) => {
+      if (event.type === 'message_update') {
+        const msg = event.assistantMessageEvent;
+        if (msg?.type === 'text_delta') fullText += msg.delta;
+      }
+    });
+
+    session.prompt(promptText)
+      .then(() => {
+        const elapsed = Date.now() - startTime;
+        logger.info(`[Orchestrator] Project analysis generated in ${elapsed}ms, length: ${fullText.length}`);
+        setTimeout(() => { try { session.dispose(); } catch {} }, 1000);
+        resolve(fullText);
+      })
+      .catch((err) => {
+        logger.error(`[Orchestrator] Project analysis FAILED: ${err.message}`);
+        try { session.dispose(); } catch {}
+        reject(err);
+      });
+  });
+}
+
+module.exports = { createSession, chat, checkStatus, createTools, generateDailyReport, generateProjectAnalysis };

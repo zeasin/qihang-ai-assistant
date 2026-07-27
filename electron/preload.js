@@ -130,6 +130,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   insights: {
     stats: () => ipcRenderer.invoke('insights:stats'),
     reports: () => ipcRenderer.invoke('insights:reports'),
+    weeklyReports: () => ipcRenderer.invoke('insights:weeklyReports'),
+    indexerInfo: () => ipcRenderer.invoke('insights:indexerInfo'),
+    clearIndex: () => ipcRenderer.invoke('insights:clearIndex'),
   },
 
   // Config
@@ -167,6 +170,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'chat:delta', 'chat:status', 'chat:tool', 'chat:done', 'chat:error',
       'coding:delta', 'coding:status', 'coding:tool', 'coding:done', 'coding:error',
       'kb:scan-progress', 'service:status', 'service:toggle', 'feishu:message',
+      'indexer:progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (event, ...args) => callback(...args));

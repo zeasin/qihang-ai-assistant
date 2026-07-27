@@ -88,7 +88,8 @@ function initSchema() {
     CREATE TABLE IF NOT EXISTS kb_chunks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       doc_id INTEGER NOT NULL REFERENCES kb_documents(id),
-      content TEXT NOT NULL
+      content TEXT NOT NULL,
+      embedding TEXT
     );
 
     CREATE TABLE IF NOT EXISTS kb_file_index_meta (
@@ -199,6 +200,8 @@ function initSchema() {
     );
 
   `);
+  // 确保 kb_chunks 有 embedding 列（兼容旧表）
+  try { db.run("ALTER TABLE kb_chunks ADD COLUMN embedding TEXT"); } catch {}
   saveDb();
 }
 
@@ -303,7 +306,13 @@ const project = {
     const r = qOne('SELECT id FROM kb_documents WHERE project_id = ? AND path = ?', projectId, pathVal);
     return r.id;
   },
-  insertChunk: (docId, content) => run('INSERT INTO kb_chunks (doc_id, content) VALUES (?, ?)', docId, content),
+  insertChunk: (docId, content, embedding) => {
+    if (embedding) {
+      run('INSERT INTO kb_chunks (doc_id, content, embedding) VALUES (?, ?, ?)', docId, content, JSON.stringify(embedding));
+    } else {
+      run('INSERT INTO kb_chunks (doc_id, content) VALUES (?, ?)', docId, content);
+    }
+  },
   getChunks: (projectId) => q('SELECT c.content FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id WHERE d.project_id = ?', projectId).map(r => r.content),
   deleteDocs: (projectId) => {
     run('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', projectId);

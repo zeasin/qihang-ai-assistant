@@ -89,6 +89,30 @@
         <span v-if="embeddingStatus" class="text-muted" :style="{ color: embeddingStatus.startsWith('✅') ? '#22c55e' : embeddingStatus.startsWith('⏳') ? '#f59e0b' : '#ef4444' }">{{ embeddingStatus }}</span>
       </div>
 
+      <!-- 笔记库索引排除配置 -->
+      <div class="card">
+        <h2>📂 笔记库索引配置</h2>
+        <div class="text-muted mb-2">配置每个笔记库索引时排除的目录和文件（逗号分隔，支持通配符 *）。</div>
+        <div v-for="p in noteProjects" :key="p.id" class="project-ignore-config">
+          <div class="project-ignore-header">
+            <span class="project-ignore-name">{{ p.name }}</span>
+            <span class="project-ignore-dir">{{ p.dir }}</span>
+          </div>
+          <div class="form-row" style="gap:8px;flex-wrap:wrap;">
+            <div class="form-group" style="flex:1;min-width:200px;">
+              <label style="font-size:12px;color:var(--text-muted);">排除目录</label>
+              <input v-model="p.ignore_dirs_local" type="text" class="form-control" placeholder="dist, build, temp">
+            </div>
+            <div class="form-group" style="flex:1;min-width:200px;">
+              <label style="font-size:12px;color:var(--text-muted);">排除文件</label>
+              <input v-model="p.ignore_files_local" type="text" class="form-control" placeholder="draft*, *test*, tmp_*.md">
+            </div>
+            <button class="btn btn-sm btn-primary" @click="saveProjectIgnore(p)" style="align-self:end;margin-bottom:12px;">保存</button>
+          </div>
+        </div>
+        <div v-if="!noteProjects.length" class="text-muted" style="padding:12px 0;">暂无笔记库项目。</div>
+      </div>
+
       <!-- Feishu Webhook -->
       <div class="card">
         <h2>🔗 飞书 Webhook 配置</h2>
@@ -209,7 +233,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 
 const API = window.electronAPI;
 
@@ -244,6 +268,19 @@ const embeddingStatus = ref('');
 
 async function loadProjects() {
   try { projects.value = await API.project.list(); } catch { projects.value = []; }
+}
+const noteProjects = computed(() => projects.value
+  .filter((p: any) => p.type === 'note')
+  .map((p: any) => ({
+    ...p,
+    ignore_dirs_local: p.ignore_dirs || '',
+    ignore_files_local: p.ignore_files || '',
+  }))
+);
+async function saveProjectIgnore(p: any) {
+  try {
+    await API.project.update(p.id, { ignore_dirs: p.ignore_dirs_local, ignore_files: p.ignore_files_local });
+  } catch {}
 }
 function projectName(projectId: number | null): string {
   if (!projectId) return '—';
@@ -452,6 +489,30 @@ onBeforeUnmount(() => {});
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #fafbfc;
+}
+
+/* 笔记库索引配置 */
+.project-ignore-config {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+}
+.project-ignore-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.project-ignore-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.project-ignore-dir {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .vars-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .vars-table th { text-align: left; padding: 6px 10px; background: var(--hover); font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border); position: sticky; top: 0; }
