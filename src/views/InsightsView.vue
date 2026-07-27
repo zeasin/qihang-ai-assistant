@@ -1,61 +1,105 @@
 <template>
   <div class="insights-view">
     <div class="content-header">
-      <h1 class="content-title">洞察</h1>
+      <h1 class="content-title">总览</h1>
     </div>
     <div class="content-body">
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-icon" style="background:rgba(139,92,246,0.1);color:#8b5cf6;">📦</div><div class="stat-num">{{ stats.projectCount }}</div><div class="stat-label">笔记库</div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">📄</div><div class="stat-num">{{ indexerInfo.docCount }}</div><div class="stat-label">文件</div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">📄</div><div class="stat-num">{{ indexerInfo.docCount }}</div><div class="stat-label">文件 <button class="reindex-btn" :disabled="indexing" @click.stop="startIndex">{{ indexing ? '⏳' : '🔄' }}</button></div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(251,146,60,0.1);color:#fb923c;">🧩</div><div class="stat-num">{{ indexerInfo.chunkCount }}</div><div class="stat-label">片段</div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.1);color:#22c55e;">💬</div><div class="stat-num">{{ stats.totalChats }}</div><div class="stat-label">对话</div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,0.1);color:#ef4444;">📅</div><div class="stat-num">{{ stats.todayModified }}</div><div class="stat-label">今日修改</div></div>
-        <div class="stat-card stat-card-action" @click="startIndex"><div class="stat-icon" style="background:rgba(99,102,241,0.1);color:#6366f1;">🔄</div><div class="stat-num" style="font-size:14px;">{{ indexing ? '索引中…' : '重新索引' }}</div><div class="stat-label">{{ indexerInfo.model }} @ {{ indexerInfo.host }}</div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.1);color:#22c55e;">✅</div><div class="stat-num">{{ stats.todoPending }}</div><div class="stat-label">待办 {{ stats.todoOverdue ? '(' + stats.todoOverdue + ' 逾期)' : '' }}</div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,0.1);color:#ef4444;">🔔</div><div class="stat-num">{{ stats.remindersActive }}</div><div class="stat-label">提醒</div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:rgba(99,102,241,0.1);color:#6366f1;">💬</div><div class="stat-num">{{ stats.totalChats }}</div><div class="stat-label">对话</div></div>
       </div>
 
-      <!-- 搜索卡片（始终显示） -->
-      <div class="search-card">
-        <div class="search-bar">
-          <select v-model="searchKbId" class="search-kb-select">
-            <option value="">全部笔记库</option>
-            <option v-for="kb in kbList" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
-          </select>
-          <input v-model="searchQuery" class="search-input" placeholder="输入关键词搜索笔记..." @keyup.enter="performSearch">
-          <button class="search-btn" @click="performSearch">搜索</button>
-        </div>
-      </div>
-
-      <div class="tabs">
-        <div class="tab active">📊 综合日报</div>
-      </div>
-
-      <!-- 日报详情 -->
-      <div v-if="activeTab === 'daily'" key="daily-detail" class="card" v-show="reportDetail">
-        <div class="preview" v-html="renderMarkdown(reportDetail)"></div>
-      </div>
-
-      <!-- 日报列表 -->
-      <div v-if="activeTab === 'daily'" key="daily-list" class="card">
-        <div class="report-header-bar">
-          <span class="report-schedule">{{ reportScheduleText }}</span>
-        </div>
-        <div v-if="reports.length" class="report-list">
-          <div v-for="(r, i) in reports" :key="r.id" class="report-item" :class="{ active: expandedReport === i }" @click="selectReport(i, r)">
-            <div class="report-header">
-              <span class="report-date">{{ r.report_date || '日报' }}</span>
-              <span class="report-time" style="margin:0;">{{ r.created_at }}</span>
+      <div class="dashboard-grid">
+        <div class="dashboard-left">
+          <!-- 搜索 -->
+          <div class="search-card">
+            <div class="search-bar">
+              <select v-model="searchKbId" class="search-kb-select">
+                <option value="">全部笔记库</option>
+                <option v-for="kb in kbList" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
+              </select>
+              <input v-model="searchQuery" class="search-input" placeholder="搜索笔记..." @keyup.enter="performSearch">
+              <button class="search-btn" @click="performSearch">搜索</button>
             </div>
-            <div class="report-summary">{{ (r.summary || '').slice(0, 200) }}</div>
+          </div>
+
+          <!-- 日报 -->
+          <div class="section-header">📊 综合日报 <span class="report-schedule">{{ reportScheduleText }}</span></div>
+          <div class="card" v-if="reportDetail">
+            <div class="preview" v-html="renderMarkdown(reportDetail)"></div>
+          </div>
+          <div class="card">
+            <div v-if="reports.length" class="report-list">
+              <div v-for="(r, i) in reports" :key="r.id" class="report-item" :class="{ active: expandedReport === i }" @click="selectReport(i, r)">
+                <div class="report-header">
+                  <span class="report-date">{{ r.report_date || '日报' }}</span>
+                  <span class="report-time" style="margin:0;">{{ r.created_at }}</span>
+                </div>
+                <div class="report-summary">{{ (r.summary || '').slice(0, 200) }}</div>
+              </div>
+            </div>
+            <div v-else class="empty-state" style="padding:20px;">
+              <div class="empty-icon">📊</div>
+              <div class="empty-title">暂无日报</div>
+            </div>
           </div>
         </div>
-        <div v-else class="empty-state">
-          <div class="empty-icon">📊</div>
-          <div class="empty-title">暂无日报</div>
-          <div class="empty-desc">{{ reportScheduleText }}</div>
+
+        <div class="dashboard-right">
+          <!-- 待办 -->
+          <div class="section-header">✅ 待办事项</div>
+          <div class="card">
+            <div v-if="todos.length" class="todo-list">
+              <div v-for="t in todos" :key="t.id" class="todo-item" :class="{ overdue: t.due_date && t.due_date < todayStr && t.status !== 'done' }">
+                <div class="todo-priority" :class="t.priority">{{ t.priority === 'high' ? '🔴' : t.priority === 'mid' ? '🟡' : '🟢' }}</div>
+                <div class="todo-body">
+                  <div class="todo-title">{{ t.title }}</div>
+                  <div class="todo-meta" v-if="t.due_date">{{ t.due_date }}</div>
+                </div>
+                <button class="todo-done-btn" @click="toggleTodo(t)">{{ t.status === 'done' ? '↩' : '✓' }}</button>
+              </div>
+            </div>
+            <div v-else class="empty-state" style="padding:20px;">
+              <div class="empty-title" style="font-size:13px;">暂无待办</div>
+            </div>
+          </div>
+
+          <!-- 提醒 -->
+          <div class="section-header">🔔 提醒</div>
+          <div class="card">
+            <div v-if="reminders.length" class="reminder-list">
+              <div v-for="r in reminders" :key="r.id" class="reminder-item">
+                <div class="reminder-name">{{ r.name }}</div>
+                <div class="reminder-time">{{ r.time || '09:00' }}{{ r.date ? ' · ' + r.date : '' }}</div>
+              </div>
+            </div>
+            <div v-else class="empty-state" style="padding:20px;">
+              <div class="empty-title" style="font-size:13px;">暂无提醒</div>
+            </div>
+          </div>
+
+          <!-- 待处理记录 -->
+          <div class="section-header">📋 待处理记录</div>
+          <div class="card">
+            <div v-if="pendingRecords.length" class="pending-list">
+              <div v-for="group in pendingRecords" :key="group.datasetId" class="pending-group">
+                <div class="pending-group-title">{{ group.datasetName }}</div>
+                <div v-for="rec in group.records" :key="rec.id" class="pending-item">
+                  <div class="pending-text">{{ Object.values(rec).filter(v => typeof v === 'string' && v.length < 80 && v !== rec._created_at).slice(0, 2).join(' · ') || '(无标题)' }}</div>
+                  <div class="pending-time">{{ rec._created_at || '' }}</div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-state" style="padding:20px;">
+              <div class="empty-title" style="font-size:13px;">暂无待处理记录</div>
+            </div>
+          </div>
         </div>
       </div>
-
-
     </div>
 
     <!-- 搜索结果弹窗 -->
@@ -98,7 +142,6 @@ import { ref, computed, onMounted } from 'vue';
 
 const API = window.electronAPI;
 
-const activeTab = ref('daily');
 const kbList = ref<any[]>([]);
 const searchKbId = ref('');
 const searchQuery = ref('');
@@ -110,9 +153,13 @@ const indexerInfo = ref({ model: '', host: '', docCount: 0, chunkCount: 0, runni
 const showPreview = ref(false);
 const previewTitle = ref('');
 const previewHtml = ref('');
+const todos = ref<any[]>([]);
+const reminders = ref<any[]>([]);
+const pendingRecords = ref<any[]>([]);
+const todayStr = ref('');
 
 const stats = ref({
-  fileCount: 0, chunkCount: 0, todayModified: 0, projectCount: 0, totalChats: 0
+  fileCount: 0, chunkCount: 0, todayModified: 0, projectCount: 0, totalChats: 0, todoPending: 0, todoOverdue: 0, remindersActive: 0
 });
 
 const reports = ref<any[]>([]);
@@ -265,6 +312,32 @@ function selectReport(i: number, r: any) {
   reportDetail.value = r.content || '无内容';
 }
 
+// ========== 待办 ==========
+async function toggleTodo(t: any) {
+  const newStatus = t.status === 'done' ? 'pending' : 'done';
+  await API.todo.update(t.id, { status: newStatus });
+  t.status = newStatus;
+}
+
+async function loadTodos() {
+  try {
+    const list = await API.todo.list();
+    todos.value = list.filter((t: any) => t.status !== 'done').slice(0, 10);
+  } catch { todos.value = []; }
+}
+
+async function loadReminders() {
+  try {
+    reminders.value = await API.reminder.list();
+  } catch { reminders.value = []; }
+}
+
+async function loadPendingRecords() {
+  try {
+    pendingRecords.value = await API.ds.pendingRecords();
+  } catch { pendingRecords.value = []; }
+}
+
 // ========== 加载数据 ==========
 async function loadDailyReports() {
   try {
@@ -294,22 +367,19 @@ async function startIndex() {
 }
 
 onMounted(async () => {
-  try {
-    stats.value = await API.insights.stats();
-  } catch {}
-  try {
-    const list = await API.kb.list();
-    kbList.value = list;
-  } catch {}
+  const d = new Date();
+  todayStr.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  try { stats.value = await API.insights.stats(); } catch {}
+  try { const list = await API.kb.list(); kbList.value = list; } catch {}
   await loadDailyReports();
   await loadIndexerInfo();
-  // Load task list to get daily report schedule time
+  await loadTodos();
+  await loadReminders();
+  await loadPendingRecords();
   try {
     const tasks = await API.task.list();
     const dailyReport = tasks.find((t: any) => t.task_type === 'daily_report');
-    if (dailyReport && dailyReport.cron_expression) {
-      reportCron.value = dailyReport.cron_expression;
-    }
+    if (dailyReport && dailyReport.cron_expression) reportCron.value = dailyReport.cron_expression;
   } catch {}
 });
 </script>
@@ -328,7 +398,10 @@ onMounted(async () => {
 .stat-card-action:hover { border-color: var(--primary); }
 .stat-icon { width: 36px; height: 36px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-size: 18px; }
 .stat-num { font-size: 22px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
-.stat-label { font-size: 12px; color: var(--text-secondary); }
+.stat-label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+.reindex-btn { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: pointer; line-height: 1.4; color: var(--text-muted); }
+.reindex-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.reindex-btn:disabled { opacity: 0.4; }
 
 .card { background: white; border-radius: var(--radius-md); border: 1px solid var(--border); box-shadow: var(--shadow-sm); padding: 20px; margin-bottom: 16px; }
 .card-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
@@ -343,9 +416,39 @@ onMounted(async () => {
 .search-btn { padding: 8px 16px; background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; transition: 0.15s; white-space: nowrap; }
 .search-btn:hover { background: var(--primary-dark); }
 
-/* 标签页 */
-.tabs { margin-bottom: 12px; }
-.tab { padding: 8px 0; font-size: 15px; font-weight: 600; color: var(--text-primary); }
+/* 双栏布局 */
+.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.dashboard-left { display: flex; flex-direction: column; gap: 12px; }
+.dashboard-right { display: flex; flex-direction: column; gap: 12px; }
+.section-header { font-size: 14px; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+.section-header .report-schedule { font-size: 11px; font-weight: 400; color: var(--text-muted); margin-left: auto; }
+
+/* 待办列表 */
+.todo-list { display: flex; flex-direction: column; gap: 4px; }
+.todo-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); transition: 0.15s; }
+.todo-item.overdue { border-color: #fca5a5; background: #fef2f2; }
+.todo-item:hover { border-color: var(--primary); }
+.todo-priority { flex-shrink: 0; font-size: 12px; }
+.todo-body { flex: 1; min-width: 0; }
+.todo-title { font-size: 13px; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.todo-done-btn { flex-shrink: 0; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 50%; background: white; cursor: pointer; font-size: 11px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); transition: 0.15s; }
+.todo-done-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+/* 提醒列表 */
+.reminder-list { display: flex; flex-direction: column; gap: 4px; }
+.reminder-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.reminder-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.reminder-time { font-size: 11px; color: var(--text-muted); }
+
+/* 待处理记录 */
+.pending-list { display: flex; flex-direction: column; gap: 8px; }
+.pending-group { }
+.pending-group-title { font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.pending-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-radius: var(--radius-sm); }
+.pending-item:hover { background: var(--hover); }
+.pending-text { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.pending-time { font-size: 11px; color: var(--text-muted); flex-shrink: 0; margin-left: 8px; }
 
 /* 搜索结果弹窗 */
 .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.35); z-index: 1000; align-items: flex-start; justify-content: center; padding-top: 60px; }

@@ -115,8 +115,8 @@ function showWindow() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: 1600,
+    height: 1000,
     minWidth: 1000,
     minHeight: 700,
     webPreferences: {
@@ -506,6 +506,21 @@ ipcMain.handle('ds:insert', (_, { datasetId, data }) => db.ds.insert(datasetId, 
 ipcMain.handle('ds:updateRecord', (_, { id, data }) => db.ds.updateRecord(id, data));
 ipcMain.handle('ds:deleteRecord', (_, { id }) => db.ds.deleteRecord(id));
 ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
+ipcMain.handle('ds:pendingRecords', () => {
+  const datasets = db.q("SELECT dataset_id, name FROM data_center_datasets ORDER BY name");
+  const result = [];
+  for (const ds of datasets) {
+    const records = db.q("SELECT id, data_json, created_at FROM data_center_records WHERE dataset_id = ? AND (record_status IS NULL OR record_status = '' OR record_status = 'pending') ORDER BY created_at DESC LIMIT 5", ds.dataset_id);
+    if (records.length) {
+      result.push({
+        datasetName: ds.name,
+        datasetId: ds.dataset_id,
+        records: records.map(r => ({ id: r.id, ...JSON.parse(r.data_json || '{}'), _created_at: r.created_at })),
+      });
+    }
+  }
+  return result;
+});
 
 // --- Chat / Orchestrator ---
 ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbIds, images, agent }) => {
@@ -781,7 +796,10 @@ ipcMain.handle('insights:stats', () => {
   const totalChats = (db.qOne("SELECT COUNT(*) as c FROM prj_messages") || {}).c || 0;
   const todayModified = (db.qOne("SELECT COUNT(*) as c FROM kb_documents WHERE indexed_at >= date('now')") || {}).c || 0;
   const projectCount = (db.qOne("SELECT COUNT(*) as c FROM prj_projects WHERE type = 'note'") || {}).c || 0;
-  return { fileCount, chunkCount, totalChats, todayModified, projectCount };
+  const todoPending = (db.qOne("SELECT COUNT(*) as c FROM plan_todos WHERE status IN ('pending','in_progress')") || {}).c || 0;
+  const todoOverdue = (db.qOne("SELECT COUNT(*) as c FROM plan_todos WHERE due_date != '' AND due_date < date('now','+8 hours') AND status IN ('pending','in_progress')") || {}).c || 0;
+  const remindersActive = (db.qOne("SELECT COUNT(*) as c FROM plan_reminders WHERE enabled = 1") || {}).c || 0;
+  return { fileCount, chunkCount, totalChats, todayModified, projectCount, todoPending, todoOverdue, remindersActive };
 });
 ipcMain.handle('insights:reports', () => {
   return db.q("SELECT id, type, report_date, content, substr(content, 1, 100) as summary, created_at FROM ai_analysis WHERE type = 'daily_report' ORDER BY created_at DESC LIMIT 10");

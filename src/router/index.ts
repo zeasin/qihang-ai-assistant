@@ -3,7 +3,7 @@ import { createRouter, createWebHashHistory } from 'vue-router';
 const routes = [
   {
     path: '/',
-    redirect: '/coding'
+    redirect: '/insights'
   },
   {
     path: '/notes',

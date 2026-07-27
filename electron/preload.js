@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateRecord: (id, data) => ipcRenderer.invoke('ds:updateRecord', { id, data }),
     deleteRecord: (id) => ipcRenderer.invoke('ds:deleteRecord', { id }),
     remove: (id) => ipcRenderer.invoke('ds:remove', { datasetId: id }),
+    pendingRecords: () => ipcRenderer.invoke('ds:pendingRecords'),
   },
 
   // Chat (unified: general chat + coding workbench)
