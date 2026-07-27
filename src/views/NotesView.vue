@@ -100,6 +100,9 @@ const searchActive = ref(false);
 const searched = ref(false);
 const searchResults = ref<any[]>([]);
 const selectedProject = computed(() => kbList.value.find(k => k.id === selectedKbId.value));
+const indexing = ref(false);
+const indexStatus = ref('');
+const hasIndexed = ref(false);
 
 const renderedContent = computed(() => {
   if (!fileContent.value) return '';
@@ -222,16 +225,22 @@ async function doSearch() {
 async function indexCurrentProject() {
   if (!selectedKbId.value || indexing.value) return;
   indexing.value = true;
+  const onDone = () => {
+    hasIndexed.value = true;
+    indexing.value = false;
+    API.removeAllListeners('code:index-done');
+  };
+  API.on('code:index-done', onDone);
   try {
     const proj = kbList.value.find(k => k.id === selectedKbId.value);
     if (proj?.type === 'code') {
       await API.code.index(selectedKbId.value);
     } else {
       await API.kb.scan(selectedKbId.value);
+      hasIndexed.value = true;
+      indexing.value = false;
     }
-    hasIndexed.value = true;
-  } catch {}
-  indexing.value = false;
+  } catch { indexing.value = false; }
 }
 
 function clearSearch() {

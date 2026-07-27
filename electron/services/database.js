@@ -238,6 +238,14 @@ function runMany(sqls) {
   saveDb();
 }
 
+function runRaw(sql, params) {
+  db.run(sql, params || []);
+}
+
+function save() {
+  saveDb();
+}
+
 // ========== Config ==========
 function configGet(key) {
   const r = qOne('SELECT value FROM sys_config WHERE key = ?', key);
@@ -535,4 +543,4 @@ function close() {
   if (db) { saveDb(); db.close(); db = null; }
 }
 
-module.exports = { getDb, close, q, qOne, run, runMany, configGet, configSet, project, chat, dm, ds, task, reminder, todo };
+module.exports = { getDb, close, q, qOne, run, runMany, runRaw, save, configGet, configSet, project, chat, dm, ds, task, reminder, todo };

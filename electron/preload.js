@@ -176,7 +176,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'chat:delta', 'chat:status', 'chat:tool', 'chat:done', 'chat:error',
       'coding:delta', 'coding:status', 'coding:tool', 'coding:done', 'coding:error',
       'kb:scan-progress', 'service:status', 'service:toggle', 'feishu:message',
-      'indexer:progress',
+      'indexer:progress', 'code:index-done',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (event, ...args) => callback(...args));

@@ -461,37 +461,46 @@ ipcMain.handle('notes:read', (_, { projectId, filePath }) => {
 
 
 
-ipcMain.handle('code:index', (_, { projectId }) => {
+ipcMain.handle('code:index', async (_, { projectId }) => {
   try {
     const project = db.project.get(projectId);
     if (!project || !project.dir) return { ok: false, error: '项目不存在' };
-    // 清空旧索引
-    db.run('DELETE FROM kb_file_index_meta WHERE project_id = ?', projectId);
-    // 遍历目录，插入文件路径
-    const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.opencode', '__pycache__', '.cache', 'dist', 'build', 'target', '.idea', '.vscode']);
-    let count = 0;
-    const walkDir = (dir) => {
+    logger.info('[CodeIndex] 开始索引: %s (%s)', project.name, project.dir);
+    // 先返回，后台执行索引
+    const result = { ok: true, started: true };
+    setImmediate(() => {
       try {
-        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-          const full = path.join(dir, e.name);
-          if (e.isDirectory()) {
-            if (IGNORED_DIRS.has(e.name) || e.name.startsWith('.')) continue;
-            walkDir(full);
-          } else {
-            try {
-              db.run('INSERT OR IGNORE INTO kb_file_index_meta (project_id, file_path, file_name, last_indexed_at) VALUES (?, ?, ?, datetime("now", "+8 hours"))', projectId, full, e.name);
-              count++;
-            } catch {}
-          }
+        db.runRaw('DELETE FROM kb_file_index_meta WHERE project_id = ?', [projectId]);
+        const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.opencode', '__pycache__', '.cache', 'dist', 'build', 'target', '.idea', '.vscode']);
+        let count = 0;
+        const walkDir = (dir) => {
+          try {
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, e.name);
+              if (e.isDirectory()) {
+                if (IGNORED_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+                walkDir(full);
+              } else {
+                db.runRaw('INSERT OR IGNORE INTO kb_file_index_meta (project_id, file_path, file_name, last_indexed_at) VALUES (?, ?, ?, datetime("now", "+8 hours"))', [projectId, full, e.name]);
+                count++;
+              }
+            }
+          } catch {}
+        };
+        walkDir(project.dir);
+        db.save();
+        logger.info('[CodeIndex] 完成: %s, %d 个文件', project.name, count);
+        // 通知前端索引完成
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('code:index-done', { projectId, count });
         }
-      } catch {}
-    };
-    walkDir(project.dir);
-    return { ok: true, count };
-  } catch { return { ok: false, error: '索引失败' } };
-});
-
-ipcMain.handle('code:search', (_, { projectId, query }) => {
+      } catch (e) {
+        logger.error('[CodeIndex] 后台错误: %s', e.message);
+      }
+    });
+    return result;
+  } catch (e) { logger.error('[CodeIndex] 失败: %s', e.message); return { ok: false, error: '索引失败' }; }
+});ipcMain.handle('code:search', (_, { projectId, query }) => {
   try {
     if (!query || !projectId) return [];
     // 英文分词：按非字母数字字符分割
