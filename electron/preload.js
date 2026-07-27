@@ -22,7 +22,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testBot: (app_id, app_secret) => ipcRenderer.invoke('feishu:testBot', { app_id, app_secret }),
   },
   code: {
-    index: (projectId) => ipcRenderer.invoke('code:index', { projectId }),
     search: (projectId, query) => ipcRenderer.invoke('code:search', { projectId, query }),
   },
 
@@ -176,7 +175,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'chat:delta', 'chat:status', 'chat:tool', 'chat:done', 'chat:error',
       'coding:delta', 'coding:status', 'coding:tool', 'coding:done', 'coding:error',
       'kb:scan-progress', 'service:status', 'service:toggle', 'feishu:message',
-      'indexer:progress', 'code:index-done',
+      'indexer:progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (event, ...args) => callback(...args));

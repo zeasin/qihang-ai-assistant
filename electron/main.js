@@ -461,97 +461,33 @@ ipcMain.handle('notes:read', (_, { projectId, filePath }) => {
 
 
 
-ipcMain.handle('code:index', async (_, { projectId }) => {
-  try {
-    const project = db.project.get(projectId);
-    if (!project || !project.dir) return { ok: false, error: '项目不存在' };
-    logger.info('[CodeIndex] 开始索引: %s (%s)', project.name, project.dir);
-    // 先返回，后台执行索引
-    const result = { ok: true, started: true };
-    setImmediate(() => {
-      try {
-        db.runRaw('DELETE FROM kb_file_index_meta WHERE project_id = ?', [projectId]);
-        const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.opencode', '__pycache__', '.cache', 'dist', 'build', 'target', '.idea', '.vscode']);
-        let count = 0;
-        const walkDir = (dir) => {
-          try {
-            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-              const full = path.join(dir, e.name);
-              if (e.isDirectory()) {
-                if (IGNORED_DIRS.has(e.name) || e.name.startsWith('.')) continue;
-                walkDir(full);
-              } else {
-                db.runRaw('INSERT OR IGNORE INTO kb_file_index_meta (project_id, file_path, file_name, last_indexed_at) VALUES (?, ?, ?, datetime("now", "+8 hours"))', [projectId, full, e.name]);
-                count++;
-              }
-            }
-          } catch {}
-        };
-        walkDir(project.dir);
-        db.save();
-        logger.info('[CodeIndex] 完成: %s, %d 个文件', project.name, count);
-        // 通知前端索引完成
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('code:index-done', { projectId, count });
-        }
-      } catch (e) {
-        logger.error('[CodeIndex] 后台错误: %s', e.message);
-      }
-    });
-    return result;
-  } catch (e) { logger.error('[CodeIndex] 失败: %s', e.message); return { ok: false, error: '索引失败' }; }
-});ipcMain.handle('code:search', (_, { projectId, query }) => {
+ipcMain.handle('code:search', (_, { projectId, query }) => {
   try {
     if (!query || !projectId) return [];
-    // 英文分词：按非字母数字字符分割
-    const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-    if (tokens.length === 0) {
-      // 中文 fallback: 直接搜整句
-      const sql = `SELECT file_path, file_name FROM kb_file_index_meta WHERE project_id = ? AND (file_path LIKE ? OR file_name LIKE ?) ORDER BY file_path LIMIT 30`;
-      const like = `%${query}%`;
-      return db.q(sql, projectId, like, like).map(r => ({
-        path: r.file_path, name: r.file_name, score: 0.5, match: '',
-      }));
-    }
-    // 英文：每个 token 都要匹配文件名或路径
-    const likeClauses = tokens.map(t => `(file_name LIKE ? OR file_path LIKE ?)`);
-    const params = [];
-    for (const t of tokens) {
-      params.push(`%${t}%`, `%${t}%`);
-    }
-    params.push(projectId);
-    // rank: 匹配的 token 数
-    const rankExpr = tokens.map(t => `CASE WHEN file_name LIKE ? THEN 2 WHEN file_path LIKE ? THEN 1 ELSE 0 END`).join('+');
-    for (const t of tokens) {
-      params.push(`%${t}%`, `%${t}%`);
-    }
-    const sql = `SELECT file_path, file_name, (${rankExpr}) as rank FROM kb_file_index_meta WHERE ${likeClauses.join(' OR ')} AND project_id = ? ORDER BY rank DESC, file_path LIMIT 30`;
-    const rows = db.q(sql, ...params);
-    if (rows.length > 0) return rows.map(r => ({
-      path: r.file_path, name: r.file_name, score: r.rank, match: '',
-    }));
-    // 索引为空时降级到文件系统搜索
     const project = db.project.get(projectId);
-    if (project && project.dir) {
-      const fsResults = [];
-      const q = query.toLowerCase();
-      const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '__pycache__', 'dist', 'build', 'target', '.idea', '.vscode']);
-      const walkDir = (dir) => {
-        try {
-          for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-            const full = path.join(dir, e.name);
-            if (e.isDirectory()) {
-              if (IGNORED_DIRS.has(e.name) || e.name.startsWith('.')) continue;
-              walkDir(full);
-            } else if (e.name.toLowerCase().includes(q)) {
-              fsResults.push({ path: full, name: e.name, score: 1, match: '' });
+    if (!project || !project.dir) return [];
+
+    const q = query.toLowerCase();
+    const results = [];
+    const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '__pycache__', '.cache', 'dist', 'build', 'target', '.idea', '.vscode']);
+    const walkDir = (dir) => {
+      try {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) {
+            if (IGNORED_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+            walkDir(full);
+          } else {
+            if (e.name.startsWith('.')) continue;
+            if (e.name.toLowerCase().includes(q) || full.toLowerCase().includes(q)) {
+              results.push({ path: full, name: e.name, score: 1, match: '' });
             }
           }
-        } catch {}
-      };
-      walkDir(project.dir);
-      return fsResults.slice(0, 30);
-    }
+        }
+      } catch {}
+    };
+    walkDir(project.dir);
+    return results.sort((a, b) => a.path.localeCompare(b.path)).slice(0, 50);
   } catch { return []; }
 });
 
@@ -561,9 +497,38 @@ ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
 ipcMain.handle('kb:remove', (_, { id }) => db.project.remove(id));
 ipcMain.handle('kb:scan', async (_, { id }) => {
   try {
-    const result = await indexer.indexSingle(id);
-    sendToRenderer('kb:scan-progress', { id, ...result });
-    return result;
+    const project = db.project.get(id);
+    if (!project || project.type !== 'note') return { error: '只有笔记库类型可以使用此接口' };
+    const sendProgress = (data) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('kb:scan-progress', { id, ...data });
+      }
+    };
+    sendProgress({ phase: 'scan', current: 0, total: 0, file: '' });
+
+    // 在子进程中执行索引，避免阻塞主线程
+    const { fork } = require('child_process');
+    const worker = fork(path.join(__dirname, 'services', 'index-worker.js'));
+
+    return new Promise((resolve) => {
+      worker.on('message', (msg) => {
+        if (msg.type === 'progress') {
+          sendProgress(msg);
+        } else if (msg.type === 'done') {
+          const r = msg.results && msg.results.length > 0 ? msg.results[0] : {};
+          sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
+          worker.kill();
+          resolve({ totalChunks: r.chunks || 0, files: r.files || 0 });
+        } else if (msg.type === 'error') {
+          sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
+          worker.kill();
+          resolve({ error: msg.message });
+        }
+      });
+      worker.on('error', () => { sendProgress({ phase: 'done' }); resolve({ error: 'worker error' }); });
+      worker.on('exit', () => resolve({}));
+      worker.send({ type: 'start', projectIds: [id] });
+    });
   } catch (e) {
     return { error: e.message };
   }

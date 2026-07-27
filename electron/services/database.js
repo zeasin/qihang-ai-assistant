@@ -92,18 +92,6 @@ function initSchema() {
       embedding TEXT
     );
 
-    CREATE TABLE IF NOT EXISTS kb_file_index_meta (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER NOT NULL REFERENCES prj_projects(id),
-      file_path TEXT,
-      file_name TEXT,
-      last_modified INTEGER,
-      file_size INTEGER,
-      content_hash TEXT,
-      last_indexed_at TEXT,
-      created_at TEXT DEFAULT (datetime('now', '+8 hours'))
-    );
-
     CREATE TABLE IF NOT EXISTS data_center_datasets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       dataset_id TEXT,
@@ -203,7 +191,8 @@ function initSchema() {
   `);
   // 确保 kb_chunks 有 embedding 列（兼容旧表）
   try { db.run("ALTER TABLE kb_chunks ADD COLUMN embedding TEXT"); } catch {}
-  try { db.run("ALTER TABLE kb_file_index_meta ADD COLUMN file_name TEXT"); } catch {}
+  try { db.run("DROP TABLE IF EXISTS kb_file_index_meta"); } catch {}
+  try { db.run("DROP TABLE IF EXISTS kb_code_index"); } catch {}
   saveDb();
 }
 
@@ -297,8 +286,6 @@ const project = {
   remove: (id) => {
     run('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', id);
     run('DELETE FROM kb_documents WHERE project_id = ?', id);
-    run('DELETE FROM kb_file_index_meta WHERE project_id = ?', id);
-    run('DELETE FROM kb_code_index WHERE project_id = ?', id);
     run('DELETE FROM ai_analysis WHERE project_id = ?', id);
     let sessions = [];
     try { sessions = q('SELECT id FROM prj_sessions WHERE project_id = ?', id); } catch {}

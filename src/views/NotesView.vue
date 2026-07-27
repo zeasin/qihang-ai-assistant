@@ -16,9 +16,16 @@
               {{ p.name }}{{ p.is_default ? ' ★' : '' }}
             </option>
           </select>
-          <button class="btn-icon" @click="refreshTree" title="刷新文件树">↻</button>
+          <template v-if="selectedProject?.type === 'note'">
           <button class="btn-icon" :disabled="indexing" @click="indexCurrentProject" :title="hasIndexed ? '重新索引' : '构建索引'">{{ indexing ? '⏳' : '📇' }}</button>
-          <span class="index-status">{{ indexing ? '进行中' : (hasIndexed ? '已索引' : '') }}</span>
+          <span class="index-status">{{ indexing ? progressText : (hasIndexed ? '已索引' : '') }}</span>
+          </template>
+        </div>
+        <div v-if="indexing && selectedProject?.type === 'note'" class="index-progress">
+          <div class="progress-track">
+            <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
+          </div>
+          <div v-if="progressFile" class="progress-file">{{ progressFile }}</div>
         </div>
         <div class="search-bar">
           <input v-model="searchQuery" class="search-input" placeholder="搜索当前项目..." @keydown.enter="doSearch" />
@@ -78,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
@@ -101,8 +108,23 @@ const searched = ref(false);
 const searchResults = ref<any[]>([]);
 const selectedProject = computed(() => kbList.value.find(k => k.id === selectedKbId.value));
 const indexing = ref(false);
-const indexStatus = ref('');
-const hasIndexed = ref(false);
+const indexedState = ref<Record<string, boolean>>({});
+const hasIndexed = computed(() => indexedState.value[selectedKbId.value] ?? false);
+const progressPhase = ref('');
+const progressCurrent = ref(0);
+const progressTotal = ref(0);
+const progressFile = ref('');
+
+const progressText = computed(() => {
+  const phase = progressPhase.value === 'embed' ? '生成嵌入' : '扫描文件';
+  return progressTotal.value > 0
+    ? `${phase} ${progressCurrent.value}/${progressTotal.value}`
+    : phase;
+});
+const progressPct = computed(() => {
+  if (!progressTotal.value) return 0;
+  return Math.round((progressCurrent.value / progressTotal.value) * 100);
+});
 
 const renderedContent = computed(() => {
   if (!fileContent.value) return '';
@@ -121,6 +143,7 @@ watch(() => route.query.kbId, (newId) => {
   if (newId && newId !== selectedKbId.value) {
     selectedKbId.value = newId as string;
     loadFileTree();
+    loadIndexedState(newId as string);
   }
 });
 
@@ -152,6 +175,7 @@ async function loadKbList() {
     }
     if (selectedKbId.value) {
       await loadFileTree();
+      await loadIndexedState(selectedKbId.value);
     }
   } catch (e) {
     console.warn('加载笔记库失败:', e);
@@ -183,15 +207,25 @@ async function selectFile(item: TreeNode) {
   }
 }
 
+async function loadIndexedState(projectId: string) {
+  if (!projectId) return;
+  const proj = kbList.value.find(k => k.id === projectId);
+  if (!proj) return;
+  if (proj.type === 'code') { indexedState.value[projectId] = true; return; }
+  try {
+    const status = await API.kb.status(projectId);
+    indexedState.value[projectId] = status?.indexed ?? false;
+  } catch {
+    indexedState.value[projectId] = false;
+  }
+}
+
 const onKbChange = async () => {
   selectedFile.value = null;
   fileContent.value = '';
   treeData.value = [];
   await loadFileTree();
-};
-
-const refreshTree = async () => {
-  await loadFileTree();
+  await loadIndexedState(selectedKbId.value);
 };
 
 function escapeHtml(text: string): string {
@@ -222,25 +256,34 @@ async function doSearch() {
   } catch { searchResults.value = []; }
 }
 
+function onScanProgress(data: any) {
+  if (data.phase === 'done') {
+    indexedState.value[selectedKbId.value] = true;
+    indexing.value = false;
+    return;
+  }
+  progressPhase.value = data.phase || '';
+  progressCurrent.value = data.current || 0;
+  progressTotal.value = data.total || 0;
+  progressFile.value = data.file || '';
+}
+
 async function indexCurrentProject() {
   if (!selectedKbId.value || indexing.value) return;
+  const proj = kbList.value.find(k => k.id === selectedKbId.value);
+  if (proj?.type === 'code') return;
   indexing.value = true;
-  const onDone = () => {
-    hasIndexed.value = true;
-    indexing.value = false;
-    API.removeAllListeners('code:index-done');
-  };
-  API.on('code:index-done', onDone);
+  progressPhase.value = 'scan';
+  progressCurrent.value = 0;
+  progressTotal.value = 0;
+  progressFile.value = '';
+
+  API.on('kb:scan-progress', onScanProgress);
+
   try {
-    const proj = kbList.value.find(k => k.id === selectedKbId.value);
-    if (proj?.type === 'code') {
-      await API.code.index(selectedKbId.value);
-    } else {
-      await API.kb.scan(selectedKbId.value);
-      hasIndexed.value = true;
-      indexing.value = false;
-    }
+    await API.kb.scan(selectedKbId.value);
   } catch { indexing.value = false; }
+  API.removeAllListeners('kb:scan-progress');
 }
 
 function clearSearch() {
@@ -256,6 +299,9 @@ function openSearchResult(r: any) {
 
 onMounted(() => {
   loadKbList();
+});
+onUnmounted(() => {
+  API.removeAllListeners('kb:scan-progress');
 });
 </script>
 
@@ -534,6 +580,10 @@ onMounted(() => {
 }
 
 .index-status { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
+.index-progress { padding: 6px 14px 8px; border-bottom: 1px solid var(--border); }
+.progress-track { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--primary); border-radius: 2px; transition: width 0.2s ease; }
+.progress-file { font-size: 11px; color: var(--text-muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .text-muted { color: var(--text-muted); font-size: 13px; }
 
 /* 搜索 */
