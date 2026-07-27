@@ -123,7 +123,7 @@ java -jar target/ai-assistant-1.0.0.jar
           <tr><td>AI 引擎</td><td>ChatClient 直连 LLM（OpenAI 兼容协议）</td></tr>
           <tr><td>工具编排</td><td>@Tool 注解 + ToolCallingAdvisor（自动路由）</td></tr>
           <tr><td>语义检索</td><td>Ollama（bge-m3 等）</td></tr>
-          <tr><td>会话存储</td><td>SQLite（MyBatis-Plus）— sessions / messages / turn_embeddings</td></tr>
+          <tr><td>会话存储</td><td>SQLite — prj_sessions / prj_messages</td></tr>
           <tr><td>笔记库存储</td><td>JSON / Markdown 文件（本地文件系统）</td></tr>
           <tr><td>前端</td><td>Vue 3 + Electron</td></tr>
           <tr><td>飞书集成</td><td>OpenAPI SDK（WebSocket）+ HttpURLConnection（Webhook）</td></tr>

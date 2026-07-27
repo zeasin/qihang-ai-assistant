@@ -374,7 +374,7 @@ async function createReportTools(kbId) {
     sdk.defineTool({
       name: 'query_todos',
       label: 'Query Todos',
-      description: '查询待办事项（todos），可按状态( done / in_progress / pending )、优先级、日期范围过滤。不传参数则返回最近的待办。',
+      description: '查询待办事项（plan_todos），可按状态( done / in_progress / pending )、优先级、日期范围过滤。不传参数则返回最近的待办。',
       parameters: Type.Object({
         status: Type.Optional(Type.String({ description: '过滤状态: done / in_progress / pending' })),
         priority: Type.Optional(Type.String({ description: '过滤优先级: high / mid / low' })),
@@ -383,7 +383,7 @@ async function createReportTools(kbId) {
         limit: Type.Optional(Type.Number({ description: '返回条数上限，默认30' })),
       }),
       execute: async (callId, params) => {
-        let sql = 'SELECT * FROM todos WHERE 1=1';
+        let sql = 'SELECT * FROM plan_todos WHERE 1=1';
         const sqlParams = [];
         if (params.status) { sql += ' AND status = ?'; sqlParams.push(params.status); }
         if (params.priority) { sql += ' AND priority = ?'; sqlParams.push(params.priority); }
@@ -399,7 +399,7 @@ async function createReportTools(kbId) {
     sdk.defineTool({
       name: 'query_messages',
       label: 'Query Messages',
-      description: '查询聊天/对话记录（messages）。可过滤日期范围、角色( user / assistant )。',
+      description: '查询聊天/对话记录（prj_messages）。可过滤日期范围、角色( user / assistant )。',
       parameters: Type.Object({
         date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
         date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
@@ -407,7 +407,7 @@ async function createReportTools(kbId) {
         limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
       }),
       execute: async (callId, params) => {
-        let sql = "SELECT id, session_id, role, substr(content, 1, 200) as content, created_at FROM messages WHERE 1=1";
+        let sql = "SELECT id, session_id, role, substr(content, 1, 200) as content, created_at FROM prj_messages WHERE 1=1";
         const sqlParams = [];
         if (params.role) { sql += ' AND role = ?'; sqlParams.push(params.role); }
         if (params.date_from) { sql += ' AND created_at >= ?'; sqlParams.push(params.date_from); }
@@ -422,7 +422,7 @@ async function createReportTools(kbId) {
     sdk.defineTool({
       name: 'query_documents',
       label: 'Query Documents',
-      description: '查询知识库中文档更新记录（documents）。可过滤知识库ID、日期范围。',
+      description: '查询知识库中文档更新记录（kb_documents）。可过滤知识库ID、日期范围。',
       parameters: Type.Object({
         project_id: Type.Optional(Type.Number({ description: '项目/知识库ID' })),
         date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
@@ -430,7 +430,7 @@ async function createReportTools(kbId) {
         limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
       }),
       execute: async (callId, params) => {
-        let sql = "SELECT id, project_id, path, substr(content, 1, 300) as content, file_mtime FROM documents WHERE 1=1";
+        let sql = "SELECT id, project_id, path, substr(content, 1, 300) as content, file_mtime FROM kb_documents WHERE 1=1";
         const sqlParams = [];
         if (params.project_id) { sql += ' AND project_id = ?'; sqlParams.push(params.project_id); }
         if (params.date_from) { sql += ' AND file_mtime >= ?'; sqlParams.push(params.date_from); }
@@ -471,10 +471,10 @@ async function createReportTools(kbId) {
     sdk.defineTool({
       name: 'query_reminders',
       label: 'Query Reminders',
-      description: '查询已启用的提醒事项（reminders）。',
+      description: '查询已启用的提醒事项（plan_reminders）。',
       parameters: Type.Object({}),
       execute: async () => {
-        const rows = db.q("SELECT * FROM reminders WHERE enabled = 1 ORDER BY created_at DESC");
+        const rows = db.q("SELECT * FROM plan_reminders WHERE enabled = 1 ORDER BY created_at DESC");
         return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无提醒' }], details: { count: rows.length } };
       },
     }),
@@ -486,7 +486,7 @@ async function createReportTools(kbId) {
         parameters: Type.Object({}),
         execute: async () => {
           const projectId = kbId || null;
-          const projectName = projectId ? (db.qOne("SELECT name FROM projects WHERE id = ?", projectId) || {}).name || '笔记库' : '笔记库';
+          const projectName = projectId ? (db.qOne("SELECT name FROM prj_projects WHERE id = ?", projectId) || {}).name || '笔记库' : '笔记库';
           const info = { today: getChinaDate(), yesterday: getChinaDate(-1), weekAgo: getChinaDate(-7), projectId, projectName };
           return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }], details: {} };
         },

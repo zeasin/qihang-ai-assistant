@@ -350,7 +350,7 @@ const feishuMessageHandler = async (msg) => {
       }
     };
 
-    const setMode = (mode) => { try { db.run("UPDATE sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", mode, sessionId); } catch {} };
+    const setMode = (mode) => { try { db.run("UPDATE prj_sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", mode, sessionId); } catch {} };
     const questionText = await buildKBInjectedPrompt();
     const feishuSessionDir = path.join(app.getPath('userData'), 'feishu-sessions', String(feishuProjectId), msg.sender);
     fs.mkdirSync(feishuSessionDir, { recursive: true });
@@ -767,10 +767,10 @@ ipcMain.handle('todo:add', (_, data) => db.todo.add(data));
 ipcMain.handle('todo:update', (_, id, data) => { db.todo.update(id, data); return true; });
 ipcMain.handle('todo:remove', (_, id) => { db.todo.remove(id); return true; });
 ipcMain.handle('insights:stats', () => {
-  const fileCount = (db.qOne("SELECT COUNT(*) as c FROM documents") || {}).c || 0;
-  const chunkCount = (db.qOne("SELECT COUNT(*) as c FROM chunks") || {}).c || 0;
-  const totalChats = (db.qOne("SELECT COUNT(*) as c FROM messages") || {}).c || 0;
-  const todayModified = (db.qOne("SELECT COUNT(*) as c FROM documents WHERE indexed_at >= date('now')") || {}).c || 0;
+  const fileCount = (db.qOne("SELECT COUNT(*) as c FROM kb_documents") || {}).c || 0;
+  const chunkCount = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks") || {}).c || 0;
+  const totalChats = (db.qOne("SELECT COUNT(*) as c FROM prj_messages") || {}).c || 0;
+  const todayModified = (db.qOne("SELECT COUNT(*) as c FROM kb_documents WHERE indexed_at >= date('now')") || {}).c || 0;
   return { fileCount, chunkCount, totalChats, todayModified };
 });
 ipcMain.handle('insights:reports', () => {

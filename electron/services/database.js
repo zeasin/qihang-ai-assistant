@@ -19,8 +19,6 @@ async function getDb() {
     db = new SQL.Database();
   }
   initSchema();
-  migrate();
-  ensureColumns();
   return db;
 }
 
@@ -30,19 +28,11 @@ function saveDb() {
   fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
 
-function schemaVersion() {
-  const r = qOne("SELECT value FROM config WHERE key = 'schema_version'");
-  return r ? parseInt(r.value, 10) : 0;
-}
-function setSchemaVersion(v) {
-  run("INSERT OR REPLACE INTO config (key, value) VALUES ('schema_version', ?)", String(v));
-}
-
 function initSchema() {
   db.run(`
-    CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS sys_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
-    CREATE TABLE IF NOT EXISTS sessions (
+    CREATE TABLE IF NOT EXISTS prj_sessions (
       id TEXT PRIMARY KEY,
       source TEXT DEFAULT 'ui',
       title TEXT,
@@ -55,9 +45,9 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
-    CREATE TABLE IF NOT EXISTS messages (
+    CREATE TABLE IF NOT EXISTS prj_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES sessions(id),
+      session_id TEXT NOT NULL REFERENCES prj_sessions(id),
       source TEXT DEFAULT 'ui',
       role TEXT NOT NULL,
       content TEXT NOT NULL,
@@ -66,7 +56,7 @@ function initSchema() {
       created_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
-    CREATE TABLE IF NOT EXISTS projects (
+    CREATE TABLE IF NOT EXISTS prj_projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       type TEXT NOT NULL DEFAULT 'note',
@@ -85,9 +75,9 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
-    CREATE TABLE IF NOT EXISTS documents (
+    CREATE TABLE IF NOT EXISTS kb_documents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER NOT NULL REFERENCES projects(id),
+      project_id INTEGER NOT NULL REFERENCES prj_projects(id),
       path TEXT NOT NULL,
       content TEXT NOT NULL,
       indexed_at TEXT,
@@ -95,41 +85,20 @@ function initSchema() {
       UNIQUE(project_id, path)
     );
 
-    CREATE TABLE IF NOT EXISTS chunks (
+    CREATE TABLE IF NOT EXISTS kb_chunks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      doc_id INTEGER NOT NULL REFERENCES documents(id),
+      doc_id INTEGER NOT NULL REFERENCES kb_documents(id),
       content TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS note_embeddings (
+    CREATE TABLE IF NOT EXISTS kb_file_index_meta (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER REFERENCES projects(id),
-      file_path TEXT,
-      chunk_index INTEGER,
-      path_context TEXT,
-      content TEXT,
-      embedding TEXT,
-      content_hash TEXT,
-      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
-      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
-    );
-
-    CREATE TABLE IF NOT EXISTS file_index_meta (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER NOT NULL REFERENCES projects(id),
+      project_id INTEGER NOT NULL REFERENCES prj_projects(id),
       file_path TEXT,
       last_modified INTEGER,
       file_size INTEGER,
       content_hash TEXT,
       last_indexed_at TEXT,
-      created_at TEXT DEFAULT (datetime('now', '+8 hours'))
-    );
-
-    CREATE TABLE IF NOT EXISTS turn_embeddings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT REFERENCES sessions(id),
-      turn_order INTEGER,
-      embedding TEXT,
       created_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
@@ -174,7 +143,7 @@ function initSchema() {
 
     CREATE TABLE IF NOT EXISTS ai_analysis (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER REFERENCES projects(id),
+      project_id INTEGER REFERENCES prj_projects(id),
       type TEXT,
       content TEXT,
       prompt TEXT,
@@ -201,7 +170,7 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
-    CREATE TABLE IF NOT EXISTS reminders (
+    CREATE TABLE IF NOT EXISTS plan_reminders (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       message TEXT DEFAULT '',
@@ -217,7 +186,7 @@ function initSchema() {
       project_id INTEGER DEFAULT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS todos (
+    CREATE TABLE IF NOT EXISTS plan_todos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       description TEXT DEFAULT '',
@@ -230,168 +199,6 @@ function initSchema() {
     );
 
   `);
-  saveDb();
-}
-
-function migrate() {
-  const version = schemaVersion();
-
-  if (version < 1) {
-    setSchemaVersion(1);
-
-  const hasLegacySessions = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_sessions'");
-  if (hasLegacySessions) {
-    const legacySessions = q('SELECT * FROM chat_sessions');
-    for (const s of legacySessions) {
-      if (!s.id) continue;
-      db.run("INSERT OR IGNORE INTO sessions (id, source, title, mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-        s.id, s.source || 'ui', s.title || '新对话', s.agent_type || 'general', s.created_at, s.updated_at);
-    }
-  }
-
-  const hasLegacyMessages = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_messages'");
-  if (hasLegacyMessages) {
-    const legacyMessages = q('SELECT * FROM chat_messages');
-    for (const m of legacyMessages) {
-      if (!m.session_id) continue;
-      db.run("INSERT INTO messages (session_id, role, content, source, created_at) VALUES (?, ?, ?, ?, ?)",
-        m.session_id, m.role, m.content, 'ui', m.created_at);
-    }
-  }
-
-  const hasOldDs = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='dataset_schemas'");
-  if (hasOldDs) {
-    const old = q('SELECT * FROM dataset_schemas');
-    for (const d of old) {
-      db.run("INSERT INTO data_center_datasets (dataset_id, name, schema_json, created_at) VALUES (?, ?, ?, ?)",
-        d.id, d.name, d.schema_json, d.created_at);
-    }
-  }
-
-  const hasOldDsRec = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='dataset_records'");
-  if (hasOldDsRec) {
-    const old = q('SELECT * FROM dataset_records');
-    for (const r of old) {
-      db.run("INSERT INTO data_center_records (dataset_id, data_json, created_at) VALUES (?, ?, ?)",
-        r.dataset_id, r.data_json, r.created_at);
-    }
-  }
-
-  const hasOldTasks = qOne("SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_tasks'");
-  if (hasOldTasks) {
-    const old = q('SELECT * FROM scheduled_tasks');
-    for (const t of old) {
-      db.run("INSERT INTO sys_tasks (task_id, name, cron_expression, task_type, params_json, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        t.id, t.name, t.cron_expr, t.task_type, t.config_json, t.enabled, t.created_at);
-    }
-  }
-
-  try { db.run("ALTER TABLE documents ADD COLUMN kb_id INTEGER"); } catch {}
-  try { db.run("ALTER TABLE sys_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
-  }
-
-  if (version < 3) {
-    try { db.run("ALTER TABLE documents ADD COLUMN file_mtime INTEGER"); } catch {}
-    setSchemaVersion(3);
-  }
-
-  if (version < 4) {
-    try { db.run("ALTER TABLE messages ADD COLUMN images TEXT DEFAULT NULL"); } catch {}
-    setSchemaVersion(4);
-  }
-
-  if (version < 5) {
-    // Ensure projects table has columns needed for migration
-    try { db.run("ALTER TABLE projects ADD COLUMN type TEXT NOT NULL DEFAULT 'note'"); } catch {}
-    try { db.run("ALTER TABLE projects ADD COLUMN labels TEXT"); } catch {}
-    try { db.run("ALTER TABLE projects ADD COLUMN sort_order INTEGER DEFAULT 0"); } catch {}
-    try { db.run("ALTER TABLE projects ADD COLUMN auto_report INTEGER DEFAULT 0"); } catch {}
-    try { db.run("ALTER TABLE projects ADD COLUMN feishu_push INTEGER DEFAULT 0"); } catch {}
-    try { db.run("ALTER TABLE projects ADD COLUMN dir_settings TEXT"); } catch {}
-    try { db.run("ALTER TABLE projects ADD COLUMN ignore_dirs TEXT"); } catch {}
-    try { db.run("ALTER TABLE projects ADD COLUMN ignore_files TEXT"); } catch {}
-
-    // Ensure sessions table has project_id + active_agent columns
-    try { db.run("ALTER TABLE sessions ADD COLUMN project_id INTEGER"); } catch (e) { logger.error('[DB] ALTER sessions project_id:', e.message); }
-    try { db.run("ALTER TABLE sessions ADD COLUMN active_agent TEXT DEFAULT 'pi'"); } catch (e) { logger.error('[DB] ALTER sessions active_agent:', e.message); }
-
-    // Migrate kb_id → project_id in dependent tables (if old schema with kb_id)
-    try {
-      const docHasKb = qOne("SELECT kb_id FROM documents LIMIT 1");
-      if (docHasKb !== undefined) {
-        try { db.run("ALTER TABLE documents ADD COLUMN project_id INTEGER"); } catch {}
-        db.run("UPDATE documents SET project_id = kb_id WHERE project_id IS NULL");
-      }
-    } catch {}
-    try { db.run("ALTER TABLE note_embeddings ADD COLUMN project_id INTEGER"); } catch {}
-    try { db.run("UPDATE note_embeddings SET project_id = kb_id WHERE project_id IS NULL AND kb_id IS NOT NULL"); } catch {}
-    try { db.run("ALTER TABLE file_index_meta ADD COLUMN project_id INTEGER"); } catch {}
-    try { db.run("UPDATE file_index_meta SET project_id = kb_id WHERE project_id IS NULL AND kb_id IS NOT NULL"); } catch {}
-    try { db.run("ALTER TABLE ai_analysis ADD COLUMN project_id INTEGER"); } catch {}
-    try { db.run("UPDATE ai_analysis SET project_id = kb_id WHERE project_id IS NULL AND kb_id IS NOT NULL"); } catch {}
-    try { db.run("ALTER TABLE reminders ADD COLUMN project_id INTEGER"); } catch {}
-    try { db.run("UPDATE reminders SET project_id = kb_id WHERE project_id IS NULL AND kb_id IS NOT NULL"); } catch {}
-
-    // Update seed task params: kb_id → project_ids
-    const tasks = q("SELECT id, params_json FROM sys_tasks WHERE task_type = 'daily_report' OR task_type = 'auto_index'");
-    for (const t of tasks) {
-      try {
-        const params = JSON.parse(t.params_json || '{}');
-        if (params.kb_id && !params.project_ids) {
-          params.project_ids = [params.kb_id];
-          delete params.kb_id;
-          run('UPDATE sys_tasks SET params_json = ? WHERE id = ?', JSON.stringify(params), t.id);
-        }
-      } catch {}
-    }
-
-    setSchemaVersion(5);
-  }
-
-  if (version < 6) {
-    // Rename collector_tasks → sys_tasks
-    try { db.run("ALTER TABLE collector_tasks RENAME TO sys_tasks"); } catch {}
-    try { db.run("ALTER TABLE sys_tasks ADD COLUMN project_id INTEGER DEFAULT NULL"); } catch {}
-    setSchemaVersion(6);
-  }
-
-  try { db.run("ALTER TABLE sys_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 1"); } catch {}
-
-  try {
-    const existing = qOne("SELECT id FROM sys_tasks WHERE task_type = 'daily_report'");
-    if (!existing) {
-      db.run("INSERT INTO sys_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_daily_report', '综合日报', '56 9 * * *', 'daily_report', '{}', 1, 1)");
-    }
-  } catch (e) { console.error('[DB] seed task error:', e); }
-
-  try {
-    const existing = qOne("SELECT id FROM sys_tasks WHERE task_type = 'auto_index'");
-    if (!existing) {
-      db.run("INSERT INTO sys_tasks (task_id, name, cron_expression, task_type, params_json, enabled, notify_feishu) VALUES ('sys_auto_index', '自动索引笔记库', '0 */2 * * *', 'auto_index', '{}', 1, 0)");
-    }
-  } catch (e) { console.error('[DB] seed auto_index error:', e); }
-
-  saveDb();
-}
-
-function ensureColumns() {
-  // 用 PRAGMA 检查并添加 sessions 表缺失的列（比 ALTER TABLE 更可靠）
-  const sessionCols = q("PRAGMA table_info('sessions')").map(r => r.name);
-  const neededSessions = [
-    { name: 'project_id', sql: "ALTER TABLE sessions ADD COLUMN project_id INTEGER" },
-    { name: 'active_agent', sql: "ALTER TABLE sessions ADD COLUMN active_agent TEXT DEFAULT 'pi'" },
-  ];
-  for (const col of neededSessions) {
-    if (!sessionCols.includes(col.name)) {
-      try { db.run(col.sql); saveDb(); logger.info('[DB] Added column %s to sessions', col.name); } catch (e) { logger.error('[DB] Failed to add %s to sessions: %s', col.name, e.message); }
-    }
-  }
-  try { db.run("ALTER TABLE documents ADD COLUMN project_id INTEGER"); } catch {}
-  try { db.run("ALTER TABLE note_embeddings ADD COLUMN project_id INTEGER"); } catch {}
-  try { db.run("ALTER TABLE file_index_meta ADD COLUMN project_id INTEGER"); } catch {}
-  try { db.run("ALTER TABLE ai_analysis ADD COLUMN project_id INTEGER"); } catch {}
-  try { db.run("ALTER TABLE sys_tasks ADD COLUMN project_id INTEGER DEFAULT NULL"); } catch {}
-  try { db.run("ALTER TABLE reminders ADD COLUMN project_id INTEGER"); } catch {}
   saveDb();
 }
 
@@ -428,30 +235,30 @@ function runMany(sqls) {
 
 // ========== Config ==========
 function configGet(key) {
-  const r = qOne('SELECT value FROM config WHERE key = ?', key);
+  const r = qOne('SELECT value FROM sys_config WHERE key = ?', key);
   return r ? r.value : null;
 }
 function configSet(key, value) {
-  run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', key, value);
+  run('INSERT OR REPLACE INTO sys_config (key, value) VALUES (?, ?)', key, value);
 }
 
 // ========== Projects (unified: note + code) ==========
 const project = {
   list: (type) => {
-    if (type) return q('SELECT * FROM projects WHERE type = ? ORDER BY sort_order ASC, created_at DESC', type);
-    return q('SELECT * FROM projects ORDER BY sort_order ASC, created_at DESC');
+    if (type) return q('SELECT * FROM prj_projects WHERE type = ? ORDER BY sort_order ASC, created_at DESC', type);
+    return q('SELECT * FROM prj_projects ORDER BY sort_order ASC, created_at DESC');
   },
-  get: (id) => qOne('SELECT * FROM projects WHERE id = ?', id),
-  getDefault: () => qOne('SELECT * FROM projects WHERE is_default = 1'),
+  get: (id) => qOne('SELECT * FROM prj_projects WHERE id = ?', id),
+  getDefault: () => qOne('SELECT * FROM prj_projects WHERE is_default = 1'),
   setDefault: (id) => {
-    run('UPDATE projects SET is_default = 0 WHERE is_default = 1');
-    if (id) run('UPDATE projects SET is_default = 1 WHERE id = ?', id);
+    run('UPDATE prj_projects SET is_default = 0 WHERE is_default = 1');
+    if (id) run('UPDATE prj_projects SET is_default = 1 WHERE id = ?', id);
   },
   add: (name, type, dir, description, defaultBranch) => {
     const t = type || 'note';
-    run('INSERT INTO projects (name, type, dir, description, default_branch) VALUES (?, ?, ?, ?, ?)',
+    run('INSERT INTO prj_projects (name, type, dir, description, default_branch) VALUES (?, ?, ?, ?, ?)',
       name, t, dir || '', description || '', defaultBranch || '');
-    const r = qOne('SELECT id FROM projects WHERE name = ? AND type = ?', name, t);
+    const r = qOne('SELECT id FROM prj_projects WHERE name = ? AND type = ?', name, t);
     return { id: r.id, name, type: t };
   },
   update: (id, data) => {
@@ -471,38 +278,36 @@ const project = {
     if (fields.length) {
       fields.push("updated_at = datetime('now', '+8 hours')");
       params.push(id);
-      run(`UPDATE projects SET ${fields.join(', ')} WHERE id = ?`, ...params);
+      run(`UPDATE prj_projects SET ${fields.join(', ')} WHERE id = ?`, ...params);
     }
   },
   remove: (id) => {
-    run('DELETE FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE project_id = ?)', id);
-    run('DELETE FROM documents WHERE project_id = ?', id);
-    run('DELETE FROM note_embeddings WHERE project_id = ?', id);
-    run('DELETE FROM file_index_meta WHERE project_id = ?', id);
+    run('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', id);
+    run('DELETE FROM kb_documents WHERE project_id = ?', id);
+    run('DELETE FROM kb_file_index_meta WHERE project_id = ?', id);
     run('DELETE FROM ai_analysis WHERE project_id = ?', id);
     let sessions = [];
-    try { sessions = q('SELECT id FROM sessions WHERE project_id = ?', id); } catch {}
+    try { sessions = q('SELECT id FROM prj_sessions WHERE project_id = ?', id); } catch {}
     for (const s of sessions) {
-      run('DELETE FROM messages WHERE session_id = ?', s.id);
-      run('DELETE FROM turn_embeddings WHERE session_id = ?', s.id);
+      run('DELETE FROM prj_messages WHERE session_id = ?', s.id);
     }
-    run('DELETE FROM sessions WHERE project_id = ?', id);
-    run('DELETE FROM projects WHERE id = ?', id);
+    run('DELETE FROM prj_sessions WHERE project_id = ?', id);
+    run('DELETE FROM prj_projects WHERE id = ?', id);
   },
   // Document operations (for note-type projects)
   docCount: (projectId) => {
-    try { const r = qOne('SELECT COUNT(*) as c FROM documents WHERE project_id = ?', projectId); return r ? r.c : 0; } catch { return 0; }
+    try { const r = qOne('SELECT COUNT(*) as c FROM kb_documents WHERE project_id = ?', projectId); return r ? r.c : 0; } catch { return 0; }
   },
   insertDoc: (projectId, pathVal, content, fileMtime) => {
-    run("INSERT OR REPLACE INTO documents (project_id, path, content, indexed_at, file_mtime) VALUES (?, ?, ?, datetime('now', '+8 hours'), ?)", projectId, pathVal, content, fileMtime || null);
-    const r = qOne('SELECT id FROM documents WHERE project_id = ? AND path = ?', projectId, pathVal);
+    run("INSERT OR REPLACE INTO kb_documents (project_id, path, content, indexed_at, file_mtime) VALUES (?, ?, ?, datetime('now', '+8 hours'), ?)", projectId, pathVal, content, fileMtime || null);
+    const r = qOne('SELECT id FROM kb_documents WHERE project_id = ? AND path = ?', projectId, pathVal);
     return r.id;
   },
-  insertChunk: (docId, content) => run('INSERT INTO chunks (doc_id, content) VALUES (?, ?)', docId, content),
-  getChunks: (projectId) => q('SELECT c.content FROM chunks c JOIN documents d ON c.doc_id = d.id WHERE d.project_id = ?', projectId).map(r => r.content),
+  insertChunk: (docId, content) => run('INSERT INTO kb_chunks (doc_id, content) VALUES (?, ?)', docId, content),
+  getChunks: (projectId) => q('SELECT c.content FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id WHERE d.project_id = ?', projectId).map(r => r.content),
   deleteDocs: (projectId) => {
-    run('DELETE FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE project_id = ?)', projectId);
-    run('DELETE FROM documents WHERE project_id = ?', projectId);
+    run('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', projectId);
+    run('DELETE FROM kb_documents WHERE project_id = ?', projectId);
   },
 };
 
@@ -510,60 +315,59 @@ const project = {
 const chat = {
   sessions: (projectId) => {
     try {
-      if (projectId) return q("SELECT s.*, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId);
-      return q("SELECT s.*, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s ORDER BY s.updated_at DESC");
+      if (projectId) return q("SELECT s.*, (SELECT content FROM prj_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId);
+      return q("SELECT s.*, (SELECT content FROM prj_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s ORDER BY s.updated_at DESC");
     } catch { return []; }
   },
   sessionsBySource: (source, projectId) => {
     try {
-      if (projectId) return q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.source = ? AND s.project_id = ? ORDER BY updated_at DESC`, source, projectId);
-      return q(`SELECT s.*, (SELECT COUNT(*) FROM messages WHERE session_id = s.id) as msg_count, (SELECT content FROM messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM sessions s WHERE s.source = ? ORDER BY updated_at DESC`, source);
+      if (projectId) return q(`SELECT s.*, (SELECT COUNT(*) FROM prj_messages WHERE session_id = s.id) as msg_count, (SELECT content FROM prj_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.source = ? AND s.project_id = ? ORDER BY updated_at DESC`, source, projectId);
+      return q(`SELECT s.*, (SELECT COUNT(*) FROM prj_messages WHERE session_id = s.id) as msg_count, (SELECT content FROM prj_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.source = ? ORDER BY updated_at DESC`, source);
     } catch { return []; }
   },
   createSession: (id, projectId, title, mode, agent, source) => {
     // 确保 sessions 表有 project_id 和 active_agent 列
     for (const col of ['project_id', 'active_agent']) {
       try {
-        const info = q("PRAGMA table_info('sessions')");
+        const info = q("PRAGMA table_info('prj_sessions')");
         const hasCol = info.some(r => r.name === col);
         if (!hasCol) {
           const type = col === 'project_id' ? 'INTEGER' : "TEXT DEFAULT 'pi'";
-          db.run(`ALTER TABLE sessions ADD COLUMN ${col} ${type}`);
+          db.run(`ALTER TABLE prj_sessions ADD COLUMN ${col} ${type}`);
           saveDb();
           logger.info('[DB] Added column %s to sessions via createSession', col);
         }
       } catch (_) {}
     }
     try {
-      run("INSERT OR IGNORE INTO sessions (id, source, title, mode, project_id, active_agent) VALUES (?, ?, ?, ?, ?, ?)",
+      run("INSERT OR IGNORE INTO prj_sessions (id, source, title, mode, project_id, active_agent) VALUES (?, ?, ?, ?, ?, ?)",
         id, source || 'ui', title || '新对话', mode || 'general', projectId || null, agent || 'pi');
     } catch (e) {
       logger.error('[DB] createSession fallback: %s', e.message);
-      run("INSERT OR IGNORE INTO sessions (id, source, title, mode, active_agent) VALUES (?, ?, ?, ?, ?)",
+      run("INSERT OR IGNORE INTO prj_sessions (id, source, title, mode, active_agent) VALUES (?, ?, ?, ?, ?)",
         id, source || 'ui', title || '新对话', mode || 'general', agent || 'pi');
     }
-    return qOne('SELECT * FROM sessions WHERE id = ?', id);
+    return qOne('SELECT * FROM prj_sessions WHERE id = ?', id);
   },
-  getSession: (id) => qOne('SELECT * FROM sessions WHERE id = ?', id),
+  getSession: (id) => qOne('SELECT * FROM prj_sessions WHERE id = ?', id),
   deleteSession: (sessionId) => {
-    run('DELETE FROM turn_embeddings WHERE session_id = ?', sessionId);
-    run('DELETE FROM messages WHERE session_id = ?', sessionId);
-    run('DELETE FROM sessions WHERE id = ?', sessionId);
+    run('DELETE FROM prj_messages WHERE session_id = ?', sessionId);
+    run('DELETE FROM prj_sessions WHERE id = ?', sessionId);
   },
   updateSessionTitle: (id, title) => {
-    run("UPDATE sessions SET title = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", title, id);
+    run("UPDATE prj_sessions SET title = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", title, id);
   },
   updateSessionAgent: (id, agent) => {
-    run("UPDATE sessions SET active_agent = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", agent, id);
+    run("UPDATE prj_sessions SET active_agent = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", agent, id);
   },
   messages: (sessionId) => {
-    const rows = q("SELECT * FROM messages WHERE session_id = ? ORDER BY id", sessionId);
+    const rows = q("SELECT * FROM prj_messages WHERE session_id = ? ORDER BY id", sessionId);
     return rows.map(r => ({ ...r, images: r.images ? JSON.parse(r.images) : null }));
   },
   addMessage: (sessionId, role, content, mode, images) => {
     const imagesJson = images?.length ? JSON.stringify(images) : null;
-    run("INSERT INTO messages (session_id, role, content, mode, images) VALUES (?, ?, ?, ?, ?)", sessionId, role, content, mode || 'general', imagesJson);
-    run("UPDATE sessions SET updated_at = datetime('now', '+8 hours') WHERE id = ?", sessionId);
+    run("INSERT INTO prj_messages (session_id, role, content, mode, images) VALUES (?, ?, ?, ?, ?)", sessionId, role, content, mode || 'general', imagesJson);
+    run("UPDATE prj_sessions SET updated_at = datetime('now', '+8 hours') WHERE id = ?", sessionId);
   },
 };
 
@@ -666,11 +470,11 @@ const task = {
 
 // ========== Reminders ==========
 const reminder = {
-  list: () => q('SELECT * FROM reminders ORDER BY created_at DESC'),
-  get: (id) => qOne('SELECT * FROM reminders WHERE id = ?', id),
+  list: () => q('SELECT * FROM plan_reminders ORDER BY created_at DESC'),
+  get: (id) => qOne('SELECT * FROM plan_reminders WHERE id = ?', id),
   add: (data) => {
     const id = data.id || 'R' + Date.now();
-    run('INSERT OR IGNORE INTO reminders (id, name, message, type, time, date, day_of_week, day_of_month, month_day, enabled, created_at, last_triggered, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    run('INSERT OR IGNORE INTO plan_reminders (id, name, message, type, time, date, day_of_week, day_of_month, month_day, enabled, created_at, last_triggered, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       id, data.name, data.message || '', data.type, data.time || '09:00', data.date || '',
       data.day_of_week || 0, data.day_of_month || 1, data.month_day || '',
       data.enabled !== undefined ? (data.enabled ? 1 : 0) : 1,
@@ -685,21 +489,21 @@ const reminder = {
     if (data.type !== undefined) { fields.push('type = ?'); params.push(data.type); }
     if (data.time !== undefined) { fields.push('time = ?'); params.push(data.time); }
     if (data.enabled !== undefined) { fields.push('enabled = ?'); params.push(data.enabled ? 1 : 0); }
-    if (fields.length) { params.push(id); run(`UPDATE reminders SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+    if (fields.length) { params.push(id); run(`UPDATE plan_reminders SET ${fields.join(', ')} WHERE id = ?`, ...params); }
   },
-  remove: (id) => run('DELETE FROM reminders WHERE id = ?', id),
-  setEnabled: (id, enabled) => run('UPDATE reminders SET enabled = ? WHERE id = ?', enabled ? 1 : 0, id),
-  getActive: () => q("SELECT * FROM reminders WHERE enabled = 1"),
+  remove: (id) => run('DELETE FROM plan_reminders WHERE id = ?', id),
+  setEnabled: (id, enabled) => run('UPDATE plan_reminders SET enabled = ? WHERE id = ?', enabled ? 1 : 0, id),
+  getActive: () => q("SELECT * FROM plan_reminders WHERE enabled = 1"),
 };
 
 // ========== Todos ==========
 const todo = {
-  list: () => q('SELECT * FROM todos ORDER BY sort_order ASC, created_at DESC'),
-  get: (id) => qOne('SELECT * FROM todos WHERE id = ?', id),
+  list: () => q('SELECT * FROM plan_todos ORDER BY sort_order ASC, created_at DESC'),
+  get: (id) => qOne('SELECT * FROM plan_todos WHERE id = ?', id),
   add: (data) => {
-    run('INSERT INTO todos (title, description, priority, due_date, status) VALUES (?, ?, ?, ?, ?)',
+    run('INSERT INTO plan_todos (title, description, priority, due_date, status) VALUES (?, ?, ?, ?, ?)',
       data.title, data.description || '', data.priority || 'mid', data.due_date || '', data.status || 'pending');
-    const r = qOne('SELECT id FROM todos WHERE title = ? ORDER BY id DESC', data.title);
+    const r = qOne('SELECT id FROM plan_todos WHERE title = ? ORDER BY id DESC', data.title);
     return { id: r.id };
   },
   update: (id, data) => {
@@ -710,9 +514,9 @@ const todo = {
     if (data.due_date !== undefined) { fields.push('due_date = ?'); params.push(data.due_date); }
     if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
     if (data.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(data.sort_order); }
-    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE todos SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE plan_todos SET ${fields.join(', ')} WHERE id = ?`, ...params); }
   },
-  remove: (id) => run('DELETE FROM todos WHERE id = ?', id),
+  remove: (id) => run('DELETE FROM plan_todos WHERE id = ?', id),
 };
 
 function close() {

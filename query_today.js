@@ -24,29 +24,29 @@ async function main() {
   
   // 1. 今日消息统计
   const todayMessages = db.exec(`
-    SELECT COUNT(*) as count FROM messages m
+    SELECT COUNT(*) as count FROM prj_messages m
     WHERE date(m.created_at) = '${today}'
   `);
   
   const todayUserMessages = db.exec(`
-    SELECT COUNT(*) as count FROM messages m
+    SELECT COUNT(*) as count FROM prj_messages m
     WHERE date(m.created_at) = '${today}' AND m.role = 'user'
   `);
   
   const todayAssistantMessages = db.exec(`
-    SELECT COUNT(*) as count FROM messages m
+    SELECT COUNT(*) as count FROM prj_messages m
     WHERE date(m.created_at) = '${today}' AND m.role = 'assistant'
   `);
   
   // 2. 今日会话统计
   const todaySessions = db.exec(`
-    SELECT COUNT(*) as count FROM sessions s
+    SELECT COUNT(*) as count FROM prj_sessions s
     WHERE date(s.created_at) = '${today}'
   `);
   
   // 3. 今日文档更新
   const todayDocs = db.exec(`
-    SELECT COUNT(*) as count FROM file_index_meta f
+    SELECT COUNT(*) as count FROM kb_file_index_meta f
     WHERE date(datetime(f.last_modified/1000, 'unixepoch', '+8 hours')) = '${today}'
   `);
   
@@ -98,12 +98,12 @@ async function main() {
   
   // 9. 提醒统计
   const activeReminders = db.exec(`
-    SELECT COUNT(*) as count FROM reminders
+    SELECT COUNT(*) as count FROM plan_reminders
     WHERE enabled = 1
   `);
-  
+
   const todayReminders = db.exec(`
-    SELECT COUNT(*) as count FROM reminders
+    SELECT COUNT(*) as count FROM plan_reminders
     WHERE enabled = 1 AND date(date) = '${today}'
   `);
   
@@ -115,20 +115,20 @@ async function main() {
   
   // 11. 项目/知识库信息
   const kb = db.exec(`
-    SELECT name, dir FROM projects WHERE id = 1 AND type = 'note'
+    SELECT name, dir FROM prj_projects WHERE id = 1 AND type = 'note'
   `);
   
   // 12. 文档索引统计
   const totalDocs = db.exec(`
-    SELECT COUNT(*) as count FROM file_index_meta
+    SELECT COUNT(*) as count FROM kb_file_index_meta
     WHERE project_id = 1
   `);
   
   // 13. 最近5条消息
   const recentMessages = db.exec(`
     SELECT substr(m.created_at, 1, 16) as time, m.role, substr(m.content, 1, 100) as preview, s.title
-    FROM messages m
-    JOIN sessions s ON m.session_id = s.id
+    FROM prj_messages m
+    JOIN prj_sessions s ON m.session_id = s.id
     WHERE date(m.created_at) = '${today}'
     ORDER BY m.created_at DESC
     LIMIT 5
@@ -137,7 +137,7 @@ async function main() {
   // 14. 最近5个会话
   const recentSessions = db.exec(`
     SELECT s.id, substr(s.title, 1, 50) as title, s.source, substr(s.created_at, 1, 16) as created
-    FROM sessions s
+    FROM prj_sessions s
     WHERE date(s.created_at) = '${today}'
     ORDER BY s.created_at DESC
     LIMIT 5
@@ -154,11 +154,11 @@ async function main() {
   
   // 16. 系统总体统计
   const totalSessions = db.exec(`
-    SELECT COUNT(*) as count FROM sessions
+    SELECT COUNT(*) as count FROM prj_sessions
   `);
   
   const totalMessages = db.exec(`
-    SELECT COUNT(*) as count FROM messages
+    SELECT COUNT(*) as count FROM prj_messages
   `);
   
   const totalMemories = db.exec(`

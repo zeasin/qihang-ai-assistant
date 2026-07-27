@@ -12,6 +12,18 @@ let currentLogLevel = 'DEBUG';
 let currentFile = null;
 let currentSize = 0;
 
+// 防止 stdout/stderr pipe 断裂时触发未捕获异常
+function setupPipeErrorHandler() {
+  for (const stream of [process.stdout, process.stderr]) {
+    if (stream && typeof stream.on === 'function' && stream.listenerCount('error') === 0) {
+      stream.on('error', (err) => {
+        if (err && err.code === 'EPIPE') { /* pipe broken, silently ignore */ }
+      });
+    }
+  }
+}
+setupPipeErrorHandler();
+
 function ensureDir() {
   if (!fs.existsSync(LOG_DIR)) {
     fs.mkdirSync(LOG_DIR, { recursive: true });

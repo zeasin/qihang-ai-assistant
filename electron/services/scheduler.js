@@ -336,7 +336,7 @@ function buildReportSections(data) {
 const SYSTEM_PROMPT = `你是一位日报生成助手。请使用提供的工具查询今日数据，然后生成一份完整的综合日报。
 
 ## 可用工具
-- query_todos — 查询待办事项（按状态、优先级、日期）
+- query_todos — 查询待办事项（plan_todos，按状态、优先级、日期）
 - query_messages — 查询今日对话记录
 - query_documents — 查询今日更新的文档/笔记（可指定 project_id 过滤）
 - query_data_records — 查询数据中心记录
@@ -606,14 +606,14 @@ const executors = {
           if (config.kb_id) {
             projectIds = [config.kb_id];
           } else {
-            const firstProject = db.qOne("SELECT id FROM projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
+            const firstProject = db.qOne("SELECT id FROM prj_projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
             if (firstProject) projectIds = [firstProject.id];
           }
         }
       }
       if (!projectIds || !projectIds.length) { logger.warn('[Scheduler] daily_report: no project available'); return; }
       today = getChinaDate();
-      const projectNames = projectIds.map(id => (db.qOne("SELECT name FROM projects WHERE id = ?", id) || {}).name || '笔记库').join(', ');
+      const projectNames = projectIds.map(id => (db.qOne("SELECT name FROM prj_projects WHERE id = ?", id) || {}).name || '笔记库').join(', ');
       mainProjectId = projectIds[0];
 
       // ========== Default User Prompt (editable in config page) ==========
@@ -653,8 +653,8 @@ const executors = {
         logger.info('[Scheduler] Falling back to template-based report...');
         const fallbackData = {
           today: getChinaDate(), yesterday: getChinaDate(-1),
-          greeting: '🌅 早上好', kbName: mainProjectId ? (db.qOne("SELECT name FROM projects WHERE id = ?", mainProjectId) || {}).name || '笔记库' : '笔记库',
-          doneToday: db.q("SELECT title, priority FROM todos WHERE status = 'done' AND updated_at >= ?", getChinaDate()),
+          greeting: '🌅 早上好', kbName: mainProjectId ? (db.qOne("SELECT name FROM prj_projects WHERE id = ?", mainProjectId) || {}).name || '笔记库' : '笔记库',
+          doneToday: db.q("SELECT title, priority FROM plan_todos WHERE status = 'done' AND updated_at >= ?", getChinaDate()),
           pendingTodos: [],
           overdueTodos: [],
           reminders: [], chats: [], workLogs: [], recs: [], recCount: 0,

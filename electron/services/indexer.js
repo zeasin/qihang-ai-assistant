@@ -96,12 +96,17 @@ function stop() {
 
 function isRunning() { return running; }
 
+const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.opencode', '__pycache__', '.cache']);
+
 function walkDir(dir, files) {
   if (!fs.existsSync(dir)) return;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) walkDir(full, files);
-    else if (entry.name.endsWith('.md')) files.push(full);
+    if (entry.isDirectory()) {
+      if (IGNORED_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
+      walkDir(path.join(dir, entry.name), files);
+    } else if (entry.name.endsWith('.md')) {
+      files.push(path.join(dir, entry.name));
+    }
   }
 }
 
