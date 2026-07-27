@@ -17,6 +17,8 @@
             </option>
           </select>
           <button class="btn-icon" @click="refreshTree" title="刷新文件树">↻</button>
+          <button class="btn-icon" :disabled="indexing" @click="indexCurrentProject" :title="hasIndexed ? '重新索引' : '构建索引'">{{ indexing ? '⏳' : '📇' }}</button>
+          <span class="index-status">{{ indexing ? '进行中' : (hasIndexed ? '已索引' : '') }}</span>
         </div>
         <div class="search-bar">
           <input v-model="searchQuery" class="search-input" placeholder="搜索当前项目..." @keydown.enter="doSearch" />
@@ -203,11 +205,33 @@ async function doSearch() {
   searchActive.value = true;
   searched.value = true;
   try {
-    const results = await API.kb.search(selectedKbId.value, q);
-    searchResults.value = results.map((r: any) => ({
-      path: r.source, name: r.title, score: r.score, match: (r.text || '').slice(0, 200),
-    }));
+    const proj = kbList.value.find(k => k.id === selectedKbId.value);
+    let results;
+    if (proj?.type === 'note') {
+      results = await API.kb.search(selectedKbId.value, q);
+      results = results.map((r: any) => ({
+        path: r.source, name: r.title, score: r.score, match: (r.text || '').slice(0, 200),
+      }));
+    } else {
+      results = await API.code.search(selectedKbId.value, q);
+    }
+    searchResults.value = results;
   } catch { searchResults.value = []; }
+}
+
+async function indexCurrentProject() {
+  if (!selectedKbId.value || indexing.value) return;
+  indexing.value = true;
+  try {
+    const proj = kbList.value.find(k => k.id === selectedKbId.value);
+    if (proj?.type === 'code') {
+      await API.code.index(selectedKbId.value);
+    } else {
+      await API.kb.scan(selectedKbId.value);
+    }
+    hasIndexed.value = true;
+  } catch {}
+  indexing.value = false;
 }
 
 function clearSearch() {
@@ -500,6 +524,7 @@ onMounted(() => {
   margin: 24px 0;
 }
 
+.index-status { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
 .text-muted { color: var(--text-muted); font-size: 13px; }
 
 /* 搜索 */

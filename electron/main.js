@@ -460,6 +460,92 @@ ipcMain.handle('notes:read', (_, { projectId, filePath }) => {
 });
 
 
+
+ipcMain.handle('code:index', (_, { projectId }) => {
+  try {
+    const project = db.project.get(projectId);
+    if (!project || !project.dir) return { ok: false, error: '项目不存在' };
+    // 清空旧索引
+    db.run('DELETE FROM kb_file_index_meta WHERE project_id = ?', projectId);
+    // 遍历目录，插入文件路径
+    const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.opencode', '__pycache__', '.cache', 'dist', 'build', 'target', '.idea', '.vscode']);
+    let count = 0;
+    const walkDir = (dir) => {
+      try {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) {
+            if (IGNORED_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+            walkDir(full);
+          } else {
+            try {
+              db.run('INSERT OR IGNORE INTO kb_file_index_meta (project_id, file_path, file_name, last_indexed_at) VALUES (?, ?, ?, datetime("now", "+8 hours"))', projectId, full, e.name);
+              count++;
+            } catch {}
+          }
+        }
+      } catch {}
+    };
+    walkDir(project.dir);
+    return { ok: true, count };
+  } catch { return { ok: false, error: '索引失败' } };
+});
+
+ipcMain.handle('code:search', (_, { projectId, query }) => {
+  try {
+    if (!query || !projectId) return [];
+    // 英文分词：按非字母数字字符分割
+    const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    if (tokens.length === 0) {
+      // 中文 fallback: 直接搜整句
+      const sql = `SELECT file_path, file_name FROM kb_file_index_meta WHERE project_id = ? AND (file_path LIKE ? OR file_name LIKE ?) ORDER BY file_path LIMIT 30`;
+      const like = `%${query}%`;
+      return db.q(sql, projectId, like, like).map(r => ({
+        path: r.file_path, name: r.file_name, score: 0.5, match: '',
+      }));
+    }
+    // 英文：每个 token 都要匹配文件名或路径
+    const likeClauses = tokens.map(t => `(file_name LIKE ? OR file_path LIKE ?)`);
+    const params = [];
+    for (const t of tokens) {
+      params.push(`%${t}%`, `%${t}%`);
+    }
+    params.push(projectId);
+    // rank: 匹配的 token 数
+    const rankExpr = tokens.map(t => `CASE WHEN file_name LIKE ? THEN 2 WHEN file_path LIKE ? THEN 1 ELSE 0 END`).join('+');
+    for (const t of tokens) {
+      params.push(`%${t}%`, `%${t}%`);
+    }
+    const sql = `SELECT file_path, file_name, (${rankExpr}) as rank FROM kb_file_index_meta WHERE ${likeClauses.join(' OR ')} AND project_id = ? ORDER BY rank DESC, file_path LIMIT 30`;
+    const rows = db.q(sql, ...params);
+    if (rows.length > 0) return rows.map(r => ({
+      path: r.file_path, name: r.file_name, score: r.rank, match: '',
+    }));
+    // 索引为空时降级到文件系统搜索
+    const project = db.project.get(projectId);
+    if (project && project.dir) {
+      const fsResults = [];
+      const q = query.toLowerCase();
+      const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '__pycache__', 'dist', 'build', 'target', '.idea', '.vscode']);
+      const walkDir = (dir) => {
+        try {
+          for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, e.name);
+            if (e.isDirectory()) {
+              if (IGNORED_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+              walkDir(full);
+            } else if (e.name.toLowerCase().includes(q)) {
+              fsResults.push({ path: full, name: e.name, score: 1, match: '' });
+            }
+          }
+        } catch {}
+      };
+      walkDir(project.dir);
+      return fsResults.slice(0, 30);
+    }
+  } catch { return []; }
+});
+
 ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
   return db.project.add(name, 'note', dirPath);
 });

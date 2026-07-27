@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     send: (message) => ipcRenderer.invoke('feishu:send', { message }),
     testBot: (app_id, app_secret) => ipcRenderer.invoke('feishu:testBot', { app_id, app_secret }),
   },
+  code: {
+    index: (projectId) => ipcRenderer.invoke('code:index', { projectId }),
+    search: (projectId, query) => ipcRenderer.invoke('code:search', { projectId, query }),
+  },
+
   kb: {
     list: () => ipcRenderer.invoke('kb:list'),
     add: (name, path) => ipcRenderer.invoke('kb:add', { name, path }),
