@@ -3,7 +3,7 @@ const logger = require('./logger');
 
 // 嵌入模型配置（可通过 configure() 修改）
 let embedConfig = {
-  model: 'nomic-embed-text',
+  model: 'bge-m3',
   host: 'http://127.0.0.1:11434',
   apiKey: '',
 };
@@ -11,7 +11,7 @@ let embedConfig = {
 /**
  * 配置嵌入模型参数
  * @param {Object} opts
- * @param {string} [opts.model] - 模型名，如 'nomic-embed-text', 'bge-m3'
+ * @param {string} [opts.model] - 模型名，如 'bge-m3'
  * @param {string} [opts.host] - 服务地址，如 'http://127.0.0.1:11434'
  * @param {string} [opts.apiKey] - API Key（用于非 Ollama 的兼容服务）
  */
@@ -110,17 +110,29 @@ const CACHED_SEGMENTER = (() => {
 
 function tokenize(text) {
   const words = [];
+
+  // 1. 标准分词（句意分词器）
   if (CACHED_SEGMENTER) {
     for (const s of CACHED_SEGMENTER.segment(text)) {
       if (s.isWordLike && s.segment.length >= 2) words.push(s.segment.toLowerCase());
     }
   }
+
+  const cleaned = text.replace(/[^\u4e00-\u9fff\w]/g, '').toLowerCase();
+
+  // 2. 中文 2-gram：覆盖公司名、简称等分词器不认识的组合词
+  const cjkChars = cleaned.replace(/[^\u4e00-\u9fff]/g, '');
+  for (let i = 0; i < cjkChars.length - 1; i++) {
+    words.push(cjkChars.substring(i, i + 2));
+  }
+
+  // 3. 极端回退：逐字切分
   if (words.length === 0) {
     for (const ch of text) {
       if (/[\u4e00-\u9fff\w]/.test(ch)) words.push(ch.toLowerCase());
     }
   }
-  const cleaned = text.replace(/[^\u4e00-\u9fff\w]/g, '').toLowerCase();
+
   return { words: [...new Set(words)], phrase: cleaned };
 }
 
@@ -134,90 +146,129 @@ function computeBM25(termFreq, docLen, avgDocLen, totalDocs, docFreq) {
 function keywordSearch(projectId, query, topK = 10, db) {
   const { words, phrase } = tokenize(query);
   if (words.length === 0 && !phrase) return [];
+  logger.info(`[RAG] keywordSearch query="${query}" → words=[${words.join(', ')}] phrase="${phrase}"`);
 
+  // 1. 获取所有文档（含标题），计算文件名/文件夹/标题得分
+  let docs;
+  if (projectId) {
+    docs = db.q(`SELECT id, path, COALESCE(title, '') as title, project_id
+      FROM kb_documents WHERE project_id = ?`, projectId);
+  } else {
+    docs = db.q(`SELECT id, path, COALESCE(title, '') as title, project_id
+      FROM kb_documents`);
+  }
+  if (!docs.length) return [];
+
+  const docFileScores = new Map();
+  for (const doc of docs) {
+    const pathLower = doc.path.toLowerCase();
+    const basename = pathLower.split(/[\\/]/).pop().replace(/\.md$/, '');
+    const folderParts = pathLower.split(/[\\/]/).filter(p => {
+      const f = p.replace(/\.md$/, '');
+      return f && f !== basename;
+    });
+    const titleLower = doc.title.toLowerCase();
+
+    let fileNameScore = 0;
+    let folderScore = 0;
+    let titleScore = 0;
+
+    for (const term of words) {
+      if (basename.includes(term)) fileNameScore += 5;
+      for (const part of folderParts) {
+        if (part.includes(term)) folderScore += 3;
+      }
+      if (titleLower.includes(term)) titleScore += 3;
+    }
+
+    if (phrase.length >= 2) {
+      if (basename.includes(phrase)) fileNameScore += 15;
+      for (const part of folderParts) {
+        if (part.includes(phrase)) folderScore += 8;
+      }
+      if (titleLower.includes(phrase)) titleScore += 8;
+    }
+
+    const displayTitle = doc.title || basename;
+    docFileScores.set(doc.id, {
+      path: doc.path, title: displayTitle, project_id: doc.project_id,
+      fileNameScore, folderScore, titleScore, contentScore: 0, bestChunk: '',
+    });
+  }
+
+  // 2. 获取所有 chunk，计算 BM25 内容得分
   let rows;
   if (projectId) {
-    rows = db.q(`SELECT c.id, c.content, d.path, d.file_mtime, d.project_id
+    rows = db.q(`SELECT c.id, c.content, d.id as doc_id
       FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
       WHERE d.project_id = ?`, projectId);
   } else {
-    rows = db.q(`SELECT c.id, c.content, d.path, d.file_mtime, d.project_id
+    rows = db.q(`SELECT c.id, c.content, d.id as doc_id
       FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id`);
   }
-  if (!rows.length) return [];
 
-  const docLenList = rows.map(r => r.content.length);
-  const avgDocLen = docLenList.reduce((a, b) => a + b, 0) / docLenList.length;
-  const totalDocs = rows.length;
+  if (rows.length) {
+    const docLenList = rows.map(r => r.content.length);
+    const avgDocLen = docLenList.reduce((a, b) => a + b, 0) / docLenList.length;
+    const totalDocs = docs.length;
 
-  const termDocFreq = {};
-  for (const term of words) {
-    termDocFreq[term] = rows.filter(r => r.content.toLowerCase().includes(term)).length;
+    const termDocFreq = {};
+    for (const term of words) {
+      termDocFreq[term] = rows.filter(r => r.content.toLowerCase().includes(term)).length;
+    }
+
+    for (const r of rows) {
+      const content = r.content.toLowerCase();
+      let contentScore = 0;
+      for (const term of words) {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const termFreq = (content.match(new RegExp(escaped, 'g')) || []).length;
+        if (termFreq > 0) {
+          contentScore += computeBM25(termFreq, r.content.length, avgDocLen, totalDocs, Math.max(1, termDocFreq[term]));
+        }
+      }
+      if (contentScore > 0 && phrase.length >= 2 && content.includes(phrase)) {
+        contentScore *= 1.8;
+      }
+      if (contentScore > 0) {
+        const fs = docFileScores.get(r.doc_id);
+        if (fs && contentScore > fs.contentScore) {
+          fs.contentScore = contentScore;
+          fs.bestChunk = r.content;
+        }
+      }
+    }
   }
 
-  const queryLower = query.toLowerCase();
-
-  const scored = [];
-  for (const r of rows) {
-    const content = r.content.toLowerCase();
-    const pathLower = r.path ? r.path.toLowerCase() : '';
-
-    let contentScore = 0;
-    for (const term of words) {
-      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const termFreq = (content.match(new RegExp(escaped, 'g')) || []).length;
-      if (termFreq > 0) {
-        contentScore += computeBM25(termFreq, r.content.length, avgDocLen, totalDocs, Math.max(1, termDocFreq[term]));
-      }
-    }
-
-    if (contentScore > 0 && phrase.length >= 2 && content.includes(phrase)) {
-      contentScore *= 1.8;
-    }
-
-    let pathScore = 0;
-    let pathTermHits = 0;
-    for (const term of words) {
-      if (pathLower.includes(term)) {
-        pathTermHits++;
-        pathScore += 1;
-      }
-    }
-    if (pathLower.includes(phrase) && phrase.length >= 2) {
-      pathScore += 3;
-      pathTermHits += 2;
-    }
-
-    const totalScore = contentScore + pathScore * 2;
+  // 3. 计算综合得分并排序
+  const results = [];
+  for (const [docId, fs] of docFileScores) {
+    const totalScore = fs.fileNameScore * 3 + fs.folderScore * 2 + fs.titleScore * 1.5 + fs.contentScore;
     if (totalScore === 0) continue;
-
-    const title = r.path ? r.path.split(/[\\/]/).pop() : '未知';
-    scored.push({ text: r.content, source: r.path, score: totalScore, title, pathTermHits, project_id: r.project_id });
+    results.push({
+      text: fs.bestChunk || '',
+      source: fs.path,
+      score: totalScore,
+      title: fs.title,
+      project_id: fs.project_id,
+      fileNameScore: fs.fileNameScore,
+      folderScore: fs.folderScore,
+      titleScore: fs.titleScore,
+      contentScore: fs.contentScore,
+    });
   }
 
-  scored.sort((a, b) => {
-    if (b.pathTermHits !== a.pathTermHits) return b.pathTermHits - a.pathTermHits;
-    return b.score - a.score;
-  });
-
-  const seenFiles = new Map();
-  for (const s of scored) {
-    const key = s.source;
-    if (seenFiles.has(key)) {
-      if (s.score > seenFiles.get(key).score) seenFiles.set(key, s);
-    } else {
-      seenFiles.set(key, s);
+  results.sort((a, b) => b.score - a.score);
+  const maxScore = results.length > 0 ? results[0].score : 1;
+  for (const s of results) s.score = s.score / maxScore;
+  const top = results.slice(0, topK).filter(c => c.score > 0.01);
+  if (top.length) {
+    logger.info(`[RAG] keywordSearch top${top.length}:`);
+    for (const r of top.slice(0, 5)) {
+      logger.info(`[RAG]   ${(r.score * 100).toFixed(0)}% file=${(r.fileNameScore || 0)} folder=${(r.folderScore || 0)} title=${(r.titleScore || 0)} content=${(r.contentScore || 0).toFixed(2)} | ${r.source.split(/[\\/]/).pop()}`);
     }
   }
-
-  const deduped = [...seenFiles.values()];
-  deduped.sort((a, b) => {
-    if (b.pathTermHits !== a.pathTermHits) return b.pathTermHits - a.pathTermHits;
-    return b.score - a.score;
-  });
-  const maxScore = deduped.length > 0 ? deduped[0].score : 1;
-  for (const s of deduped) s.score = s.score / maxScore;
-  return deduped.slice(0, topK).filter(c => c.score > 0.01);
+  return top;
 }
 
 async function hybridSearch(projectId, query, topK = 10, db) {
@@ -319,6 +370,15 @@ async function searchByVector(projectId, query, topK = 5, db) {
   return scored.slice(0, topK).filter(c => c.score > 0.2);
 }
 
+/**
+ * 从 markdown 内容中提取第一个标题（#、## 等）
+ */
+function extractTitle(content) {
+  if (!content) return '';
+  const match = content.match(/^#{1,6}\s+(.+)$/m);
+  return match ? match[1].trim() : '';
+}
+
 /** 测试嵌入模型连接是否正常 */
 async function testConnection(opts = {}) {
   const model = opts.model || embedConfig.model;
@@ -359,4 +419,4 @@ async function testConnection(opts = {}) {
   }
 }
 
-module.exports = { configure, chunkText, embed, cosineSimilarity, indexProjectChunks, searchByVector, hybridSearch, keywordSearch, tokenize, testConnection };
+module.exports = { configure, chunkText, embed, cosineSimilarity, indexProjectChunks, searchByVector, hybridSearch, keywordSearch, tokenize, extractTitle, testConnection };

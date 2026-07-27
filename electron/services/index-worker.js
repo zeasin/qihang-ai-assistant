@@ -94,7 +94,7 @@ async function indexProject(projectId) {
 
   // 读取嵌入配置
   const cfgRows = q("SELECT key, value FROM sys_config WHERE key IN ('embedModel','embeddingBaseUrl','embeddingApiKey')");
-  const config = { model: 'nomic-embed-text', host: 'http://127.0.0.1:11434', apiKey: '' };
+  const config = { model: 'bge-m3', host: 'http://127.0.0.1:11434', apiKey: '' };
   if (cfgRows.length && cfgRows[0].values) {
     for (const r of cfgRows[0].values) {
       if (r[0] === 'embedModel') config.model = r[1];
@@ -107,6 +107,7 @@ async function indexProject(projectId) {
   const ignoreFiles = p.ignore_files ? p.ignore_files.split(',').map(s => s.trim()) : [];
 
   // 清空旧索引
+  console.log(`[IndexWorker] 开始索引项目: ${p.name} (${p.dir})`);
   runSql('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', [projectId]);
   runSql('DELETE FROM kb_documents WHERE project_id = ?', [projectId]);
   saveDb();
@@ -115,20 +116,27 @@ async function indexProject(projectId) {
   const files = [];
   walkDir(p.dir, files, ignoreDirs, ignoreFiles);
   const total = files.length;
+  console.log(`[IndexWorker] 扫描到 ${total} 个 .md 文件`);
 
   // 写入文档和 chunk
+  const startTime = Date.now();
   for (let i = 0; i < total; i++) {
     const file = files[i];
-    process.send({ type: 'progress', phase: 'scan', current: i + 1, total, file: path.basename(file) });
+    if (i === 0 || i === total - 1 || i % 5 === 0) {
+      process.send({ type: 'progress', phase: 'scan', current: i + 1, total, file: path.basename(file) });
+    }
     const content = fs.readFileSync(file, 'utf-8');
     const stat = fs.statSync(file);
+    const title = path.basename(file, '.md');
+    console.log(`[IndexWorker]   [${i + 1}/${total}] ${path.basename(file)}`);
     const escPath = file.replace(/'/g, "''");
-    runSql('INSERT INTO kb_documents (project_id, path, content, indexed_at, file_mtime) VALUES (?, ?, ?, datetime(\'now\', \'+8 hours\'), ?)',
-      [projectId, file, content, stat.mtimeMs]);
+    runSql('INSERT INTO kb_documents (project_id, path, content, indexed_at, file_mtime, title) VALUES (?, ?, ?, datetime(\'now\', \'+8 hours\'), ?, ?)',
+      [projectId, file, content, stat.mtimeMs, title]);
     const docRows = q(`SELECT id FROM kb_documents WHERE project_id = ${projectId} AND path = '${escPath}'`);
     if (!docRows.length || !docRows[0].values.length) continue;
     const docId = docRows[0].values[0][0];
     const chunks = chunkText(content);
+    console.log(`[IndexWorker]   → ${chunks.length} chunks`);
     for (const chunk of chunks) {
       runSql('INSERT INTO kb_chunks (doc_id, content) VALUES (?, ?)', [docId, chunk]);
     }
@@ -140,6 +148,8 @@ async function indexProject(projectId) {
   const chunkRows = q(`SELECT id, content FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ${projectId}) AND embedding IS NULL`);
   const allChunks = chunkRows.length && chunkRows[0].values ? chunkRows[0].values : [];
   const chunkTotal = allChunks.length;
+  console.log(`[IndexWorker] 生成嵌入向量: 共 ${chunkTotal} 个 chunk, 模型=${config.model} @ ${config.host}`);
+  if (chunkTotal === 0) console.log(`[IndexWorker] 无新 chunk 需嵌入，跳过`);
 
   // 生成向量嵌入
   let embedded = 0;
@@ -148,13 +158,18 @@ async function indexProject(projectId) {
       const emb = await embed(row[1], config);
       runSql('UPDATE kb_chunks SET embedding = ? WHERE id = ?', [JSON.stringify(emb), row[0]]);
       embedded++;
-      process.send({ type: 'progress', phase: 'embed', current: embedded, total: chunkTotal, file: '' });
+      if (embedded === chunkTotal || embedded % 10 === 0) {
+        process.send({ type: 'progress', phase: 'embed', current: embedded, total: chunkTotal, file: '' });
+      }
+      if (embedded % 20 === 0) console.log(`[IndexWorker]   嵌入进度: ${embedded}/${chunkTotal}`);
     } catch (e) {
-      // 跳过，下次补
+      console.log(`[IndexWorker]   嵌入失败 chunk ${row[0]}: ${e.message}`);
     }
     if (embedded % 10 === 0) saveDb();
   }
   saveDb();
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`[IndexWorker] 完成: ${total} 文件, ${embedded} 嵌入 (耗时 ${elapsed}s)`);
 
   return { projectId: p.id, name: p.name, files: total, chunks: chunkTotal, embedded };
 }

@@ -73,7 +73,7 @@
         <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
           <div class="form-group" style="flex:1;min-width:160px;">
             <label style="font-size:12px;">模型名称</label>
-            <input v-model="embedModel" type="text" class="form-control" placeholder="nomic-embed-text / bge-m3 / ...">
+            <input v-model="embedModel" type="text" class="form-control" placeholder="bge-m3 / ...">
           </div>
           <div class="form-group" style="flex:1;min-width:200px;">
             <label style="font-size:12px;">服务地址</label>
@@ -376,7 +376,7 @@ async function loadConfig() {
     feishuAppSecret.value = cfg.feishuAppSecret || '';
     reportRetentionDays.value = cfg.dailyReportRetentionDays || '30';
     reportPrompt.value = cfg.dailyReportPrompt || '';
-    embedModel.value = cfg.embedModel || 'nomic-embed-text';
+    embedModel.value = cfg.embedModel || 'bge-m3';
     embeddingBaseUrl.value = cfg.embeddingBaseUrl || 'http://127.0.0.1:11434';
     embeddingApiKey.value = cfg.embeddingApiKey || '';
   } catch { console.warn('加载配置失败'); }

@@ -29,7 +29,8 @@ async function indexSingle(projectId, onProgress) {
     if (onProgress) onProgress({ phase: 'scan', current: i + 1, total, file: path.basename(file) });
     const content = fs.readFileSync(file, 'utf-8');
     const stat = fs.statSync(file);
-    const docId = db.project.insertDoc(projectId, file, content, stat.mtimeMs);
+    const title = path.basename(file, '.md');
+    const docId = db.project.insertDoc(projectId, file, content, stat.mtimeMs, title);
     const chunks = rag.chunkText(content);
     for (const chunk of chunks) {
       db.project.insertChunk(docId, chunk);

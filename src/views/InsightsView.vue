@@ -13,6 +13,32 @@
         <div class="stat-card"><div class="stat-icon" style="background:rgba(99,102,241,0.1);color:#6366f1;">💬</div><div class="stat-num">{{ stats.totalChats }}</div><div class="stat-label">对话</div></div>
       </div>
 
+      <!-- 索引管理卡片 -->
+      <div class="card index-card">
+        <div class="index-card-header">
+          <h2>📇 索引管理</h2>
+          <span class="index-model">{{ indexerInfo.model }} @ {{ indexerInfo.host }}</span>
+        </div>
+        <div class="index-summary">
+          <div class="index-stat"><span class="index-stat-num">{{ indexerInfo.docCount }}</span><span class="index-stat-label">文档</span></div>
+          <div class="index-stat"><span class="index-stat-num">{{ indexerInfo.chunkCount }}</span><span class="index-stat-label">片段</span></div>
+          <div class="index-stat"><span class="index-stat-num">{{ indexerInfo.embeddedCount }}/{{ indexerInfo.chunkCount }}</span><span class="index-stat-label">已嵌入</span></div>
+          <div class="index-stat"><span class="index-stat-num" :style="{ color: indexerInfo.embeddedCount < indexerInfo.chunkCount ? '#ef4444' : '#22c55e' }">{{ indexerInfo.embeddedCount < indexerInfo.chunkCount ? '⚠️' : '✅' }}</span><span class="index-stat-label">嵌入状态</span></div>
+        </div>
+        <div class="index-project-list">
+          <div v-for="p in kbList.filter(k => k.type === 'note')" :key="p.id" class="index-project-item">
+            <span class="index-project-name">{{ p.name }}</span>
+            <div class="index-project-actions">
+              <button class="index-btn" :disabled="indexing" @click="indexProject(p.id)">{{ indexing && indexingId === p.id ? '⏳' : '📇' }} 索引</button>
+            </div>
+          </div>
+        </div>
+        <div class="index-actions">
+          <button class="index-all-btn" :disabled="indexing" @click="startIndex">{{ indexing ? '⏳ 索引中...' : '🔄 全部重新索引' }}</button>
+          <span v-if="indexProgress" class="index-progress-text">{{ indexProgress }}</span>
+        </div>
+      </div>
+
       <div class="dashboard-grid">
         <div class="dashboard-left">
           <!-- 搜索 -->
@@ -149,7 +175,9 @@ const searchResults = ref<any[]>([]);
 const showSearchResults = ref(false);
 const lastQuery = ref('');
 const indexing = ref(false);
-const indexerInfo = ref({ model: '', host: '', docCount: 0, chunkCount: 0, running: false });
+const indexingId = ref<number | null>(null);
+const indexProgress = ref('');
+const indexerInfo = ref({ model: '', host: '', docCount: 0, chunkCount: 0, embeddedCount: 0, running: false });
 const showPreview = ref(false);
 const previewTitle = ref('');
 const previewHtml = ref('');
@@ -355,14 +383,39 @@ async function loadIndexerInfo() {
   } catch {}
 }
 
-async function startIndex() {
+async function indexProject(id: number) {
+  if (indexing.value) return;
   indexing.value = true;
-  API.on('indexer:progress', () => {});
+  indexingId.value = id;
+  indexProgress.value = '索引中...';
+  API.on('kb:scan-progress', (data: any) => {
+    if (data.file) indexProgress.value = `[${data.current}/${data.total}] ${data.file}`;
+    if (data.phase === 'done') indexProgress.value = '完成';
+  });
+  try {
+    await API.kb.scan(id);
+    await loadIndexerInfo();
+  } catch {}
+  indexing.value = false;
+  indexingId.value = null;
+  API.removeAllListeners('kb:scan-progress');
+}
+
+async function startIndex() {
+  if (indexing.value) return;
+  indexing.value = true;
+  indexingId.value = null;
+  indexProgress.value = '全部索引中...';
+  API.on('indexer:progress', (data: any) => {
+    if (data.file) indexProgress.value = `[${data.current}/${data.total}] ${data.file}`;
+    if (data.phase === 'done') indexProgress.value = '完成';
+  });
   try {
     await API.service.indexAll();
     await loadIndexerInfo();
   } catch {}
   indexing.value = false;
+  indexProgress.value = '';
   API.removeAllListeners('indexer:progress');
 }
 
@@ -405,6 +458,28 @@ onMounted(async () => {
 
 .card { background: white; border-radius: var(--radius-md); border: 1px solid var(--border); box-shadow: var(--shadow-sm); padding: 20px; margin-bottom: 16px; }
 .card-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+
+/* 索引管理卡片 */
+.index-card { margin-bottom: 14px; }
+.index-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.index-card-header h2 { font-size: 15px; font-weight: 600; margin: 0; }
+.index-model { font-size: 11px; color: var(--text-muted); }
+.index-summary { display: flex; gap: 16px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.index-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.index-stat-num { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.index-stat-label { font-size: 11px; color: var(--text-muted); }
+.index-project-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.index-project-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.index-project-name { font-size: 13px; color: var(--text-primary); }
+.index-project-actions { display: flex; gap: 6px; }
+.index-btn { font-size: 11px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 4px; background: white; cursor: pointer; color: var(--text-primary); }
+.index-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.index-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.index-actions { display: flex; align-items: center; gap: 10px; }
+.index-all-btn { padding: 6px 14px; background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; transition: 0.15s; }
+.index-all-btn:hover:not(:disabled) { background: var(--primary-dark); }
+.index-all-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.index-progress-text { font-size: 12px; color: var(--text-muted); }
 
 /* 搜索栏 */
 .search-card { background: white; border-radius: var(--radius-md); border: 1px solid var(--border); box-shadow: var(--shadow-sm); padding: 12px 16px; margin-bottom: 12px; }

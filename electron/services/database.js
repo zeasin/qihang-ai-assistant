@@ -82,6 +82,7 @@ function initSchema() {
       content TEXT NOT NULL,
       indexed_at TEXT,
       file_mtime INTEGER,
+      title TEXT DEFAULT '',
       UNIQUE(project_id, path)
     );
 
@@ -191,6 +192,7 @@ function initSchema() {
   `);
   // 确保 kb_chunks 有 embedding 列（兼容旧表）
   try { db.run("ALTER TABLE kb_chunks ADD COLUMN embedding TEXT"); } catch {}
+  try { db.run("ALTER TABLE kb_documents ADD COLUMN title TEXT DEFAULT ''"); } catch {}
   try { db.run("DROP TABLE IF EXISTS kb_file_index_meta"); } catch {}
   try { db.run("DROP TABLE IF EXISTS kb_code_index"); } catch {}
   saveDb();
@@ -299,8 +301,8 @@ const project = {
   docCount: (projectId) => {
     try { const r = qOne('SELECT COUNT(*) as c FROM kb_documents WHERE project_id = ?', projectId); return r ? r.c : 0; } catch { return 0; }
   },
-  insertDoc: (projectId, pathVal, content, fileMtime) => {
-    run("INSERT OR REPLACE INTO kb_documents (project_id, path, content, indexed_at, file_mtime) VALUES (?, ?, ?, datetime('now', '+8 hours'), ?)", projectId, pathVal, content, fileMtime || null);
+  insertDoc: (projectId, pathVal, content, fileMtime, title) => {
+    run("INSERT OR REPLACE INTO kb_documents (project_id, path, content, indexed_at, file_mtime, title) VALUES (?, ?, ?, datetime('now', '+8 hours'), ?, ?)", projectId, pathVal, content, fileMtime || null, title || '');
     const r = qOne('SELECT id FROM kb_documents WHERE project_id = ? AND path = ?', projectId, pathVal);
     return r.id;
   },

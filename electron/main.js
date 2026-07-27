@@ -495,10 +495,14 @@ ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
   return db.project.add(name, 'note', dirPath);
 });
 ipcMain.handle('kb:remove', (_, { id }) => db.project.remove(id));
+let _indexingLock = false;
+
 ipcMain.handle('kb:scan', async (_, { id }) => {
+  if (_indexingLock) return { error: '正在索引中，请稍后再试' };
   try {
     const project = db.project.get(id);
     if (!project || project.type !== 'note') return { error: '只有笔记库类型可以使用此接口' };
+    _indexingLock = true;
     const sendProgress = (data) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('kb:scan-progress', { id, ...data });
@@ -506,7 +510,6 @@ ipcMain.handle('kb:scan', async (_, { id }) => {
     };
     sendProgress({ phase: 'scan', current: 0, total: 0, file: '' });
 
-    // 在子进程中执行索引，避免阻塞主线程
     const { fork } = require('child_process');
     const worker = fork(path.join(__dirname, 'services', 'index-worker.js'));
 
@@ -518,18 +521,21 @@ ipcMain.handle('kb:scan', async (_, { id }) => {
           const r = msg.results && msg.results.length > 0 ? msg.results[0] : {};
           sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
           worker.kill();
+          _indexingLock = false;
           resolve({ totalChunks: r.chunks || 0, files: r.files || 0 });
         } else if (msg.type === 'error') {
           sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
           worker.kill();
+          _indexingLock = false;
           resolve({ error: msg.message });
         }
       });
-      worker.on('error', () => { sendProgress({ phase: 'done' }); resolve({ error: 'worker error' }); });
-      worker.on('exit', () => resolve({}));
+      worker.on('error', () => { sendProgress({ phase: 'done' }); _indexingLock = false; resolve({ error: 'worker error' }); });
+      worker.on('exit', () => { _indexingLock = false; resolve({}); });
       worker.send({ type: 'start', projectIds: [id] });
     });
   } catch (e) {
+    _indexingLock = false;
     return { error: e.message };
   }
 });
@@ -959,6 +965,8 @@ ipcMain.handle('service:stopIndexer', () => {
   return true;
 });
 ipcMain.handle('service:indexAll', async () => {
+  if (_indexingLock) return { error: '正在索引中，请稍后再试' };
+  _indexingLock = true;
   const sendProgress = (data) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('indexer:progress', data);
@@ -966,7 +974,6 @@ ipcMain.handle('service:indexAll', async () => {
   };
   sendProgress({ phase: 'scan', current: 0, total: 0, file: '' });
 
-  // 在子进程中执行索引，避免阻塞主线程
   const { fork } = require('child_process');
   const worker = fork(path.join(__dirname, 'services', 'index-worker.js'));
 
@@ -980,11 +987,12 @@ ipcMain.handle('service:indexAll', async () => {
       } else if (msg.type === 'done' || msg.type === 'error') {
         sendProgress({ phase: 'done', current: 0, total: 0, file: '' });
         worker.kill();
+        _indexingLock = false;
         resolve(true);
       }
     });
-    worker.on('error', () => { sendProgress({ phase: 'done', current: 0, total: 0, file: '' }); resolve(true); });
-    worker.on('exit', () => { resolve(true); });
+    worker.on('error', () => { sendProgress({ phase: 'done', current: 0, total: 0, file: '' }); _indexingLock = false; resolve(true); });
+    worker.on('exit', () => { _indexingLock = false; resolve(true); });
     worker.send({ type: 'start', projectIds });
   });
 });
@@ -997,10 +1005,11 @@ ipcMain.handle('insights:clearIndex', () => {
 ipcMain.handle('insights:indexerInfo', () => {
   return {
     running: indexer.isRunning(),
-    model: db.configGet('embedModel') || 'nomic-embed-text',
+    model: db.configGet('embedModel') || 'bge-m3',
     host: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
     docCount: (db.qOne("SELECT COUNT(*) as c FROM kb_documents") || {}).c || 0,
     chunkCount: (db.qOne("SELECT COUNT(*) as c FROM kb_chunks") || {}).c || 0,
+    embeddedCount: (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE embedding IS NOT NULL") || {}).c || 0,
   };
 });
 
@@ -1067,7 +1076,7 @@ ipcMain.handle('config:get', () => {
   return {
     projectDir: db.configGet('projectDir') || '',
     ollamaHost: db.configGet('ollamaHost') || 'http://127.0.0.1:11434',
-    embedModel: db.configGet('embedModel') || 'nomic-embed-text',
+    embedModel: db.configGet('embedModel') || 'bge-m3',
     embeddingBaseUrl: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
     embeddingApiKey: db.configGet('embeddingApiKey') || '',
     feishuWebhookUrl: db.configGet('feishuWebhookUrl') || '',
@@ -1107,7 +1116,7 @@ app.whenReady().then(async () => {
 
   // 配置嵌入模型（从数据库读取）
   rag.configure({
-    model: db.configGet("embedModel") || "nomic-embed-text",
+    model: db.configGet("embedModel") || "bge-m3",
     host: db.configGet("embeddingBaseUrl") || "http://127.0.0.1:11434",
     apiKey: db.configGet("embeddingApiKey") || '',
   });
