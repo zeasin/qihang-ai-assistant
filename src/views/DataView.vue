@@ -85,11 +85,18 @@
             <input type="text" class="form-control" v-model="dsForm.name" placeholder="例如：客户信息、项目列表">
           </div>
           <div class="form-group">
-            <label>模块（可选，选择已有或输入新名称）</label>
-            <input list="module-list" class="form-control" v-model="dsForm.moduleName" placeholder="选择或输入模块名称，留空则不分组">
-            <datalist id="module-list">
-              <option v-for="mod in modules" :key="mod.id" :value="mod.name"></option>
-            </datalist>
+            <label>模块（可选）</label>
+            <div class="module-row">
+              <select v-if="!dsForm.showNewModule" v-model="dsForm.moduleName" class="form-control" @change="e => { if (e.target.value === '__new__') { dsForm.showNewModule = true; dsForm.moduleName = ''; } }">
+                <option value="">（无模块）</option>
+                <option v-for="mod in modules" :key="mod.id" :value="mod.name">{{ mod.name }}</option>
+                <option value="__new__">+ 新建模块...</option>
+              </select>
+              <div v-else class="module-row">
+                <input type="text" class="form-control" v-model="dsForm.moduleName" placeholder="输入新模块名称">
+                <button class="btn btn-sm btn-secondary" @click="dsForm.showNewModule = false; dsForm.moduleName = ''" style="flex-shrink:0;">取消</button>
+              </div>
+            </div>
           </div>
           <div class="form-group">
             <label>Schema 字段（每行一个字段名）</label>
@@ -249,11 +256,11 @@ async function loadModules() {
 
 const showDsModal = ref(false);
 const editingDsId = ref('');
-const dsForm = ref({ name: '', moduleName: '', description: '', type: '', schema: '', typeOptions: '', statusOptions: '' });
+const dsForm = ref({ name: '', moduleName: '', showNewModule: false, description: '', type: '', schema: '', typeOptions: '', statusOptions: '' });
 
 function showAddDataset() {
   editingDsId.value = '';
-  dsForm.value = { name: '', moduleName: '', description: '', type: '', schema: '', typeOptions: '', statusOptions: '' };
+  dsForm.value = { name: '', moduleName: '', showNewModule: false, description: '', type: '', schema: '', typeOptions: '', statusOptions: '' };
   showDsModal.value = true;
 }
 
@@ -295,7 +302,7 @@ function showEditDataset(ds: any) {
   editingDsId.value = ds.id || '';
   dsForm.value = {
     name: ds.name || '', description: ds.description || '', type: ds.type || '',
-    moduleName: ds.moduleName || '',
+    moduleName: ds.moduleName || '', showNewModule: false,
     schema: (ds.schema && ds.schema.fields) ? ds.schema.fields.map((f: any) => f.name).join('\n') : '',
     typeOptions: (ds.schema && ds.schema.typeOptions) ? ds.schema.typeOptions.join('\n') : '',
     statusOptions: (ds.schema && ds.schema.statusOptions) ? ds.schema.statusOptions.join('\n') : ''
@@ -322,7 +329,6 @@ async function saveDataset() {
       } else {
         const r = await API.dm.add(moduleName, '', '📁');
         moduleId = r.module_id || r.id;
-        await loadModules();
       }
     }
     if (editingDsId.value) {
@@ -333,8 +339,8 @@ async function saveDataset() {
     } else {
       await API.ds.add({ name: dsForm.value.name, description: dsForm.value.description, type: dsForm.value.type, schemaJson, module_id: moduleId });
     }
-    showDsModal.value = false;
     await loadModules();
+    showDsModal.value = false;
   } catch (e) { console.error('保存数据集失败:', e); }
 }
 
@@ -609,6 +615,7 @@ onMounted(async () => {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
 }
 .form-group { margin-bottom: 12px; }
+.module-row { display: flex; gap: 6px; align-items: center; }
 .form-group label {
   display: block; font-size: 12px; font-weight: 500;
   color: var(--text-secondary); margin-bottom: 5px;

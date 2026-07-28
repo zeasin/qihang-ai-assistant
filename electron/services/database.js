@@ -430,6 +430,7 @@ const ds = {
     if (data.type !== undefined) { fields.push('type = ?'); params.push(data.type); }
     if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
     if (data.schema_json !== undefined) { fields.push('schema_json = ?'); params.push(data.schema_json); }
+    if (data.module_id !== undefined) { fields.push('module_id = ?'); params.push(data.module_id); }
     if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE data_center_datasets SET ${fields.join(', ')} WHERE id = ? OR dataset_id = ?`, ...params, id); }
   },
   remove: (id) => {
