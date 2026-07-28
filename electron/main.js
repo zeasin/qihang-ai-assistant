@@ -1127,11 +1127,7 @@ ipcMain.handle('log:dir', () => {
 
 // --- Config ---
 ipcMain.handle('config:get', () => {
-  let labels = {};
-  try { labels = JSON.parse(db.configGet('labels') || '{}'); } catch {}
   return {
-    projectDir: db.configGet('projectDir') || '',
-    ollamaHost: db.configGet('ollamaHost') || 'http://127.0.0.1:11434',
     embedModel: db.configGet('embedModel') || 'bge-m3',
     embeddingBaseUrl: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
     embeddingApiKey: db.configGet('embeddingApiKey') || '',
@@ -1141,7 +1137,7 @@ ipcMain.handle('config:get', () => {
     dailyReportRetentionDays: db.configGet('daily_report_retention_days') || '30',
     dailyReportPrompt: db.configGet('daily_report_prompt') || '',
     dailyReportTemplate: db.configGet('daily_report_template') || scheduler.DEFAULT_REPORT_TEMPLATE || '',
-    labels,
+    httpPort: db.configGet('httpPort') || '15173',
   };
 });
 ipcMain.handle('config:set', (_, cfg) => {

@@ -166,6 +166,20 @@
         <span v-if="feishuStatus" class="text-muted" :style="{ color: feishuStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ feishuStatus }}</span>
       </div>
 
+      <!-- HTTP Server -->
+      <div class="card">
+        <h2>🌐 HTTP 远程管理</h2>
+        <div class="text-muted mb-2">启动后可通过浏览器访问本机的该端口进行远程管理（如 http://本机IP:端口）。修改后需重启应用生效。</div>
+        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:center;">
+          <div class="form-group" style="flex:0 0 120px;">
+            <label style="font-size:12px;">端口号</label>
+            <input v-model="httpPort" type="number" class="form-control" min="1024" max="65535" style="width:100px;">
+          </div>
+          <button class="btn btn-primary" @click="saveHttpPort" style="margin-bottom:12px;">保存</button>
+        </div>
+        <span v-if="httpPortStatus" class="text-muted" :style="{ color: httpPortStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ httpPortStatus }}</span>
+      </div>
+
       <!-- Report Settings -->
       <div class="card">
         <h2>📊 综合日报设置</h2>
@@ -278,6 +292,8 @@ const embedModel = ref('');
 const embeddingBaseUrl = ref('');
 const embeddingApiKey = ref('');
 const embeddingStatus = ref('');
+const httpPort = ref('15173');
+const httpPortStatus = ref('');
 
 
 async function loadProjects() {
@@ -393,6 +409,7 @@ async function loadConfig() {
     embedModel.value = cfg.embedModel || 'bge-m3';
     embeddingBaseUrl.value = cfg.embeddingBaseUrl || 'http://127.0.0.1:11434';
     embeddingApiKey.value = cfg.embeddingApiKey || '';
+    httpPort.value = cfg.httpPort || '15173';
   } catch { console.warn('加载配置失败'); }
 }
 
@@ -457,6 +474,16 @@ async function testEmbedding() {
   setTimeout(() => {
     if (embeddingStatus.value.startsWith('⏳')) embeddingStatus.value = '';
   }, 10000);
+}
+
+async function saveHttpPort() {
+  const port = parseInt(httpPort.value, 10);
+  if (isNaN(port) || port < 1024 || port > 65535) { httpPortStatus.value = '❌ 端口号需在 1024-65535 之间'; return; }
+  try {
+    await API.config.set({ httpPort: String(port) });
+    httpPortStatus.value = '✅ 已保存，重启应用后生效';
+    setTimeout(() => httpPortStatus.value = '', 3000);
+  } catch (e: any) { httpPortStatus.value = '❌ ' + (e.message || '保存失败'); }
 }
 
 
