@@ -3,7 +3,7 @@ const fs = require('fs');
 const logger = require('./logger');
 
 const DB_DIR = path.join(require('os').homedir(), '.qihang-work-ai');
-const DB_PATH = path.join(DB_DIR, 'biling.db');
+const DB_PATH = path.join(DB_DIR, 'qihang-work-ai.db');
 
 let SQL = null;
 let db = null;

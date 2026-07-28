@@ -109,31 +109,60 @@ const CACHED_SEGMENTER = (() => {
 })();
 
 function tokenize(text) {
-  const words = [];
+  const segmenterWords = [];
+  const ngramWords = [];
+  const wordPositions = {}; // word -> first position in query
 
-  // 1. 标准分词（句意分词器）
+  // 1. 标准分词（基于句意），生成有语义的词
   if (CACHED_SEGMENTER) {
     for (const s of CACHED_SEGMENTER.segment(text)) {
-      if (s.isWordLike && s.segment.length >= 2) words.push(s.segment.toLowerCase());
+      if (s.isWordLike && s.segment.length >= 2) {
+        const w = s.segment.toLowerCase();
+        segmenterWords.push(w);
+        if (wordPositions[w] === undefined) wordPositions[w] = s.index;
+      }
     }
   }
 
-  const cleaned = text.replace(/[^\u4e00-\u9fff\w]/g, '').toLowerCase();
+  const cleaned = text.replace(/[^一-鿿\w]/g, "").toLowerCase();
+  const cjkChars = cleaned.replace(/[^一-鿿]/g, "");
 
-  // 2. 中文 2-gram：覆盖公司名、简称等分词器不认识的组合词
-  const cjkChars = cleaned.replace(/[^\u4e00-\u9fff]/g, '');
-  for (let i = 0; i < cjkChars.length - 1; i++) {
-    words.push(cjkChars.substring(i, i + 2));
+  // 2. n-gram：2-gram + 3-gram，覆盖分词器不识别的公司名等组合
+  for (let i = 0; i < cjkChars.length; i++) {
+    if (i + 2 <= cjkChars.length) {
+      const g = cjkChars.substring(i, i + 2);
+      ngramWords.push(g);
+      if (wordPositions[g] === undefined) wordPositions[g] = i;
+    }
+    if (i + 3 <= cjkChars.length) {
+      const g = cjkChars.substring(i, i + 3);
+      ngramWords.push(g);
+      if (wordPositions[g] === undefined) wordPositions[g] = i;
+    }
   }
+
+  const allWords = [...new Set([...segmenterWords, ...ngramWords])];
 
   // 3. 极端回退：逐字切分
-  if (words.length === 0) {
+  if (allWords.length === 0) {
     for (const ch of text) {
-      if (/[\u4e00-\u9fff\w]/.test(ch)) words.push(ch.toLowerCase());
+      if (/[一-鿿\w]/.test(ch)) allWords.push(ch.toLowerCase());
     }
   }
 
-  return { words: [...new Set(words)], phrase: cleaned };
+  const queryCharSet = new Set();
+  for (const ch of cleaned) {
+    if (/[一-鿿\w]/.test(ch)) queryCharSet.add(ch);
+  }
+
+  return {
+    words: allWords,
+    phrase: cleaned,
+    segmenterWords: new Set(segmenterWords),
+    queryChars: cleaned,
+    queryCharSet,
+    wordPositions,
+  };
 }
 
 function computeBM25(termFreq, docLen, avgDocLen, totalDocs, docFreq) {
@@ -143,12 +172,21 @@ function computeBM25(termFreq, docLen, avgDocLen, totalDocs, docFreq) {
   return idf * tf;
 }
 
-function keywordSearch(projectId, query, topK = 10, db) {
-  const { words, phrase } = tokenize(query);
-  if (words.length === 0 && !phrase) return [];
-  logger.info(`[RAG] keywordSearch query="${query}" → words=[${words.join(', ')}] phrase="${phrase}"`);
 
-  // 1. 获取所有文档（含标题），计算文件名/文件夹/标题得分
+// 根据词在查询中的位置计算权重：越靠前的词权重越高
+function positionalWeight(term, queryLen, wordPositions) {
+  const pos = wordPositions[term];
+  if (pos === undefined || queryLen <= 1) return 1.0;
+  // 位置0权重1.0，线性递减到末尾0.5
+  const weight = 1.0 - (pos / (queryLen - 1)) * 0.5;
+  return Math.max(weight, 0.5);
+}
+function keywordSearch(projectId, query, topK = 10, db) {
+  const { words, phrase, segmenterWords, queryChars, queryCharSet, wordPositions } = tokenize(query);
+  if (words.length === 0 && !phrase) return [];
+  logger.info(`[RAG] keywordSearch query="${query}" → words=[${words.join(', ')}]`);
+
+  // 1. 获取所有文档，计算文件名/文件夹/标题得分
   let docs;
   if (projectId) {
     docs = db.q(`SELECT id, path, COALESCE(title, '') as title, project_id
@@ -159,44 +197,65 @@ function keywordSearch(projectId, query, topK = 10, db) {
   }
   if (!docs.length) return [];
 
-  const docFileScores = new Map();
+  const docData = new Map();
+  const queryCharCount = queryCharSet.size || 1;
+
   for (const doc of docs) {
     const pathLower = doc.path.toLowerCase();
-    const basename = pathLower.split(/[\\/]/).pop().replace(/\.md$/, '');
-    const folderParts = pathLower.split(/[\\/]/).filter(p => {
+    const basename = pathLower.split(/[\\\/]/).pop().replace(/\.md$/, '');
+    const folderParts = pathLower.split(/[\\\/]/).filter((p, idx, arr) => {
       const f = p.replace(/\.md$/, '');
-      return f && f !== basename;
+      return f && (idx < arr.length - 1 || f !== basename);
     });
     const titleLower = doc.title.toLowerCase();
 
-    let fileNameScore = 0;
-    let folderScore = 0;
-    let titleScore = 0;
+    let fileNameScore = 0, folderScore = 0, titleScore = 0;
+    const matchedChars = new Set();
+    let phraseMatched = false;
 
     for (const term of words) {
-      if (basename.includes(term)) fileNameScore += 5;
-      for (const part of folderParts) {
-        if (part.includes(term)) folderScore += 3;
+      // 主要词（来自分词器或长度>=3的3-gram）权重高，纯2-gram噪声权重低
+      const isSignificant = segmenterWords.has(term) || term.length >= 3;
+      const posWeight = positionalWeight(term, queryChars.length, wordPositions);
+      const weight = (isSignificant ? 1.0 : 0.25) * posWeight;
+      const termChars = [...term].filter(ch => /[一-鿿\w]/.test(ch));
+
+      if (basename.includes(term)) {
+        fileNameScore += 5 * weight;
+        termChars.forEach(ch => matchedChars.add(ch));
       }
-      if (titleLower.includes(term)) titleScore += 3;
+      for (const part of folderParts) {
+        if (part.includes(term)) {
+          folderScore += 3 * weight;
+          termChars.forEach(ch => matchedChars.add(ch));
+          break;
+        }
+      }
+      if (titleLower.includes(term)) {
+        titleScore += 3 * weight;
+        termChars.forEach(ch => matchedChars.add(ch));
+      }
     }
 
+    // 完整短语匹配
     if (phrase.length >= 2) {
-      if (basename.includes(phrase)) fileNameScore += 15;
+      if (basename.includes(phrase)) { fileNameScore += 10; phraseMatched = true; }
       for (const part of folderParts) {
-        if (part.includes(phrase)) folderScore += 8;
+        if (part.includes(phrase)) { folderScore += 5; phraseMatched = true; break; }
       }
-      if (titleLower.includes(phrase)) titleScore += 8;
+      if (titleLower.includes(phrase)) { titleScore += 5; phraseMatched = true; }
     }
+    if (phraseMatched) queryCharSet.forEach(ch => matchedChars.add(ch));
 
     const displayTitle = doc.title || basename;
-    docFileScores.set(doc.id, {
+    docData.set(doc.id, {
       path: doc.path, title: displayTitle, project_id: doc.project_id,
-      fileNameScore, folderScore, titleScore, contentScore: 0, bestChunk: '',
+      fileNameScore, folderScore, titleScore, contentScore: 0, bestChunk: "",
+      matchedChars, phraseMatched, contentMatchedChars: new Set(),
     });
   }
 
-  // 2. 获取所有 chunk，计算 BM25 内容得分
+  // 2. BM25 内容评分
   let rows;
   if (projectId) {
     rows = db.q(`SELECT c.id, c.content, d.id as doc_id
@@ -220,31 +279,110 @@ function keywordSearch(projectId, query, topK = 10, db) {
     for (const r of rows) {
       const content = r.content.toLowerCase();
       let contentScore = 0;
+      const matchedTermChars = new Set();
+
       for (const term of words) {
         const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const termFreq = (content.match(new RegExp(escaped, 'g')) || []).length;
         if (termFreq > 0) {
-          contentScore += computeBM25(termFreq, r.content.length, avgDocLen, totalDocs, Math.max(1, termDocFreq[term]));
+          const isSignificant = segmenterWords.has(term) || term.length >= 3;
+          const posWeight = positionalWeight(term, queryChars.length, wordPositions);
+          const weight = (isSignificant ? 1.0 : 0.25) * posWeight;
+          contentScore += computeBM25(termFreq, r.content.length, avgDocLen, totalDocs, Math.max(1, termDocFreq[term])) * weight;
+          [...term].filter(c => /[一-鿿\w]/.test(c)).forEach(c => matchedTermChars.add(c));
         }
       }
-      if (contentScore > 0 && phrase.length >= 2 && content.includes(phrase)) {
-        contentScore *= 1.8;
+
+      if (phrase.length >= 2 && content.includes(phrase)) {
+        contentScore *= 2.0;
+        queryCharSet.forEach(ch => matchedTermChars.add(ch));
       }
+
       if (contentScore > 0) {
-        const fs = docFileScores.get(r.doc_id);
+        const fs = docData.get(r.doc_id);
         if (fs && contentScore > fs.contentScore) {
           fs.contentScore = contentScore;
           fs.bestChunk = r.content;
+          matchedTermChars.forEach(ch => fs.contentMatchedChars.add(ch));
         }
       }
     }
   }
 
-  // 3. 计算综合得分并排序
+  // 3. 综合评分：覆盖度 × 基础分 + 首词加分
   const results = [];
-  for (const [docId, fs] of docFileScores) {
-    const totalScore = fs.fileNameScore * 3 + fs.folderScore * 2 + fs.titleScore * 1.5 + fs.contentScore;
-    if (totalScore === 0) continue;
+  const segWordArray = [...segmenterWords]; // 有序的分词词列表
+  for (const [docId, fs] of docData) {
+    const structCoverage = fs.matchedChars.size / queryCharCount;
+    const allMatched = new Set([...fs.matchedChars, ...fs.contentMatchedChars]);
+    const totalCoverage = Math.max(structCoverage, allMatched.size / queryCharCount);
+
+    const hasStructMatch = fs.fileNameScore > 0 || fs.folderScore > 0 || fs.titleScore > 0;
+    if (!hasStructMatch && fs.contentScore === 0) continue;
+
+    const contentNorm = Math.min(fs.contentScore, 10);
+    // 权重顺序：文件名(4) > 全路径(2.5) > markdown标题(1.5) > 内容(1)
+    let baseScore = fs.fileNameScore * 4 + fs.folderScore * 2.5 + fs.titleScore * 1.5 + contentNorm;
+    if (baseScore === 0) continue;
+
+    // === 分词词覆盖度（按位置加权） ===
+    // 匹配第1个分词词远比匹配第2个重要
+    let segWeightedScore = 0;
+    let segWeightedMax = 0;
+    for (let wi = 0; wi < segWordArray.length; wi++) {
+      const sw = segWordArray[wi];
+      const swChars = [...sw].filter(ch => /[一-鿿\w]/.test(ch));
+      const wordWeight = wi === 0 ? 2.0 : 1.0; // 首词权重2倍
+      segWeightedMax += wordWeight;
+      if (swChars.every(ch => fs.matchedChars.has(ch))) {
+        segWeightedScore += wordWeight;
+      }
+    }
+    const segWordCoverage = segWeightedMax > 0 ? segWeightedScore / segWeightedMax : 0;
+
+    // === 首词匹配加分 ===
+    let firstWordBonus = 0;
+    let firstWordMatched = false;
+    if (segWordArray.length >= 2) {
+      const firstWord = segWordArray[0];
+      const firstWordChars = [...firstWord].filter(ch => /[一-鿿\w]/.test(ch));
+      const firstInStruct = firstWordChars.every(ch => fs.matchedChars.has(ch));
+      const firstInContent = firstWordChars.every(ch => fs.contentMatchedChars.has(ch));
+      if (firstInStruct) {
+        firstWordBonus = 40; // 首词在结构中匹配 → 大加分
+        firstWordMatched = true;
+      } else if (firstInContent) {
+        firstWordBonus = 20; // 首词只在内容中匹配 → 中加分
+        firstWordMatched = true;
+      }
+    }
+
+    // === 未匹配首词惩罚 ===
+    // 如果第一个分词词根本没匹配到，内容相关性再高也不相关，直接打两折
+    let noFirstWordPenalty = 1.0;
+    if (segWordArray.length >= 2) {
+      const firstWord = segWordArray[0];
+      const firstWordChars = [...firstWord].filter(ch => /[一-鿿w]/.test(ch));
+      const firstMatched = firstWordChars.every(ch =>
+        fs.matchedChars.has(ch) || fs.contentMatchedChars.has(ch)
+      );
+      if (!firstMatched) noFirstWordPenalty = 0.05;
+    }
+
+    // 覆盖度乘数：用分词词覆盖度代替纯字符覆盖度
+    const coverageMultiplier = 0.3 + structCoverage * 0.5 + segWordCoverage * 1.2 + (hasStructMatch ? 0.4 : 0);
+
+    const phraseBonus = fs.phraseMatched ? 12 : 0;
+
+    // 多维度加分
+    let dimCount = 0;
+    if (fs.fileNameScore > 0) dimCount++;
+    if (fs.folderScore > 0) dimCount++;
+    if (fs.titleScore > 0) dimCount++;
+    if (fs.contentScore > 0 && fs.matchedChars.size > 0) dimCount++;
+    const dimBonus = dimCount >= 2 ? dimCount * 2.5 : 0;
+
+    const totalScore = (baseScore * coverageMultiplier + phraseBonus + dimBonus) * noFirstWordPenalty + firstWordBonus;
     results.push({
       text: fs.bestChunk || '',
       source: fs.path,
@@ -255,17 +393,33 @@ function keywordSearch(projectId, query, topK = 10, db) {
       folderScore: fs.folderScore,
       titleScore: fs.titleScore,
       contentScore: fs.contentScore,
+      coverage: structCoverage,
+      dimCount,
+      firstWordMatched,
     });
   }
 
   results.sort((a, b) => b.score - a.score);
   const maxScore = results.length > 0 ? results[0].score : 1;
   for (const s of results) s.score = s.score / maxScore;
-  const top = results.slice(0, topK).filter(c => c.score > 0.01);
+  let top = results.slice(0, topK * 2).filter(c => c.score > 0.01);
+  // 首词匹配过滤：如果首词命中的结果够多，不显示只匹配后面词的结果
+  if (segWordArray.length >= 2) {
+    const fwResults = top.filter(r => r.firstWordMatched);
+    if (fwResults.length >= Math.min(topK, 5)) {
+      top = fwResults.slice(0, topK);
+    } else {
+      // 首词结果不够时，用其他结果补齐
+      const otherResults = top.filter(r => !r.firstWordMatched);
+      top = [...fwResults, ...otherResults].slice(0, topK);
+    }
+  } else {
+    top = top.slice(0, topK);
+  }
   if (top.length) {
     logger.info(`[RAG] keywordSearch top${top.length}:`);
     for (const r of top.slice(0, 5)) {
-      logger.info(`[RAG]   ${(r.score * 100).toFixed(0)}% file=${(r.fileNameScore || 0)} folder=${(r.folderScore || 0)} title=${(r.titleScore || 0)} content=${(r.contentScore || 0).toFixed(2)} | ${r.source.split(/[\\/]/).pop()}`);
+      logger.info(`[RAG]   ${(r.score * 100).toFixed(0)}% file=${r.fileNameScore} folder=${r.folderScore} title=${r.titleScore} content=${r.contentScore.toFixed(2)} cov=${(r.coverage * 100).toFixed(0)}% dims=${r.dimCount} | ${r.source.split(/[\\\/]/).pop()}`);
     }
   }
   return top;
@@ -323,9 +477,10 @@ async function hybridSearch(projectId, query, topK = 10, db) {
   }
 
   for (const [k, v] of merged) {
-    const rankV = 1 / (2 + (1 - v.vScore) * 100);
-    const rankK = 1 / (2 + (1 - v.kScore) * 100);
-    v.score = rankV * 0.6 + rankK * 0.4;
+    // 柔和融合：取最高分和平均分的加权组合，避免RRF过于激进
+    const best = Math.max(v.vScore, v.kScore);
+    const avg = (v.vScore + v.kScore) / 2;
+    v.score = best * 0.35 + avg * 0.65;
   }
 
   const finalResults = [...merged.values()];
