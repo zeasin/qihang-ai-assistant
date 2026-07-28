@@ -7,7 +7,7 @@
       <div class="left-panel">
         <div class="left-header">
           <span>数据集</span>
-          <button class="btn btn-sm btn-primary" @click="showAddDataset">+ 新增</button>
+          <button class="btn btn-sm btn-primary" @click="showAddDataset">+ 数据集</button>
         </div>
         <div class="left-body">
           <div
@@ -36,7 +36,7 @@
               <input type="text" v-model="searchKeyword" placeholder="搜索记录..." @keyup.enter="loadRecords(0)">
             </div>
             <button class="btn btn-sm btn-secondary" @click="loadRecords(0)">搜索</button>
-            <button class="btn btn-sm btn-primary" @click="showAddRecord">+ 新增</button>
+            <button class="btn btn-sm btn-primary" @click="showAddRecord">+ 记录</button>
             <button class="btn btn-sm btn-secondary" @click="showImportModal">📥 导入</button>
           </div>
           <table class="data-table" v-if="records.length > 0">

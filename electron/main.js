@@ -916,11 +916,12 @@ ipcMain.handle('insights:stats', () => {
   const totalChats = (db.qOne("SELECT COUNT(*) as c FROM prj_messages") || {}).c || 0;
   const todayModified = (db.qOne("SELECT COUNT(*) as c FROM kb_documents WHERE indexed_at >= date('now')") || {}).c || 0;
   const projectCount = (db.qOne("SELECT COUNT(*) as c FROM prj_projects WHERE type = 'note'") || {}).c || 0;
+  const codeProjectCount = (db.qOne("SELECT COUNT(*) as c FROM prj_projects WHERE type = 'code'") || {}).c || 0;
   const todoPending = (db.qOne("SELECT COUNT(*) as c FROM plan_todos WHERE status IN ('pending','in_progress')") || {}).c || 0;
   const todoOverdue = (db.qOne("SELECT COUNT(*) as c FROM plan_todos WHERE due_date != '' AND due_date < date('now','+8 hours') AND status IN ('pending','in_progress')") || {}).c || 0;
   const remindersActive = (db.qOne("SELECT COUNT(*) as c FROM plan_reminders WHERE enabled = 1") || {}).c || 0;
   const todayDataRecords = (db.qOne("SELECT COUNT(*) as c FROM data_center_records WHERE created_at >= datetime('now', '+8 hours', 'start of day')") || {}).c || 0;
-  return { fileCount, chunkCount, totalChats, todayModified, projectCount, todoPending, todoOverdue, remindersActive, todayDataRecords };
+  return { fileCount, chunkCount, totalChats, todayModified, projectCount, codeProjectCount, todoPending, todoOverdue, remindersActive, todayDataRecords };
 });
 ipcMain.handle('insights:reports', () => {
   return db.q("SELECT id, type, report_date, content, substr(content, 1, 100) as summary, created_at FROM ai_analysis WHERE type = 'daily_report' ORDER BY created_at DESC LIMIT 10");
