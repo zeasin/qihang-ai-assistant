@@ -18,3 +18,4 @@ nul
 target/
 .opencode/
 .claude/
+.vite/
