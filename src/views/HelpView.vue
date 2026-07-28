@@ -22,18 +22,18 @@ npm run electron:dev
 
 # 3. 打包构建
 npm run electron:build</pre>
-        <p class="tip">提示：首次使用请先到设置页配置 AI 模型、嵌入模型，并在总览页添加笔记库。</p>
+        <p class="tip">提示：首次使用请先到设置页配置 AI 模型、嵌入模型，并在概览页添加笔记库。</p>
       </div>
 
       <div class="card">
         <h2>🧭 页面导航</h2>
         <table class="help-table">
           <tr><th>菜单</th><th>说明</th></tr>
-          <tr><td>📊 总览</td><td>全局看板：数据统计、语义搜索、笔记库索引管理</td></tr>
-          <tr><td>💻 项目</td><td>AI 编程工作台，辅助代码开发</td></tr>
-          <tr><td>📁 文件</td><td>Markdown 笔记管理，目录树浏览、编辑器、Zen 模式</td></tr>
+          <tr><td>📊 概览</td><td>全局看板：数据统计、语义搜索、笔记库索引管理</td></tr>
+          <tr><td>💻 工作台</td><td>AI 编程工作台，辅助代码开发</td></tr>
+          <tr><td>📁 知识库</td><td>Markdown 笔记管理，目录树浏览、编辑器、Zen 模式</td></tr>
           <tr><td>🗃️ 数据</td><td>多数据集管理，Excel/JSON 批量导入，AI 智能填充</td></tr>
-          <tr><td>🔔 提醒</td><td>待办 + 定时提醒统一管理</td></tr>
+          <tr><td>🔔 任务</td><td>待办 + 定时提醒统一管理</td></tr>
           <tr><td>⚙️ 设置</td><td>系统配置：LLM 模型、嵌入模型、Agent、飞书、定时任务等</td></tr>
           <tr><td>📋 日志</td><td>操作日志查看</td></tr>
           <tr><td>❓ 帮助</td><td>使用指南（当前页面）</td></tr>
@@ -42,12 +42,12 @@ npm run electron:build</pre>
       </div>
 
       <div class="card">
-        <h2>📁 文件管理</h2>
+        <h2>📁 知识库</h2>
         <p class="text-muted mb-2">Markdown 笔记/文件的目录树浏览、编辑、索引与搜索。</p>
         <ul>
           <li><strong>目录树</strong> — 侧边栏树状结构浏览，右键新建/重命名/删除文件或目录</li>
           <li><strong>编辑器</strong> — 分屏实时 Markdown 预览，支持 Zen 模式全屏写作、标签管理</li>
-          <li><strong>索引</strong> — 在总览页按笔记库名称逐库索引，系统自动分段并生成向量嵌入</li>
+          <li><strong>索引</strong> — 在概览页按笔记库名称逐库索引，系统自动分段并生成向量嵌入</li>
           <li><strong>搜索</strong> — 文件名关键词搜索 + 语义搜索（基于向量相似度，需配置嵌入模型）</li>
         </ul>
       </div>
@@ -73,7 +73,7 @@ npm run electron:build</pre>
           <li>支持 Ollama 本地或 OpenAI 兼容 API（如硅基流动）</li>
           <li>搜索时按关键词 + 向量相似度综合排序</li>
         </ul>
-        <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">在总览页管理</h3>
+        <h3 style="font-size:13px;font-weight:600;margin:12px 0 8px;color:#5c5f66;">在概览页管理</h3>
         <ul>
           <li>查看文档数、片段数、嵌入进度</li>
           <li>按笔记库单独索引或全部重新索引</li>
@@ -114,7 +114,7 @@ npm run electron:build</pre>
         <table class="help-table">
           <tr><th>问题</th><th>原因</th><th>解决</th></tr>
           <tr><td>对话为空或超时</td><td>LLM 地址或网络不可达</td><td>检查 API 地址和网络，超时设 600s</td></tr>
-          <tr><td>语义搜索无结果</td><td>笔记库未索引或嵌入模型未配置</td><td>在总览页点击索引按钮，检查嵌入模型配置</td></tr>
+          <tr><td>语义搜索无结果</td><td>笔记库未索引或嵌入模型未配置</td><td>在概览页点击索引按钮，检查嵌入模型配置</td></tr>
           <tr><td>索引失败</td><td>嵌入模型服务未启动</td><td>确认 Ollama 运行或 API 地址正确</td></tr>
           <tr><td>飞书消息收不到</td><td>Webhook 未配置或 Bot 未启动</td><td>在设置页检查飞书配置</td></tr>
           <tr><td>定时任务未执行</td><td>调度器未开启</td><td>在设置页确认调度器运行中</td></tr>
@@ -131,7 +131,6 @@ npm run electron:build</pre>
           <tr><td>数据库</td><td>SQLite（better-sqlite3）</td></tr>
           <tr><td>AI Agent</td><td>pi-coding-agent / opencode SDK / claude-agent-sdk</td></tr>
           <tr><td>语义检索</td><td>Ollama / OpenAI 兼容 API（bge-m3）</td></tr>
-          <tr><td>LLM 接入</td><td>OpenAI 兼容协议（直连）</td></tr>
           <tr><td>飞书集成</td><td>Webhook + WebSocket Bot</td></tr>
           <tr><td>IPC 通信</td><td>Electron ipcMain / ipcRenderer</td></tr>
         </table>

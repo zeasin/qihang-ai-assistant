@@ -1,7 +1,7 @@
 <template>
   <div class="insights-view">
     <div class="content-header">
-      <h1 class="content-title">总览</h1>
+      <h1 class="content-title">概览</h1>
     </div>
     <div class="content-body">
       <div class="stats-grid">

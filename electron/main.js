@@ -801,7 +801,18 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
 ipcMain.handle('project:list', (_, { type } = {}) => db.project.list(type));
 ipcMain.handle('project:get', (_, { id }) => db.project.get(id));
 ipcMain.handle('project:add', (_, { name, type, dir, description, defaultBranch }) => {
-  return db.project.add(name, type || 'code', dir, description, defaultBranch);
+  const result = db.project.add(name, type || 'code', dir, description, defaultBranch);
+  if ((type || 'note') === 'note') {
+    const taskData = { name: `${name} 综合日报`, cron_expression: '0 7 * * *', task_type: 'daily_report', enabled: 1, notify_feishu: 1, project_id: result.id };
+    try {
+      const r = db.task.add(taskData.name, taskData.cron_expression, taskData.task_type, taskData);
+      const task = db.task.get(r.id);
+      if (task && task.enabled && scheduler.isRunning()) scheduler.addTask(task);
+    } catch (e) {
+      logger.warn('[Project] auto-create daily_report task failed:', e.message);
+    }
+  }
+  return result;
 });
 ipcMain.handle('project:update', (_, { id, data }) => db.project.update(id, data));
 ipcMain.handle('project:delete', (_, { id }) => db.project.delete(id));

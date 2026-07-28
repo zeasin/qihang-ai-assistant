@@ -1,7 +1,7 @@
 <template>
   <div class="planner-view">
     <div class="content-header">
-      <h1 class="content-title">提醒</h1>
+      <h1 class="content-title">任务</h1>
     </div>
     
     <div class="content-body">

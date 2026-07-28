@@ -700,8 +700,29 @@ function start() {
 
   logger.info(`[Scheduler] started with ${tasks.length} tasks + ${reminders.length} reminders`);
 
+  // Ensure every note project has a daily_report task
+  setImmediate(() => ensureDailyReportTasks());
+
   // Check if today's daily report was already generated; if not, regenerate now
   setImmediate(() => checkAndRegenerateDailyReport());
+}
+
+function ensureDailyReportTasks() {
+  try {
+    const noteProjects = db.project.list('note');
+    const existingTasks = db.q("SELECT project_id FROM sys_tasks WHERE task_type = 'daily_report' AND project_id IS NOT NULL");
+    const existingIds = new Set(existingTasks.map(t => t.project_id));
+    for (const p of noteProjects) {
+      if (!existingIds.has(p.id)) {
+        logger.info(`[Scheduler] auto-creating daily_report task for project: ${p.name}`);
+        const r = db.task.add(`${p.name} 综合日报`, '0 7 * * *', 'daily_report', { project_id: p.id, enabled: 1, notify_feishu: 1 });
+        const task = db.task.get(r.id);
+        if (task && task.enabled) scheduleTask(task);
+      }
+    }
+  } catch (e) {
+    logger.error('[Scheduler] ensureDailyReportTasks error:', e.message);
+  }
 }
 
 async function checkAndRegenerateDailyReport() {
