@@ -12,13 +12,15 @@ async function getDb() {
   if (db) return db;
   if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
   if (!SQL) SQL = await require('sql.js')();
-  if (fs.existsSync(DB_PATH)) {
+  const isNew = !fs.existsSync(DB_PATH);
+  if (isNew) {
+    db = new SQL.Database();
+  } else {
     const buf = fs.readFileSync(DB_PATH);
     db = new SQL.Database(buf);
-  } else {
-    db = new SQL.Database();
   }
   initSchema();
+  if (isNew) initDefaultConfig();
   return db;
 }
 
@@ -191,6 +193,14 @@ function initSchema() {
 
   `);
 
+  const obsoleteKeys = ['projectDir', 'ollamaHost', 'labels'];
+  for (const key of obsoleteKeys) {
+    run('DELETE FROM sys_config WHERE key = ?', key);
+  }
+  saveDb();
+}
+
+function initDefaultConfig() {
   const defaultConfig = {
     embedModel: 'bge-m3',
     embeddingBaseUrl: 'http://127.0.0.1:11434',
@@ -203,15 +213,8 @@ function initSchema() {
     daily_report_template: '{{greetingLine}}\n\n📅 {{today}}\n\n{{overview}}\n\n{{doneSection}}\n{{overdueSection}}\n{{pendingSection}}\n{{reminderSection}}\n{{worklogSection}}\n{{chatSection}}\n{{recordSection}}\n{{docSection}}\n\n{{analysisSection}}\n\n{{footer}}',
     httpPort: '15173',
   };
-  const obsoleteKeys = ['projectDir', 'ollamaHost', 'labels'];
-  for (const key of obsoleteKeys) {
-    run('DELETE FROM sys_config WHERE key = ?', key);
-  }
-  const existingKeys = new Set(q('SELECT key FROM sys_config').map(r => r.key));
   for (const [key, value] of Object.entries(defaultConfig)) {
-    if (!existingKeys.has(key)) {
-      run('INSERT INTO sys_config (key, value) VALUES (?, ?)', key, value);
-    }
+    run('INSERT INTO sys_config (key, value) VALUES (?, ?)', key, value);
   }
   saveDb();
 }

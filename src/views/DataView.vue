@@ -1,35 +1,32 @@
 <template>
   <div class="data-view">
     <div class="content-header">
-      <h1 class="content-title">数据中心</h1>
-      <button class="btn btn-primary btn-sm" @click="createModule">+ 新建模块</button>
+      <h1 class="content-title">数据</h1>
     </div>
     <div class="split-panel">
       <div class="left-panel">
-        <div class="left-header">模块列表</div>
+        <div class="left-header">
+          <span>数据集</span>
+          <button class="btn btn-sm btn-primary" @click="showAddDataset">+ 新增</button>
+        </div>
         <div class="left-body">
-          <div v-for="mod in modules" :key="mod.id" class="mod-group">
-            <div class="mod-header" @click="mod.expanded = !mod.expanded">
-              <span class="mod-arrow">{{ mod.expanded ? '▾' : '▸' }}</span>
-              <span class="mod-icon">{{ mod.icon }}</span>
-              <span class="mod-name">{{ mod.name }}</span>
-              <span class="mod-count">{{ mod.dsList.length }} 数据集</span>
-            </div>
-            <div v-if="mod.expanded" class="ds-list">
-              <div
-                v-for="ds in mod.dsList"
-                :key="ds.id"
-                class="ds-item"
-                :class="{ active: selectedDs && selectedDs.id === ds.id }"
-                @click="selectDataset(ds)"
-              >
-                <span class="ds-icon">📋</span>
-                <span class="ds-name">{{ ds.name }}</span>
-                <span class="ds-count">{{ ds.recordCount || 0 }}</span>
-              </div>
-            </div>
+          <div
+            v-for="ds in allDatasets"
+            :key="ds.id"
+            class="ds-item"
+            :class="{ active: selectedDs && selectedDs.id === ds.id }"
+            @click="selectDataset(ds)"
+          >
+            <span class="ds-icon">📋</span>
+            <span class="ds-name">{{ ds.name }}</span>
+            <span class="ds-meta">{{ ds.moduleName || '未分组' }}</span>
+            <span class="ds-actions">
+              <button class="ds-btn" @click.stop="showEditDataset(ds)" title="编辑">✏️</button>
+              <button class="ds-btn ds-btn-danger" @click.stop="deleteDataset(ds)" title="删除">🗑️</button>
+            </span>
+            <span class="ds-count">{{ ds.recordCount || 0 }}</span>
           </div>
-          <div v-if="modules.length === 0" class="empty-hint">暂无模块，点击上方按钮创建</div>
+          <div v-if="!allDatasets.length" class="empty-hint">暂无数据集</div>
         </div>
       </div>
       <div class="right-panel">
@@ -40,9 +37,7 @@
             </div>
             <button class="btn btn-sm btn-secondary" @click="loadRecords(0)">搜索</button>
             <button class="btn btn-sm btn-primary" @click="showAddRecord">+ 新增</button>
-            <button class="btn btn-sm btn-secondary" @click="showEditDataset(selectedDs)">✏️ 编辑</button>
             <button class="btn btn-sm btn-secondary" @click="showImportModal">📥 导入</button>
-            <button class="btn btn-sm btn-danger" @click="deleteDataset(selectedDs)">🗑️ 删除</button>
           </div>
           <table class="data-table" v-if="records.length > 0">
             <thead>
@@ -77,36 +72,8 @@
       </div>
     </div>
 
-    <!-- 模块编辑模态框 -->
-    <div v-if="showModuleModal" class="modal-overlay" @click="showModuleModal = false">
-      <div class="modal-box" @click.stop>
-        <div class="modal-header">
-          <h3>{{ editingModule ? '编辑模块' : '新建模块' }}</h3>
-          <button class="btn btn-secondary" @click="showModuleModal = false">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>模块名称 *</label>
-            <input type="text" class="form-control" v-model="moduleForm.name">
-          </div>
-          <div class="form-group">
-            <label>描述</label>
-            <input type="text" class="form-control" v-model="moduleForm.description">
-          </div>
-          <div class="form-group">
-            <label>图标</label>
-            <input type="text" class="form-control" v-model="moduleForm.icon">
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" @click="showModuleModal = false">取消</button>
-          <button class="btn btn-primary" @click="saveModule">保存</button>
-        </div>
-      </div>
-    </div>
-
     <!-- 数据集模态框 -->
-    <div v-if="showDsModal" class="modal-overlay" @click="showDsModal = false">
+    <div v-if="showDsModal" class="modal-overlay">
       <div class="modal-box" @click.stop>
         <div class="modal-header">
           <h3>{{ editingDsId ? '编辑数据集' : '新建数据集' }}</h3>
@@ -115,28 +82,30 @@
         <div class="modal-body">
           <div class="form-group">
             <label>名称 *</label>
-            <input type="text" class="form-control" v-model="dsForm.name">
-          </div>
-
-<!--          <div class="form-group">-->
-<!--            <label>类型</label>-->
-<!--            <input type="text" class="form-control" v-model="dsForm.type">-->
-<!--          </div>-->
-          <div class="form-group">
-            <label>Schema 字段（每行一个）</label>
-            <textarea class="form-control" v-model="dsForm.schema" rows="6"></textarea>
+            <input type="text" class="form-control" v-model="dsForm.name" placeholder="例如：客户信息、项目列表">
           </div>
           <div class="form-group">
-            <label>类型选项（每行一个）</label>
-            <textarea class="form-control" v-model="dsForm.typeOptions" rows="5"></textarea>
+            <label>模块（可选，选择已有或输入新名称）</label>
+            <input list="module-list" class="form-control" v-model="dsForm.moduleName" placeholder="选择或输入模块名称，留空则不分组">
+            <datalist id="module-list">
+              <option v-for="mod in modules" :key="mod.id" :value="mod.name"></option>
+            </datalist>
           </div>
           <div class="form-group">
-            <label>状态选项（每行一个）</label>
-            <textarea class="form-control" v-model="dsForm.statusOptions" rows="5"></textarea>
+            <label>Schema 字段（每行一个字段名）</label>
+            <textarea class="form-control" v-model="dsForm.schema" rows="6" placeholder="例如：&#10;姓名&#10;电话&#10;邮箱&#10;地址"></textarea>
           </div>
           <div class="form-group">
-            <label>描述</label>
-            <textarea class="form-control" v-model="dsForm.description" rows="2"></textarea>
+            <label>类型选项（每行一个，可选）</label>
+            <textarea class="form-control" v-model="dsForm.typeOptions" rows="5" placeholder="例如：&#10;个人&#10;企业"></textarea>
+          </div>
+          <div class="form-group">
+            <label>状态选项（每行一个，可选）</label>
+            <textarea class="form-control" v-model="dsForm.statusOptions" rows="5" placeholder="例如：&#10;待办&#10;进行中&#10;已完成"></textarea>
+          </div>
+          <div class="form-group">
+            <label>描述（可选）</label>
+            <textarea class="form-control" v-model="dsForm.description" rows="2" placeholder="数据集的简要说明"></textarea>
           </div>
         </div>
         <div class="modal-footer">
@@ -248,57 +217,45 @@ interface ModItem {
 
 const modules = ref<ModItem[]>([]);
 
+const allDatasets = computed(() => {
+  const list: any[] = [];
+  for (const mod of modules.value) {
+    for (const ds of mod.dsList) {
+      list.push({ ...ds, moduleName: mod.name });
+    }
+  }
+  return list;
+});
+
 async function loadModules() {
   if (!API) return;
   try {
     const list = await API.dm.list();
     const dsList = await API.ds.list();
-    modules.value = list.map((m: any) => {
+    const modList = list.map((m: any) => {
       const dsInModule = dsList.filter((d: any) => d.module_id === m.module_id);
       return {
         id: m.module_id || m.id, name: m.name, description: m.description || '',
         icon: m.icon || '📁', dsList: dsInModule, expanded: true
       };
     });
+    const ungrouped = dsList.filter((d: any) => !d.module_id);
+    if (ungrouped.length) {
+      modList.unshift({ id: '__ungrouped__', name: '未分组', description: '', icon: '📁', dsList: ungrouped, expanded: true });
+    }
+    modules.value = modList;
   } catch (e) { console.error('加载模块失败:', e); }
 }
 
-const showModuleModal = ref(false);
-const editingModule = ref<any>(null);
-const moduleForm = ref({ name: '', description: '', icon: '📁' });
+const showDsModal = ref(false);
+const editingDsId = ref('');
+const dsForm = ref({ name: '', moduleName: '', description: '', type: '', schema: '', typeOptions: '', statusOptions: '' });
 
-const editModule = (mod: ModItem) => {
-  editingModule.value = mod;
-  moduleForm.value = { name: mod.name, description: mod.description, icon: mod.icon };
-  showModuleModal.value = true;
-};
-
-const deleteModule = async (mod: ModItem) => {
-  if (!confirm(`确定删除模块「${mod.name}」及所有数据？`)) return;
-  try { await API.dm.remove(mod.id); await loadModules(); }
-  catch (e) { console.error('删除模块失败:', e); }
-};
-
-const createModule = () => {
-  editingModule.value = null;
-  moduleForm.value = { name: '', description: '', icon: '📁' };
-  showModuleModal.value = true;
-};
-
-const saveModule = async () => {
-  if (!moduleForm.value.name.trim()) { alert('请输入模块名称'); return; }
-  try {
-    if (editingModule.value) {
-      await API.dm.update(editingModule.value.id, moduleForm.value);
-    } else {
-      await API.dm.add(moduleForm.value.name, moduleForm.value.description, moduleForm.value.icon);
-    }
-    showModuleModal.value = false;
-    editingModule.value = null;
-    moduleForm.value = { name: '', description: '', icon: '📁' };
-    await loadModules();
-  } catch (e) { console.error('保存模块失败:', e); }
-};
+function showAddDataset() {
+  editingDsId.value = '';
+  dsForm.value = { name: '', moduleName: '', description: '', type: '', schema: '', typeOptions: '', statusOptions: '' };
+  showDsModal.value = true;
+}
 
 // ========== 数据集选择 ==========
 
@@ -333,15 +290,12 @@ function buildRecordColumns(recs: any[]): string[] {
 
 // ========== 数据集 CRUD ==========
 
-const showDsModal = ref(false);
-const editingDsId = ref('');
-const dsForm = ref({ name: '', description: '', type: '', schema: '', typeOptions: '', statusOptions: '' });
-
 function showEditDataset(ds: any) {
   if (!ds) return;
   editingDsId.value = ds.id || '';
   dsForm.value = {
     name: ds.name || '', description: ds.description || '', type: ds.type || '',
+    moduleName: ds.moduleName || '',
     schema: (ds.schema && ds.schema.fields) ? ds.schema.fields.map((f: any) => f.name).join('\n') : '',
     typeOptions: (ds.schema && ds.schema.typeOptions) ? ds.schema.typeOptions.join('\n') : '',
     statusOptions: (ds.schema && ds.schema.statusOptions) ? ds.schema.statusOptions.join('\n') : ''
@@ -359,13 +313,25 @@ async function saveDataset() {
     statusOptions: dsForm.value.statusOptions.split('\n').filter(s => s.trim())
   });
   try {
+    let moduleId = '';
+    const moduleName = dsForm.value.moduleName.trim();
+    if (moduleName) {
+      const existing = modules.value.find(m => m.name === moduleName);
+      if (existing) {
+        moduleId = existing.id;
+      } else {
+        const r = await API.dm.add(moduleName, '', '📁');
+        moduleId = r.module_id || r.id;
+        await loadModules();
+      }
+    }
     if (editingDsId.value) {
       await API.ds.updateMeta(editingDsId.value, {
         name: dsForm.value.name, description: dsForm.value.description,
-        type: dsForm.value.type, schema_json: schemaJson,
+        type: dsForm.value.type, schema_json: schemaJson, module_id: moduleId,
       });
     } else {
-      await API.ds.add({ name: dsForm.value.name, description: dsForm.value.description, type: dsForm.value.type, schemaJson, module_id: selectedDs.value?.module_id || '' });
+      await API.ds.add({ name: dsForm.value.name, description: dsForm.value.description, type: dsForm.value.type, schemaJson, module_id: moduleId });
     }
     showDsModal.value = false;
     await loadModules();
@@ -376,7 +342,9 @@ async function deleteDataset(ds: any) {
   if (!ds || !confirm(`确定删除数据集「${ds.name}」及所有数据？`)) return;
   try {
     await API.ds.remove(ds.dataset_id || ds.id);
-    selectedDs.value = null; records.value = [];
+    if (selectedDs.value && (selectedDs.value.id === ds.id || selectedDs.value.dataset_id === ds.dataset_id)) {
+      selectedDs.value = null; records.value = [];
+    }
     await loadModules();
   } catch (e) { console.error('删除数据集失败:', e); }
 }
@@ -545,34 +513,33 @@ onMounted(async () => {
   display: flex; flex-direction: column; background: #fafbfc;
 }
 .left-header {
-  padding: 12px 16px; font-size: 12px; font-weight: 600;
+  padding: 10px 16px; font-size: 12px; font-weight: 600;
   color: var(--text-muted); text-transform: uppercase;
   border-bottom: 1px solid var(--border); background: white;
+  display: flex; align-items: center; justify-content: space-between;
 }
-.left-body { flex: 1; overflow-y: auto; padding: 8px 0; }
-.mod-group { margin-bottom: 2px; }
-.mod-header {
-  display: flex; align-items: center; gap: 6px; padding: 8px 16px;
-  cursor: pointer; font-size: 13px; user-select: none;
-}
-.mod-header:hover { background: var(--hover); }
-.mod-arrow { font-size: 10px; color: var(--text-muted); width: 12px; flex-shrink: 0; }
-.mod-icon { font-size: 16px; flex-shrink: 0; }
-.mod-name { flex: 1; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mod-count { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-.ds-list { padding: 0 0 4px 34px; }
+.left-body { flex: 1; overflow-y: auto; padding: 4px 0; }
 .ds-item {
-  display: flex; align-items: center; gap: 6px; padding: 6px 12px;
-  border-radius: 6px; cursor: pointer; font-size: 13px; margin-bottom: 1px;
+  display: flex; align-items: center; gap: 6px; padding: 8px 16px;
+  cursor: pointer; font-size: 13px; border-radius: 0; margin: 0;
 }
 .ds-item:hover { background: #e8eaed; }
 .ds-item.active { background: var(--primary); color: white; }
 .ds-item.active .ds-name { color: white; }
-.ds-item.active .ds-count { color: rgba(255,255,255,0.7); }
+.ds-item.active .ds-meta { color: rgba(255,255,255,0.6); }
+.ds-item.active .ds-actions { display: flex; }
+.ds-item.active .ds-btn { color: rgba(255,255,255,0.7); }
+.ds-item.active .ds-btn:hover { color: white; background: rgba(255,255,255,0.15); }
+.ds-item.active .ds-count { background: rgba(255,255,255,0.2); color: white; }
 .ds-icon { font-size: 14px; flex-shrink: 0; }
-.ds-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ds-meta { font-size: 11px; color: var(--text-muted); margin-right: 4px; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-actions { display: none; gap: 2px; margin-right: 4px; flex-shrink: 0; }
+.ds-item:hover .ds-actions { display: flex; }
+.ds-btn { background: none; border: none; cursor: pointer; font-size: 12px; padding: 1px 3px; border-radius: 3px; color: var(--text-muted); line-height: 1; }
+.ds-btn:hover { background: var(--hover); color: var(--text-primary); }
+.ds-btn-danger:hover { color: #dc2626; }
 .ds-count { font-size: 11px; background: rgba(0,0,0,0.08); padding: 0 6px; border-radius: 8px; }
-.ds-item.active .ds-count { background: rgba(255,255,255,0.2); }
 .empty-hint { text-align: center; padding: 24px; font-size: 13px; color: var(--text-muted); }
 
 .right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -620,8 +587,6 @@ onMounted(async () => {
 .detail-row .value { font-size: 13px; color: var(--text-primary); }
 
 .import-type-btns { display: flex; gap: 8px; }
-
-.empty-hint { text-align: center; padding: 24px; font-size: 13px; color: var(--text-muted); }
 
 .modal-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
