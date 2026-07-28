@@ -167,7 +167,7 @@ async function main() {
   
   // 格式化输出
   console.log('========================================');
-  console.log('           笔灵 AI - 今日数据报告');
+  console.log('           启航AI工作台 - 今日数据报告');
   console.log('========================================\n');
   
   console.log(`📅 日期: ${today}`);

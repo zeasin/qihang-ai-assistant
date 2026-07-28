@@ -1,4 +1,4 @@
-# 笔灵 AI - Electron 桌面应用
+# 启航AI工作台 - Electron 桌面应用
 
 基于 Vue 3 + Electron 的桌面应用，数据通过 Electron IPC 与主进程通信获取。
 

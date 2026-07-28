@@ -322,7 +322,7 @@ function buildReportSections(data) {
     greetingLine, overview, doneSection, overdueSection, pendingSection,
     reminderSection, worklogSection, chatSection, recordSection, docSection,
     analysisSection,
-    footer: '📊 综合日报 · ' + today + '\n---\n💡 打开应用查看完整详情\n笔灵 AI · ' + kbName,
+    footer: '📊 综合日报 · ' + today + '\n---\n💡 打开应用查看完整详情\n启航AI工作台 · ' + kbName,
   };
   const vars = {
     today, yesterday, greeting, kbName,
@@ -544,7 +544,7 @@ function buildReportCard(data) {
     elements: [
       ...elements,
       { tag: 'hr' },
-      { tag: 'note', elements: [{ tag: 'plain_text', content: `笔灵 AI · ${kbName} · ${today}` }] },
+      { tag: 'note', elements: [{ tag: 'plain_text', content: `启航AI工作台 · ${kbName} · ${today}` }] },
     ],
   };
 }

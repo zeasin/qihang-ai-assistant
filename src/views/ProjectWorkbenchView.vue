@@ -529,10 +529,10 @@ async function sendMessage() {
       openAddProject();
       return;
     }
-    const firstProject = projects.value[0];
-    selectedProject.value = firstProject;
-    await loadSessions(firstProject.id);
-    await newSession(firstProject.id);
+    const firstNote = projects.value.find(p => p.type === 'note') || projects.value[0];
+    selectedProject.value = firstNote;
+    await loadSessions(firstNote.id);
+    await newSession(firstNote.id);
     // 等 session 创建完成后再发送
     nextTick(() => {
       inputText.value = text;
@@ -738,8 +738,9 @@ async function saveProject() {
     await loadProjects();
     // 选中新项目
     if (projects.value.length > 0 && !editingProject.value) {
-      selectedProject.value = projects.value[0];
-      loadSessions(projects.value[0].id);
+      const firstNote = projects.value.find(p => p.type === 'note') || projects.value[0];
+      selectedProject.value = firstNote;
+      loadSessions(firstNote.id);
     }
   } catch (e: any) {
     alert('保存失败: ' + (e.message || ''));
@@ -772,8 +773,13 @@ onMounted(async () => {
   await loadProjects();
   await checkAgentStatus();
   if (projects.value.length > 0) {
-    expandedProjects.add(projects.value[0].id);
-    await loadSessions(projects.value[0].id);
+    const firstNote = projects.value.find(p => p.type === 'note') || projects.value[0];
+    expandedProjects.add(firstNote.id);
+    await loadSessions(firstNote.id);
+    const sessions = projectSessions[firstNote.id];
+    if (sessions && sessions.length > 0) {
+      await selectSession(sessions[0]);
+    }
   }
 });
 

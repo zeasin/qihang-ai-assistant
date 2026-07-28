@@ -245,7 +245,7 @@ function configSet(key, value) {
 const project = {
   list: (type) => {
     if (type) return q('SELECT * FROM prj_projects WHERE type = ? ORDER BY sort_order ASC, created_at DESC', type);
-    return q('SELECT * FROM prj_projects ORDER BY sort_order ASC, created_at DESC');
+    return q("SELECT * FROM prj_projects ORDER BY CASE WHEN type = 'note' THEN 0 ELSE 1 END, sort_order ASC, created_at DESC");
   },
   get: (id) => qOne('SELECT * FROM prj_projects WHERE id = ?', id),
   getDefault: () => qOne('SELECT * FROM prj_projects WHERE is_default = 1'),

@@ -127,7 +127,7 @@ function pageLayout(title, bodyHTML, activePath, headExtra = '') {
     const active = item.path === activePath ? ' active' : '';
     return `<a class="nav-item${active}" href="${item.path}" title="${item.label}"><span class="nav-icon">${item.icon}</span><span class="nav-label">${item.label}</span></a>`;
   }).join('');
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} - 笔灵 AI</title><style>${LAYOUT_CSS}</style>${headExtra}</head><body><div class="app-container"><aside class="sidebar"><nav class="nav-menu">${navHTML}</nav><div class="sidebar-footer"><a class="nav-item" href="/web/status" title="状态"><span class="nav-icon">⚡</span><span class="nav-label">状态</span></a></div></aside><main class="main-content">${bodyHTML}</main></div></body></html>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} - 启航AI工作台</title><style>${LAYOUT_CSS}</style>${headExtra}</head><body><div class="app-container"><aside class="sidebar"><nav class="nav-menu">${navHTML}</nav><div class="sidebar-footer"><a class="nav-item" href="/web/status" title="状态"><span class="nav-icon">⚡</span><span class="nav-label">状态</span></a></div></aside><main class="main-content">${bodyHTML}</main></div></body></html>`;
 }
 
 const LAYOUT_CSS = `
@@ -188,7 +188,7 @@ textarea{min-height:80px;resize:vertical}
 function remoteIndex() {
   return pageLayout('远程管理', `
 <div class="page">
-<h1>📘 笔灵 AI 远程管理</h1>
+<h1>📘 启航AI工作台 远程管理</h1>
 <div class="card"><p style="font-size:14px;color:var(--text-secondary)">从左侧导航选择功能查看或管理数据。</p></div>
 </div>`, '/web');
 }

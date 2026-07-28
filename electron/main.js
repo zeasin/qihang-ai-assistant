@@ -49,7 +49,7 @@ let backgroundReady = false;
 function createTray() {
   const icon = createTrayIcon();
   tray = new Tray(icon);
-  tray.setToolTip('笔灵 AI - 运行中');
+  tray.setToolTip('启航AI工作台 - 运行中');
   updateTrayMenu();
   tray.on('double-click', () => showWindow());
 }
@@ -119,6 +119,7 @@ function createWindow() {
     height: 1000,
     minWidth: 1000,
     minHeight: 700,
+    title: '启航AI工作台',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -1086,7 +1087,7 @@ ipcMain.handle('feishu:webhook:set', (_, { url }) => {
   return { ok: true };
 });
 ipcMain.handle('feishu:webhook:test', async (_, { url }) => {
-  const result = await feishu.sendViaWebhook(url, '🔔 笔灵 AI 桌面端连接测试成功！');
+  const result = await feishu.sendViaWebhook(url, '🔔 启航AI工作台 桌面端连接测试成功！');
   return result;
 });
 ipcMain.handle('feishu:send', async (_, { message }) => {
