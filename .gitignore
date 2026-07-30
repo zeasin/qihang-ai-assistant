@@ -19,3 +19,5 @@ target/
 .opencode/
 .claude/
 .vite/
+app.log.2026-07-28.0.gz
+src/main/resources/application-dev.yml
