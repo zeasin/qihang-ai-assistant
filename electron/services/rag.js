@@ -457,35 +457,47 @@ async function hybridSearch(projectId, query, topK = 10, db) {
   if (!vectorResults.length) return keywordResults.slice(0, topK);
   if (!keywordResults.length) return vectorResults.slice(0, topK);
 
-  const merged = new Map();
-  for (const r of vectorResults) {
-    const key = r.source;
-    if (merged.has(key)) {
-      const existing = merged.get(key);
-      if (r.score > existing.vScore) existing.vScore = r.score;
-    } else {
-      merged.set(key, { source: r.source, text: r.text, title: r.title, vScore: r.score, kScore: 0 });
-    }
-  }
+  // 关键词结果按文件路径建立提升映射
+  const kwMap = new Map();
   for (const r of keywordResults) {
-    const key = r.source;
-    if (merged.has(key)) {
-      merged.get(key).kScore = Math.max(merged.get(key).kScore, r.score);
-    } else {
-      merged.set(key, { source: r.source, text: r.text, title: r.title, vScore: 0, kScore: r.score });
+    kwMap.set(r.source, r.score);
+  }
+
+  // 以向量 chunk 为主体，融合关键词得分
+  const combined = vectorResults.map(r => {
+    const kScore = kwMap.get(r.source) || 0;
+    const best = Math.max(r.score, kScore);
+    const avg = (r.score + kScore) / 2;
+    return { ...r, kScore, score: best * 0.35 + avg * 0.65 };
+  });
+
+  // 补充关键词有但向量未覆盖的文件（取 bestChunk）
+  for (const r of keywordResults) {
+    if (!combined.some(c => c.source === r.source)) {
+      combined.push({
+        text: r.text,
+        source: r.source,
+        title: r.title,
+        score: r.score * 0.35,
+        kScore: r.score,
+        vScore: 0,
+      });
     }
   }
 
-  for (const [k, v] of merged) {
-    // 柔和融合：取最高分和平均分的加权组合，避免RRF过于激进
-    const best = Math.max(v.vScore, v.kScore);
-    const avg = (v.vScore + v.kScore) / 2;
-    v.score = best * 0.35 + avg * 0.65;
+  combined.sort((a, b) => b.score - a.score);
+
+  // 去重：每文件最多 2 条，避免单一文件垄断 topK
+  const fileCount = new Map();
+  const deduped = [];
+  for (const r of combined) {
+    const cnt = fileCount.get(r.source) || 0;
+    if (cnt >= 2) continue;
+    fileCount.set(r.source, cnt + 1);
+    deduped.push(r);
   }
 
-  const finalResults = [...merged.values()];
-  finalResults.sort((a, b) => b.score - a.score);
-  return finalResults.slice(0, topK).filter(c => c.score > 0.01);
+  return deduped.slice(0, topK).filter(c => c.score > 0.01);
 }
 
 /**

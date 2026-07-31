@@ -129,32 +129,29 @@ async function runAgent({ messages, toolDefs = [], onDelta, onTool, onError, max
     try {
       const aggregated = chunks.reduce((a, b) => a.concat(b));
       // 工具调用跨多个流式帧（name/id 在第一帧，arguments 分片在后续帧），按 index 聚合并拼接。
-      // 主路径 tool_call_chunks（ChatOllama 等正常端点）；若为空（如部分兼容端点解析失败），
-      // 回退到原始 delta chunk.additional_kwargs.tool_calls 兜底，避免同源数据重复拼接。
+      // 注意：不能依赖 aggregated.tool_call_chunks，因为 AIMessageChunk.concat 合并时用
+      // `...right` 覆盖 left 字段，导致后续帧的 name="" 覆盖了首帧的真实 name。
+      // 改为遍历原始 chunks 的 tool_call_chunks 自行聚合。
       const accByIndex = new Map();
-      const collectRaw = (tcs) => {
-        if (!Array.isArray(tcs)) return;
-        for (const tc of tcs) {
+      const collectTcc = (tcc) => {
+        if (!Array.isArray(tcc)) return;
+        for (const tc of tcc) {
+          if (!tc) continue;
           const idx = tc.index ?? 0;
           const acc = accByIndex.get(idx) || { name: '', args: '', id: '' };
-          if (tc.function && tc.function.name) acc.name += tc.function.name;
-          if (tc.function && tc.function.arguments) acc.args += tc.function.arguments;
+          if (tc.name) acc.name += tc.name;
+          if (tc.args) acc.args += tc.args;
           if (tc.id) acc.id = tc.id;
           accByIndex.set(idx, acc);
         }
       };
-      for (const c of aggregated.tool_call_chunks || []) {
-        if (!c) continue;
-        const idx = c.index ?? 0;
-        const acc = accByIndex.get(idx) || { name: '', args: '', id: '' };
-        if (c.name) acc.name += c.name;
-        if (c.args) acc.args += c.args;
-        if (c.id) acc.id = c.id;
-        accByIndex.set(idx, acc);
+      for (const c of chunks) {
+        collectTcc(c.tool_call_chunks);
       }
+      // 若 tool_call_chunks 空（如某些兼容端点未生成），回退到原始 delta
       if (!accByIndex.size) {
         for (const c of chunks) {
-          collectRaw(c.additional_kwargs && c.additional_kwargs.tool_calls);
+          collectTcc(c.additional_kwargs && c.additional_kwargs.tool_calls);
         }
       }
       const toolCalls = [];
