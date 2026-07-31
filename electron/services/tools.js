@@ -59,7 +59,9 @@ async function queryDatasetTool({ datasetName, conditions, limit }, projectDir) 
 async function searchKbTool({ query, kbName }, projectDir) {
   const noteProjects = db.project.list('note');
   let targetProjects = noteProjects;
-  if (kbName) targetProjects = noteProjects.filter(p => p.name === kbName || p.name.includes(kbName));
+  if (kbName && kbName !== 'None' && kbName !== 'null') {
+    targetProjects = noteProjects.filter(p => p.name === kbName || p.name.includes(kbName));
+  }
   if (!targetProjects.length) {
     const names = noteProjects.map(p => p.name).join(', ');
     return `知识库未找到。可用: ${names || '无'}`;
