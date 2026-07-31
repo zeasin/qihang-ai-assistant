@@ -415,7 +415,6 @@ async function testWebhook() {
 }
 
 async function saveFeishuBot() {
-  if (!feishuAppId.value || !feishuAppSecret.value) { feishuStatus.value = '❌ 请先填写 App ID 和 App Secret'; return; }
   try {
     await API.feishu.saveBot(feishuAppId.value, feishuAppSecret.value);
     feishuStatus.value = '✅ 配置已保存';
