@@ -36,9 +36,6 @@
             >
               <span class="conv-icon">🗨️</span>
               <span class="conv-title">{{ session.title || '新对话' }}</span>
-              <span class="conv-agent-badge" :class="session.active_agent">
-                {{ agentLabel(session.active_agent) }}
-              </span>
               <span class="conv-delete" @click.stop="deleteSession(session.id)" title="删除">×</span>
             </div>
             <div class="conversation-item new-conversation" @click="newSession(project.id)">
@@ -63,8 +60,8 @@
         <div class="empty-icon">💻</div>
         <div class="empty-title">工作台</div>
         <div class="empty-desc">
-          从左侧选择一个项目下的对话，或新建一个对话开始编程<br>
-          支持 <strong>pi agent</strong> · <strong>opencode</strong> · <strong>Claude Code</strong> 三种 Agent
+          从左侧选择一个项目下的对话，或新建一个对话开始<br>
+          数据集查询 · 笔记库检索 · 项目文件操作，一个助理全部搞定
         </div>
       </div>
 
@@ -76,21 +73,14 @@
             <h3 class="chat-title">{{ currentSession?.title || '对话' }}</h3>
             <span class="chat-project-badge" v-if="currentProject">📁 {{ currentProject.name }}</span>
           </div>
-          <div class="chat-header-right">
-            <div class="agent-switcher">
-              <span class="agent-label">Agent:</span>
-              <div class="agent-select-wrapper">
-                <select
-                  v-model="activeAgent"
-                  @change="onAgentSwitch"
-                  class="agent-select"
-                >
-                  <option value="pi">🤖 pi agent</option>
-                  <option value="opencode">🔧 opencode</option>
-                  <option value="claude">🌿 Claude Code</option>
-                </select>
-                <span class="agent-status-dot" :class="agentReady ? 'ready' : 'checking'"></span>
-              </div>
+          <div class="chat-header-right" v-if="llmProfiles.length">
+            <div class="model-switcher">
+              <span class="model-label">模型:</span>
+              <select v-model="selectedModelId" class="model-select" title="选择对话使用的大模型">
+                <option v-for="p in llmProfiles" :key="p.id" :value="p.id">
+                  {{ p.name }} · {{ p.model }}{{ p.isDefault ? ' ⭐' : '' }}
+                </option>
+              </select>
             </div>
           </div>
         </div>
@@ -106,7 +96,7 @@
             <div class="message-content-wrapper">
               <div class="message-header">
                 <span class="message-author">
-                  {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : agentLabel(msg.mode || currentSession?.active_agent) }}
+                  {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : 'AI 助理' }}
                 </span>
                 <span class="message-status" v-if="msg.status">{{ msg.status }}</span>
               </div>
@@ -130,7 +120,7 @@
             <textarea
               v-model="inputText"
               class="chat-input"
-              :placeholder="`输入代码问题，Enter 发送... (当前: ${agentLabel(activeAgent)})`"
+              :placeholder="`输入问题，Enter 发送... (支持 数据集 · 笔记库 · 代码操作)`"
               @keydown.enter.exact.prevent="sendMessage"
               @paste="handlePaste"
               @compositionstart="composing = true"
@@ -259,9 +249,9 @@ const messages = ref<any[]>([]);
 const inputText = ref('');
 const isStreaming = ref(false);
 const composing = ref(false);
-const activeAgent = ref('pi');
-const agentReady = ref(false);
 const thinkingText = ref('');
+const llmProfiles = ref<any[]>([]);
+const selectedModelId = ref<number | null>(null);
 const inputRef = ref<HTMLTextAreaElement>();
 const messagesContainer = ref<HTMLElement>();
 const pendingImages = ref<{ data: string; mimeType: string }[]>([]);const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -275,19 +265,23 @@ const currentProject = computed(() => {
   return projects.value.find(p => p.id === currentSession.value.project_id) || null;
 });
 
-// ========== Agent 工具函数 ==========
-function agentLabel(agent: string) {
-  if (agent === 'pi') return 'pi';
-  if (agent === 'opencode') return 'opencode';
-  if (agent === 'claude') return 'Claude';
-  return agent || 'pi';
-}
-
 // ========== 加载数据 ==========
 async function loadProjects() {
   try {
     projects.value = await API.project.list();
   } catch { projects.value = []; }
+}
+
+async function loadLlmProfiles() {
+  try {
+    llmProfiles.value = await API.llmProfiles.list();
+    const defaultP = llmProfiles.value.find(p => p.isDefault) || llmProfiles.value[0];
+    if (defaultP && selectedModelId.value === null) {
+      selectedModelId.value = defaultP.id;
+    } else if (!defaultP) {
+      selectedModelId.value = null;
+    }
+  } catch { llmProfiles.value = []; }
 }
 
 async function loadSessions(projectId: number) {
@@ -352,9 +346,7 @@ async function selectSession(session: any) {
   if (isStreaming.value) return;
   currentSessionId.value = session.id;
   currentSession.value = session;
-  activeAgent.value = session.active_agent || 'pi';
   await loadMessages(session.id);
-  checkAgentStatus();
   saveCodingState();
 }
 
@@ -362,14 +354,13 @@ async function newSession(projectId: number) {
   if (isStreaming.value) return;
   const id = 'coding_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   try {
-    const session = await API.coding.createSession(id, String(projectId), '新对话', activeAgent.value);
+    const session = await API.coding.createSession(id, String(projectId), '新对话');
     currentSessionId.value = id;
     currentSession.value = session;
     messages.value = [];
     inputText.value = '';
     await loadSessions(projectId);
     selectedProject.value = projects.value.find(p => p.id === projectId) || null;
-    checkAgentStatus();
     nextTick(() => inputRef.value?.focus());
   } catch (e: any) {
     console.error('创建对话失败:', e);
@@ -394,33 +385,6 @@ async function deleteSession(sessionId: string) {
   }
 }
 
-// ========== Agent 切换 ==========
-async function onAgentSwitch() {
-  if (!currentSessionId.value) return;
-  try {
-    const session = await API.coding.switchAgent(currentSessionId.value, activeAgent.value);
-    currentSession.value = session;
-    checkAgentStatus();
-    // 刷新项目中的对话列表（更新 badge）
-    for (const pid of Object.keys(projectSessions)) {
-      loadSessions(Number(pid));
-    }
-  } catch (e: any) {
-    console.error('切换 Agent 失败:', e);
-  }
-}
-
-async function checkAgentStatus() {
-  agentReady.value = false;
-  try {
-    const status = await API.agent.status();
-    if (activeAgent.value === 'pi') agentReady.value = status.pi?.installed;
-    else if (activeAgent.value === 'opencode') agentReady.value = status.opencode?.installed;
-    else if (activeAgent.value === 'claude') agentReady.value = status.claude?.installed;
-  } catch {
-    agentReady.value = false;
-  }
-}
 // ========== 状态持久化 ==========
 const CODING_STATE_KEY = "coding_workbench_state";
 
@@ -432,7 +396,6 @@ function saveCodingState() {
     localStorage.setItem(CODING_STATE_KEY, JSON.stringify({
       sessionId: currentSessionId.value,
       projectId: projectId,
-      agent: activeAgent.value,
     }));
   } catch (e) {
     console.error("保存工作台状态失败:", e);
@@ -443,7 +406,7 @@ async function restoreCodingState() {
   try {
     const saved = localStorage.getItem(CODING_STATE_KEY);
     if (!saved) return false;
-    const { sessionId, projectId, agent } = JSON.parse(saved);
+    const { sessionId, projectId } = JSON.parse(saved);
     if (!sessionId || !projectId) return false;
     
     // 找到对应的项目
@@ -462,9 +425,7 @@ async function restoreCodingState() {
     // 恢复选中状态
     currentSessionId.value = session.id;
     currentSession.value = session;
-    if (agent) activeAgent.value = agent;
     await loadMessages(session.id);
-    checkAgentStatus();
     
     return true;
   } catch (e) {
@@ -563,7 +524,6 @@ async function doSend(text: string) {
     role: 'assistant',
     content: '',
     status: '准备中...',
-    mode: activeAgent.value,
   });
 
   isStreaming.value = true;
@@ -651,7 +611,7 @@ async function doSend(text: string) {
   API.on('coding:error', onError);
 
   try {
-    await API.coding.send(text, sid, projectDir, activeAgent.value, images.length ? images : undefined);
+    await API.coding.send(text, sid, projectDir, undefined, images.length ? images : undefined, selectedModelId.value || undefined);
   } catch (err: any) {
     isStreaming.value = false;
     const msg = messages.value[msgIdx];
@@ -771,7 +731,7 @@ async function deleteProject(project: any) {
 // ========== 生命周期 ==========
 onMounted(async () => {
   await loadProjects();
-  await checkAgentStatus();
+  await loadLlmProfiles();
   if (projects.value.length > 0) {
     const firstNote = projects.value.find(p => p.type === 'note') || projects.value[0];
     expandedProjects.add(firstNote.id);
@@ -943,18 +903,6 @@ onBeforeUnmount(() => {
   color: #6366f1;
 }
 
-.conv-agent-badge {
-  font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 6px;
-  flex-shrink: 0;
-  font-weight: 500;
-}
-
-.conv-agent-badge.pi { background: #eef2ff; color: #6366f1; }
-.conv-agent-badge.opencode { background: #fef3c7; color: #b45309; }
-.conv-agent-badge.claude { background: #d1fae5; color: #059669; }
-
 .conv-delete {
   font-size: 14px;
   color: #94a3b8;
@@ -1082,26 +1030,19 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
-.agent-switcher {
+.model-switcher {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.agent-label {
+.model-label {
   font-size: 12px;
   color: #64748b;
   font-weight: 500;
 }
 
-.agent-select-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.agent-select {
+.model-select {
   padding: 4px 28px 4px 10px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -1114,33 +1055,12 @@ onBeforeUnmount(() => {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
+  max-width: 260px;
 }
 
-.agent-select:focus {
+.model-select:focus {
   border-color: #6366f1;
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
-}
-
-.agent-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #fbbf24;
-  flex-shrink: 0;
-}
-
-.agent-status-dot.ready {
-  background: #22c55e;
-}
-
-.agent-status-dot.checking {
-  background: #fbbf24;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
 }
 
 /* ========== 消息列表 ========== */

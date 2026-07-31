@@ -111,7 +111,7 @@ function stop() {
 
 function isRunning() { return running; }
 
-const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.opencode', '__pycache__', '.cache']);
+const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '__pycache__', '.cache']);
 
 function walkDir(dir, files, ignoreDirs = [], ignoreFiles = []) {
   if (!fs.existsSync(dir)) return;

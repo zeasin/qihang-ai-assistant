@@ -23,7 +23,7 @@ for (const s of [process.stdout, process.stderr]) {
   }
 }
 
-// Polyfill for Electron: undici v6 (bundled with pi-agent) expects worker_threads.markAsUncloneable
+// Polyfill for Electron: some deps expect worker_threads.markAsUncloneable
 try {
   const wt = require('worker_threads');
   if (typeof wt.markAsUncloneable !== 'function') {
@@ -32,6 +32,7 @@ try {
 } catch {} // worker_threads not available
 const db = require('./services/database');
 const orchestrator = require('./services/orchestrator');
+const llm = require('./services/llm');
 const feishu = require('./services/feishu');
 const scheduler = require('./services/scheduler');
 const indexer = require('./services/indexer');
@@ -190,19 +191,6 @@ function sendToRenderer(channel, data) {
   }
 }
 
-/**
- * 构建编程对话上下文（从历史消息中提取）
- */
-function buildCodingContext(history) {
-  if (!history || !history.length) return '';
-  const lines = history.map(m => {
-    if (m.role === 'user') return `【用户】${m.content}`;
-    if (m.role === 'assistant') return `【助手】${m.content}`;
-    return '';
-  }).filter(Boolean);
-  return '以下是之前的对话历史，请基于此上下文继续对话：\n\n' + lines.join('\n\n');
-}
-
 // ========== Feishu message handler (shared) ==========
 
 function parseFeishuContext(text, db) {
@@ -359,10 +347,8 @@ const feishuMessageHandler = async (msg) => {
 
     const setMode = (mode) => { try { db.run("UPDATE prj_sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", mode, sessionId); } catch {} };
     const questionText = await buildKBInjectedPrompt();
-    const feishuSessionDir = path.join(app.getPath('userData'), 'feishu-sessions', String(feishuProjectId), msg.sender);
-    fs.mkdirSync(feishuSessionDir, { recursive: true });
     const replyOrchestrator = async (cwd) => {
-      const session = await orchestrator.createSession(cwd, feishuSessionDir);
+      const session = await orchestrator.createSession(cwd, sessionId);
       let reply = '';
       const sendReply = (text) => {
         if (text) {
@@ -632,7 +618,7 @@ ipcMain.handle('ds:pendingRecords', () => {
 });
 
 // --- Chat / Orchestrator ---
-ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbIds, images, agent }) => {
+ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbIds, images, agent, modelName }) => {
   const sid = sessionId || 'session_' + Date.now();
   const activeAgent = agent || 'pi';
   try {
@@ -646,58 +632,29 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
 
     db.chat.addMessage(sid, 'user', question, activeAgent, images);
 
-    if (activeAgent === 'opencode') {
-      // ===== opencode agent =====
-      sendToRenderer('chat:status', { sessionId: sid, text: 'opencode 正在处理...' });
-      const opencode = require('./services/opencode');
+    // ===== LangChain 统一助理 =====
+    const session = await orchestrator.createSession(projectDir || '', sid);
+    sendToRenderer('chat:status', { sessionId: sid, text: 'AI 正在分析问题...' });
 
-      // Build context: include kb context if specified
-      let context = '';
-      if (kbIds?.length) {
-        const kbNames = (await Promise.all(kbIds.map(id => db.project.get(id)))).filter(Boolean).map(k => k.name).join(', ');
-        context = `[笔记库: ${kbNames}]`;
-      }
+    const augmentedQuestion = kbIds?.length
+      ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.project.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
+      : question;
 
-      let reply = '';
-      await opencode.prompt(
-        context,
-        question,
-        projectDir || '',
-        (delta) => {
-          reply += delta;
-          sendToRenderer('chat:delta', { sessionId: sid, text: delta });
-        },
-        () => {
-          if (reply) db.chat.addMessage(sid, 'assistant', reply, 'opencode');
-          sendToRenderer('chat:done', { sessionId: sid });
-        },
-        (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
-        (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent })
-      );
-    } else {
-      // ===== pi agent (default) =====
-      const session = await orchestrator.createSession(projectDir || '');
-      sendToRenderer('chat:status', { sessionId: sid, text: 'AI 正在分析问题...' });
-
-      const augmentedQuestion = kbIds?.length
-        ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.project.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
-        : question;
-
-      let reply = '';
-      await orchestrator.chat(session, augmentedQuestion,
-        (delta) => {
-          reply += delta;
-          sendToRenderer('chat:delta', { sessionId: sid, text: delta });
-        },
-        (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent }),
-        () => {
-          if (reply) db.chat.addMessage(sid, 'assistant', reply, 'pi');
-          sendToRenderer('chat:done', { sessionId: sid });
-        },
-        (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
-        images
-      );
-    }
+    let reply = '';
+    await orchestrator.chat(session, augmentedQuestion,
+      (delta) => {
+        reply += delta;
+        sendToRenderer('chat:delta', { sessionId: sid, text: delta });
+      },
+      (toolEvent) => sendToRenderer('chat:tool', { sessionId: sid, ...toolEvent }),
+      () => {
+        if (reply) db.chat.addMessage(sid, 'assistant', reply, 'pi');
+        sendToRenderer('chat:done', { sessionId: sid });
+      },
+      (err) => sendToRenderer('chat:error', { sessionId: sid, text: err }),
+      images,
+      modelName
+    );
   } catch (err) {
     sendToRenderer('chat:error', { sessionId: sid, text: err.message });
   }
@@ -728,18 +685,12 @@ ipcMain.handle('coding:switchAgent', (_, { sessionId, agent }) => {
   db.chat.updateSessionAgent(sessionId, agent);
   return db.chat.getSession(sessionId);
 });
-ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, agent, images }) => {
+ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, agent, images, modelName }) => {
   const sid = sessionId || ('coding_' + Date.now());
   try {
     let session = db.chat.getSession(sid);
     if (!session) {
-      session = db.chat.createSession(sid, null, null, 'coding', agent || 'pi', 'ui');
-    }
-    const agentName = agent || session.active_agent || 'pi';
-
-    // 如果 agent 变了，更新数据库
-    if (session.active_agent !== agentName) {
-      db.chat.updateSessionAgent(sid, agentName);
+      session = db.chat.createSession(sid, null, null, 'coding', 'pi', 'ui');
     }
 
     // 首条消息自动设置标题
@@ -749,22 +700,18 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
       db.chat.updateSessionTitle(sid, title);
     }
 
-    // 构建上下文（从历史消息中提取，实现跨 Agent 上下文保持）
-    const context = buildCodingContext(existing);
-
     // 保存用户消息（含图片）
-    db.chat.addMessage(sid, 'user', question, agentName, images);
+    db.chat.addMessage(sid, 'user', question, 'pi', images);
 
     let reply = '';
-    const agentLabel = agentName === 'pi' ? 'pi agent' : agentName === 'opencode' ? 'opencode' : 'Claude Code';
-    sendToRenderer('coding:status', { sessionId: sid, text: `${agentLabel} 正在处理...` });
+    sendToRenderer('coding:status', { sessionId: sid, text: 'AI 正在处理...' });
 
     const onDelta = (delta) => {
       reply += delta;
       sendToRenderer('coding:delta', { sessionId: sid, text: delta });
     };
     const onDone = () => {
-      if (reply) db.chat.addMessage(sid, 'assistant', reply, agentName);
+      if (reply) db.chat.addMessage(sid, 'assistant', reply, 'pi');
       sendToRenderer('coding:done', { sessionId: sid });
     };
     const onError = (err) => {
@@ -774,24 +721,9 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
       sendToRenderer('coding:tool', { sessionId: sid, ...toolEvent });
     };
 
-    if (agentName === 'opencode') {
-      const oc = require('./services/opencode');
-      // opencode 服务端自己管理 session 上下文，不传本地历史避免重复
-      await oc.prompt('', question, projectDir || "", onDelta, onDone, onError, onTool);
-    } else if (agentName === 'claude') {
-      const cc = require('./services/claude-code');
-      // Claude SDK 自己管理 session 上下文，不传本地历史避免重复
-      await cc.prompt('', question, projectDir || '', onDelta, onDone, onError, onTool);
-    } else {
-      // pi agent
-      const fullPrompt = context ? `${context}
-
----
-
-用户的新问题：${question}` : question;
-      const piSession = await orchestrator.createSession(projectDir || '');
-      await orchestrator.chat(piSession, fullPrompt, onDelta, onTool, onDone, onError, images);
-    }
+    // LangChain 统一助理（历史消息由会话加载，工具含数据集/知识库/文件操作）
+    const piSession = await orchestrator.createSession(projectDir || '', sid);
+    await orchestrator.chat(piSession, question, onDelta, onTool, onDone, onError, images, modelName);
   } catch (err) {
     sendToRenderer('coding:error', { sessionId: sid, text: err.message });
   }
@@ -819,18 +751,49 @@ ipcMain.handle('project:delete', (_, { id }) => db.project.delete(id));
 
 // --- Agent Status ---
 ipcMain.handle('agent:status', async () => {
-  const piStatus = await orchestrator.checkStatus();
-  let opencodeStatus = { installed: false, version: null };
-  let claudeStatus = { installed: false, version: null };
-  try {
-    const oc = require('./services/opencode');
-    opencodeStatus = await oc.checkStatus();
-  } catch {}
-  try {
-    const cc = require('./services/claude-code');
-    claudeStatus = await cc.checkStatus();
-  } catch {}
-  return { pi: piStatus, opencode: opencodeStatus, claude: claudeStatus };
+  const status = await orchestrator.checkStatus();
+  return { pi: status, langchain: status };
+});
+
+// --- LLM Profiles (multi-model) ---
+ipcMain.handle('llm:profiles:list', () => {
+  return db.llmProfile.list().map(p => ({
+    id: p.id,
+    name: p.name,
+    provider: p.provider,
+    apiKey: p.api_key ? '****' : '',
+    hasApiKey: !!p.api_key,
+    baseUrl: p.base_url,
+    model: p.model,
+    timeout: p.timeout,
+    modelType: p.model_type,
+    isDefault: !!p.is_default,
+  }));
+});
+ipcMain.handle('llm:profiles:add', (_, data) => {
+  const p = db.llmProfile.add(data);
+  return p ? { id: p.id, name: p.name, isDefault: !!p.is_default } : null;
+});
+ipcMain.handle('llm:profiles:update', (_, { id, data }) => {
+  const p = db.llmProfile.update(id, data);
+  return p ? { id: p.id, name: p.name, isDefault: !!p.is_default } : null;
+});
+ipcMain.handle('llm:profiles:setDefault', (_, { id }) => {
+  db.llmProfile.setDefault(id);
+  return { ok: true };
+});
+ipcMain.handle('llm:profiles:delete', (_, { id }) => {
+  db.llmProfile.remove(id);
+  return { ok: true };
+});
+ipcMain.handle('llm:profiles:test', async (_, data) => {
+  return llm.testConnection({
+    profileRef: data.profileRef,
+    provider: data.provider,
+    model: data.model,
+    apiKey: data.apiKey,
+    baseUrl: data.baseUrl,
+  });
 });
 
 // --- Service Management ---
@@ -994,7 +957,6 @@ ipcMain.handle('insights:analyzeProject', async (_, { projectId, projectName }) 
   const rows = db.q("SELECT path, content FROM kb_documents WHERE project_id = ? AND path LIKE ?", projectId, `%${projectName}%`);
   if (!rows.length) return { error: '该项目没有可分析的文件' };
   try {
-    const orchestrator = require('./services/orchestrator');
     const text = await orchestrator.generateProjectAnalysis(projectName, projectId, rows);
     db.run("INSERT INTO ai_analysis (project_id, type, content, dir_path, created_at, updated_at) VALUES (?, 'project_analysis', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
       projectId, text, projectName);
@@ -1129,6 +1091,10 @@ ipcMain.handle('log:dir', () => {
 // --- Config ---
 ipcMain.handle('config:get', () => {
   return {
+    llmProvider: db.configGet('llmProvider') || 'deepseek',
+    llmModel: db.configGet('llmModel') || '',
+    llmApiKey: db.configGet('llmApiKey') || '',
+    llmBaseUrl: db.configGet('llmBaseUrl') || '',
     embedModel: db.configGet('embedModel') || 'bge-m3',
     embeddingBaseUrl: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
     embeddingApiKey: db.configGet('embeddingApiKey') || '',
@@ -1144,6 +1110,16 @@ ipcMain.handle('config:get', () => {
 ipcMain.handle('config:set', (_, cfg) => {
   Object.entries(cfg).forEach(([k, v]) => db.configSet(k, String(v)));
   return true;
+});
+
+ipcMain.handle("llm:test", async (_, { provider, model, apiKey, baseUrl }) => {
+  try {
+    const llm = require('./services/llm');
+    const result = await llm.testConnection({ provider, model, apiKey, baseUrl });
+    return result;
+  } catch (e) {
+    return { ok: false, message: "❌ 测试异常: " + (e.message || e) };
+  }
 });
 
 ipcMain.handle("embedding:test", async (_, { model, host, apiKey }) => {

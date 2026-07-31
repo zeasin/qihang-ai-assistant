@@ -68,7 +68,15 @@ interface ElectronAPI {
     delete: (id: number) => Promise<void>;
   };
   agent: {
-    status: () => Promise<{ pi: any; opencode: any; claude: any }>;
+    status: () => Promise<{ pi: any; langchain?: any }>;
+  };
+  llmProfiles: {
+    list: () => Promise<any[]>;
+    add: (data: any) => Promise<any>;
+    update: (id: number, data: any) => Promise<any>;
+    setDefault: (id: number) => Promise<{ ok: boolean }>;
+    remove: (id: number) => Promise<{ ok: boolean }>;
+    test: (data: any) => Promise<{ ok: boolean; message: string; response?: string }>;
   };
   service: {
     status: () => Promise<{ feishu: boolean; scheduler: boolean; indexer: boolean }>;
@@ -84,6 +92,12 @@ interface ElectronAPI {
     get: () => Promise<any>;
     set: (config: any) => Promise<boolean>;
   };
+  llm: {
+    test: (opts: { provider?: string; model?: string; apiKey?: string; baseUrl?: string }) => Promise<{ ok: boolean; message: string; response?: string }>;
+  };
+  embedding: {
+    test: (model: string, host: string, apiKey: string) => Promise<any>;
+  };
   on: (channel: string, callback: (...args: any[]) => void) => void;
   removeAllListeners: (channel: string) => void;
 
@@ -95,7 +109,7 @@ interface ElectronAPI {
     deleteSession: (sessionId: string) => Promise<void>;
     updateTitle: (sessionId: string, title: string) => Promise<void>;
     switchAgent: (sessionId: string, agent: string) => Promise<any>;
-    send: (question: string, sessionId: string, projectDir: string, agent: string) => Promise<void>;
+    send: (question: string, sessionId: string, projectDir: string, agent?: string, images?: any[], modelName?: string) => Promise<void>;
   };
 }
 

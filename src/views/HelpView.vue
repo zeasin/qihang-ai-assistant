@@ -34,7 +34,7 @@ npm run electron:build</pre>
           <tr><td>📁 知识库</td><td>Markdown 笔记管理，目录树浏览、编辑器、Zen 模式</td></tr>
           <tr><td>🗃️ 数据</td><td>多数据集管理，Excel/JSON 批量导入，AI 智能填充</td></tr>
           <tr><td>🔔 任务</td><td>待办 + 定时提醒统一管理</td></tr>
-          <tr><td>⚙️ 设置</td><td>系统配置：LLM 模型、嵌入模型、Agent、飞书、定时任务等</td></tr>
+          <tr><td>⚙️ 设置</td><td>系统配置：LLM 模型、嵌入模型、AI 助理、飞书、定时任务等</td></tr>
           <tr><td>📋 日志</td><td>操作日志查看</td></tr>
           <tr><td>❓ 帮助</td><td>使用指南（当前页面）</td></tr>
         </table>
@@ -82,15 +82,16 @@ npm run electron:build</pre>
       </div>
 
       <div class="card">
-        <h2>🤖 Agent 系统</h2>
-        <p class="text-muted mb-2">内置多个 AI Agent，各有不同能力定位。</p>
+        <h2>🤖 AI 助理</h2>
+        <p class="text-muted mb-2">基于 LangChain 的统一本地助理，一个引擎搞定所有场景。</p>
         <table class="help-table">
-          <tr><th>Agent</th><th>用途</th><th>安装方式</th></tr>
-          <tr><td>🧠 pi agent</td><td>AI 代码编排 agent，负责工具调用和任务编排</td><td><code>npm install @earendil-works/pi-coding-agent</code></td></tr>
-          <tr><td>🔧 opencode</td><td>通用 AI agent SDK，适合通用对话任务</td><td><code>npm install @opencode-ai/sdk</code></td></tr>
-          <tr><td>🤖 Claude Code CLI</td><td>Anthropic 官方 Agent SDK，流式对话</td><td><code>npm install @anthropic-ai/claude-agent-sdk</code></td></tr>
+          <tr><th>能力</th><th>说明</th></tr>
+          <tr><td>💾 数据集查询</td><td>通过结构化查询工具访问数据中心的记录数据</td></tr>
+          <tr><td>📚 笔记库检索</td><td>语义搜索本地笔记（Embedding + RAG）</td></tr>
+          <tr><td>📁 项目文件操作</td><td>读写文件、目录浏览、grep 搜索，可执行命令</td></tr>
+          <tr><td>📅 日报生成</td><td>自动汇总待办、消息、文档等生成综合日报</td></tr>
         </table>
-        <p class="text-muted">状态和版本信息在设置页查看。API Key 通过环境变量配置。</p>
+        <p class="text-muted">模型配置在设置页「对话模型配置」中管理，支持 DeepSeek（OpenAI 兼容）或本地 Ollama。</p>
       </div>
 
       <div class="card">
@@ -99,7 +100,7 @@ npm run electron:build</pre>
         <table class="help-table">
           <tr><th>配置项</th><th>说明</th></tr>
           <tr><td>嵌入模型</td><td>语义检索用的向量模型（Ollama 或 API）</td></tr>
-          <tr><td>Agent 状态</td><td>查看 pi agent / opencode / Claude Code CLI 安装状态</td></tr>
+          <tr><td>AI 助理状态</td><td>查看统一助理（LangChain）的模型配置与可用状态</td></tr>
           <tr><td>定时任务</td><td>管理内置定时任务（日报、消息汇总等），支持飞书通知</td></tr>
           <tr><td>飞书 Webhook</td><td>消息推送 URL</td></tr>
           <tr><td>飞书 Bot</td><td>App ID / Secret，WebSocket 长连接接收消息</td></tr>
@@ -140,7 +141,7 @@ npm run electron:build</pre>
           <tr><td>桌面壳</td><td>Electron</td></tr>
           <tr><td>后端</td><td>Node.js（主进程）</td></tr>
           <tr><td>数据库</td><td>SQLite（better-sqlite3）</td></tr>
-          <tr><td>AI Agent</td><td>pi-coding-agent / opencode SDK / claude-agent-sdk</td></tr>
+          <tr><td>AI 引擎</td><td>LangChain.js（@langchain/openai + @langchain/ollama）</td></tr>
           <tr><td>语义检索</td><td>Ollama / OpenAI 兼容 API（bge-m3）</td></tr>
           <tr><td>飞书集成</td><td>Webhook + WebSocket Bot</td></tr>
           <tr><td>IPC 通信</td><td>Electron ipcMain / ipcRenderer</td></tr>

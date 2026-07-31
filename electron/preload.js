@@ -62,8 +62,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Chat (unified: general chat + coding workbench)
   chat: {
-    send: (question, sessionId, projectDir, kbIds, images, agent) =>
-      ipcRenderer.invoke('chat:send', { question, sessionId, projectDir, kbIds, images, agent }),
+    send: (question, sessionId, projectDir, kbIds, images, agent, modelName) =>
+      ipcRenderer.invoke('chat:send', { question, sessionId, projectDir, kbIds, images, agent, modelName }),
     createSession: (sessionId, projectId, title, mode, agent, source) =>
       ipcRenderer.invoke('chat:session:create', { id: sessionId, projectId, title, mode, source, agent }),
     getSessions: (projectId) => projectId ? ipcRenderer.invoke('chat:session:listByProject', { projectId }) : ipcRenderer.invoke('chat:session:list'),
@@ -91,6 +91,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Agent
   agent: {
     status: () => ipcRenderer.invoke('agent:status'),
+  },
+
+  // LLM Profiles (multi-model)
+  llmProfiles: {
+    list: () => ipcRenderer.invoke('llm:profiles:list'),
+    add: (data) => ipcRenderer.invoke('llm:profiles:add', data),
+    update: (id, data) => ipcRenderer.invoke('llm:profiles:update', { id, data }),
+    setDefault: (id) => ipcRenderer.invoke('llm:profiles:setDefault', { id }),
+    remove: (id) => ipcRenderer.invoke('llm:profiles:delete', { id }),
+    test: (data) => ipcRenderer.invoke('llm:profiles:test', data),
   },
 
   // Service Management
@@ -148,6 +158,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     set: (cfg) => ipcRenderer.invoke('config:set', cfg),
   },
 
+  // LLM (对话模型)
+  llm: {
+    test: (opts) => ipcRenderer.invoke("llm:test", opts),
+  },
+
   // Embedding Model
   embedding: {
     test: (model, host, apiKey) => ipcRenderer.invoke("embedding:test", { model, host, apiKey }),
@@ -167,8 +182,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('coding:session:updateTitle', { sessionId, title }),
     switchAgent: (sessionId, agent) =>
       ipcRenderer.invoke('coding:switchAgent', { sessionId, agent }),
-    send: (question, sessionId, projectDir, agent, images) =>
-      ipcRenderer.invoke('coding:send', { question, sessionId, projectDir, agent, images }),
+    send: (question, sessionId, projectDir, agent, images, modelName) =>
+      ipcRenderer.invoke('coding:send', { question, sessionId, projectDir, agent, images, modelName }),
   },
 
   // Event listeners (streaming)

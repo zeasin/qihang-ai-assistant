@@ -31,51 +31,102 @@
         <div v-else class="text-muted" style="padding:12px 0;">暂无定时任务。</div>
       </div>
 
-      <!-- Agent Status -->
+      <!-- AI 助理状态 -->
       <div class="card">
         <div class="card-title-row">
-          <h2>🤖 Agent 状态</h2>
+          <h2>🤖 AI 助理</h2>
           <button class="btn btn-sm btn-secondary" @click="showHelp = true">帮助</button>
         </div>
         <div class="agent-grid">
           <div class="agent-card" :class="agentStatus.pi.installed ? 'installed' : 'missing'">
-            <div class="agent-icon">🧠</div>
-            <div class="agent-info">
-              <div class="agent-name">pi agent</div>
-              <div class="agent-version" v-if="agentStatus.pi.installed">v{{ agentStatus.pi.version }}</div>
-              <div class="agent-version" v-else>未安装</div>
-              <div class="agent-meta" v-if="agentStatus.pi.installed && agentStatus.pi.modelsAvailable > 0">
-                <span class="badge badge-primary">{{ agentStatus.pi.modelsAvailable }} 模型</span>
-              </div>
-            </div>
-          </div>
-          <div class="agent-card" :class="agentStatus.opencode.installed ? 'installed' : 'missing'">
-            <div class="agent-icon">🔧</div>
-            <div class="agent-info">
-              <div class="agent-name">opencode</div>
-              <div class="agent-version" v-if="agentStatus.opencode.installed">v{{ agentStatus.opencode.version }}</div>
-              <div class="agent-version" v-else>未安装</div>
-              <div class="agent-meta" v-if="agentStatus.opencode.installed">
-                <span v-for="p in agentStatus.opencode.providers || []" :key="p.name" class="badge badge-gray">{{ p.name }}({{ p.models }})</span>
-              </div>
-              <div class="agent-meta" v-else>
-                <span class="badge badge-gray">需要 npm install</span>
-              </div>
-            </div>
-          </div>
-          <div class="agent-card" :class="agentStatus.claude.installed ? 'installed' : 'missing'">
             <div class="agent-icon">🤖</div>
             <div class="agent-info">
-              <div class="agent-name">Claude Code CLI</div>
-              <div class="agent-version" v-if="agentStatus.claude.installed">v{{ agentStatus.claude.version }}</div>
-              <div class="agent-version" v-else>未安装</div>
-              <div class="agent-meta" v-if="agentStatus.claude.installed && agentStatus.claude.apiKeyConfigured">
-                <span class="badge badge-success">✅ API Key 已配置</span>
-              </div>
-              <div class="agent-meta" v-else>
-                <span class="badge badge-gray">需要 npm install @anthropic-ai/claude-agent-sdk</span>
+              <div class="agent-name">统一助理 (LangChain)</div>
+              <div class="agent-version" v-if="agentStatus.pi.installed">v{{ agentStatus.pi.version }}</div>
+              <div class="agent-version" v-else>引擎未初始化</div>
+              <div class="agent-meta" v-if="agentStatus.pi.installed">
+                <span class="badge badge-primary">{{ agentStatus.pi.firstModel || agentStatus.pi.model || '未配置模型' }}</span>
+                <span v-if="!agentStatus.pi.error" class="badge badge-success">✅ 可用</span>
+                <span v-else class="badge badge-gray">{{ agentStatus.pi.error }}</span>
               </div>
             </div>
+          </div>
+        </div>
+        <div class="text-muted" style="margin-top:8px;font-size:12px;">基于 LangChain 的统一本地助理：数据集查询 · 笔记库检索 · 项目文件操作，使用下方「对话模型」配置。</div>
+      </div>
+
+      <!-- LLM (对话模型) 配置：多模型 -->
+      <div class="card">
+        <div class="card-title-row">
+          <h2>💬 对话模型配置</h2>
+          <span class="text-muted" style="font-size:12px;">可配置多条模型，第一条自动设为默认；对话时可在页面上切换模型</span>
+        </div>
+
+        <!-- 模型列表 -->
+        <table v-if="llmProfiles.length" class="config-table">
+          <thead><tr><th>名称</th><th>提供商</th><th>模型</th><th>API 地址</th><th>类型</th><th>默认</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="p in llmProfiles" :key="p.id">
+              <td><strong>{{ p.name }}</strong></td>
+              <td><span class="badge" :class="p.provider === 'ollama' ? 'badge-gray' : 'badge-primary'">{{ p.provider === 'ollama' ? 'Ollama' : 'OpenAI 兼容' }}</span></td>
+              <td><code>{{ p.model }}</code></td>
+              <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;word-break:break-all;"><code>{{ p.baseUrl }}</code></td>
+              <td><span class="badge badge-gray">{{ p.modelType === 'multimodal' ? '多模态' : '文本' }}</span></td>
+              <td>{{ p.isDefault ? '⭐ 默认' : '' }}</td>
+              <td>
+                <button class="btn btn-sm btn-secondary" @click="editLlmProfile(p)">编辑</button>
+                <button v-if="!p.isDefault" class="btn btn-sm btn-secondary" @click="setDefaultLlmProfile(p)">设为默认</button>
+                <button class="btn btn-sm btn-secondary" style="color:#ef4444;" @click="deleteLlmProfile(p)">删除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="text-muted" style="padding:12px 0;">暂无模型，请点击下方「添加模型」配置。</div>
+
+        <!-- 模型表单 -->
+        <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
+          <h3 style="font-size:14px;margin:0 0 12px;">{{ llmEditingId ? '编辑模型' : '添加模型' }}</h3>
+          <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
+            <div class="form-group" style="flex:1;min-width:120px;">
+              <label style="font-size:12px;">名称 *</label>
+              <input v-model="llmForm.name" type="text" class="form-control" placeholder="如: DeepSeek / 本地 Ollama">
+            </div>
+            <div class="form-group" style="flex:1;min-width:130px;">
+              <label style="font-size:12px;">提供商</label>
+              <select v-model="llmForm.provider" class="form-control">
+                <option value="deepseek">DeepSeek (OpenAI 兼容)</option>
+                <option value="ollama">Ollama (本地)</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1;min-width:150px;">
+              <label style="font-size:12px;">模型名称</label>
+              <input v-model="llmForm.model" type="text" class="form-control" :placeholder="llmForm.provider === 'ollama' ? 'qwen2.5 / deepseek-r1 ...' : 'deepseek-chat'">
+            </div>
+            <div class="form-group" style="flex:1;min-width:200px;">
+              <label style="font-size:12px;">API Key（Ollama 可留空）</label>
+              <input v-model="llmForm.apiKey" type="password" class="form-control" :placeholder="llmForm.hasApiKey ? '已保存，留空不修改' : 'sk-...'">
+            </div>
+            <div class="form-group" style="flex:1;min-width:200px;">
+              <label style="font-size:12px;">服务地址</label>
+              <input v-model="llmForm.baseUrl" type="text" class="form-control" :placeholder="llmForm.provider === 'ollama' ? 'http://127.0.0.1:11434' : 'https://api.deepseek.com/v1'">
+            </div>
+            <div class="form-group" style="flex:0 0 90px;">
+              <label style="font-size:12px;">超时(秒)</label>
+              <input v-model.number="llmForm.timeout" type="number" min="10" max="900" class="form-control">
+            </div>
+            <div class="form-group" style="flex:0 0 110px;">
+              <label style="font-size:12px;">模型类型</label>
+              <select v-model="llmForm.modelType" class="form-control">
+                <option value="text">文本模型</option>
+                <option value="multimodal">多模态(识图)</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+            <button class="btn btn-primary" @click="saveLlmProfile">{{ llmEditingId ? '保存修改' : '添加模型' }}</button>
+            <button v-if="llmEditingId" class="btn btn-secondary" @click="cancelEditLlmProfile">取消</button>
+            <button class="btn btn-secondary" @click="testLlmProfile">测试连接</button>
+            <span v-if="llmStatus" class="text-muted" :style="{ color: llmStatus.startsWith('✅') ? '#22c55e' : llmStatus.startsWith('⏳') ? '#f59e0b' : '#ef4444' }">{{ llmStatus }}</span>
           </div>
         </div>
       </div>
@@ -236,20 +287,13 @@
     <div v-if="showHelp" class="modal-overlay" @click.self="showHelp = false">
       <div class="modal">
         <div class="modal-header">
-          <h3>🤖 Agent 安装帮助</h3>
+          <h3>🤖 AI 助理说明</h3>
         </div>
         <div class="modal-body">
           <div class="help-section">
-            <h4>🧠 pi agent</h4>
-            <p>AI 代码编排 agent，负责工具调用和任务编排。</p>
-            <div class="help-code">npm install @earendil-works/pi-coding-agent</div>
-            <p class="text-muted" style="margin-top:8px;">已内置于项目依赖中。需要配置 API Key 才能使用。</p>
-          </div>
-          <div class="help-section">
-            <h4>🔧 opencode</h4>
-            <p>通用 AI agent SDK，适合通用对话任务。</p>
-            <div class="help-code">npm install @opencode-ai/sdk</div>
-            <p class="text-muted" style="margin-top:8px;">已内置于项目依赖中。使用 opencode 账号登录后即可使用。</p>
+            <h4>🧠 统一助理 (LangChain)</h4>
+            <p>基于 LangChain 的本地知识库助理，支持数据集查询、笔记库语义检索、项目文件读写与命令执行。</p>
+            <p class="text-muted" style="margin-top:8px;">配置下方「对话模型」即可使用，支持 DeepSeek（OpenAI 兼容）或本地 Ollama。</p>
           </div>
         </div>
         <div class="modal-footer">
@@ -266,7 +310,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 const API = window.electronAPI;
 
 const projects = ref<any[]>([]);
-const agentStatus = ref({ pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null }, opencode: { installed: false, version: null, providers: [], totalModels: 0 }, claude: { installed: false, version: null, apiKeyConfigured: false, apiKeyHint: null } });
+const agentStatus = ref({ pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null } });
 const showHelp = ref(false);
 
 const webhookUrl = ref('');
@@ -294,6 +338,11 @@ const embeddingApiKey = ref('');
 const embeddingStatus = ref('');
 const httpPort = ref('15173');
 const httpPortStatus = ref('');
+// LLM (对话模型) 多模型管理
+const llmProfiles = ref<any[]>([]);
+const llmEditingId = ref<number | null>(null);
+const llmForm = ref({ name: '', provider: 'deepseek', apiKey: '', hasApiKey: false, baseUrl: '', model: '', timeout: 600, modelType: 'text' });
+const llmStatus = ref('');
 
 
 async function loadProjects() {
@@ -341,7 +390,7 @@ async function checkAgentStatus() {
   try {
     const s = await API.agent.status();
     agentStatus.value = s;
-  } catch { agentStatus.value = { pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null }, opencode: { installed: false, version: null, providers: [], totalModels: 0 }, claude: { installed: false, version: null, apiKeyConfigured: false, apiKeyHint: null } }; }
+  } catch { agentStatus.value = { pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null } }; }
 }
 
 async function saveWebhook() {
@@ -411,6 +460,105 @@ async function loadConfig() {
     embeddingApiKey.value = cfg.embeddingApiKey || '';
     httpPort.value = cfg.httpPort || '15173';
   } catch { console.warn('加载配置失败'); }
+}
+
+async function loadLlmProfiles() {
+  try {
+    llmProfiles.value = await API.llmProfiles.list();
+  } catch { llmProfiles.value = []; }
+}
+
+function resetLlmForm() {
+  llmEditingId.value = null;
+  llmForm.value = { name: '', provider: 'deepseek', apiKey: '', hasApiKey: false, baseUrl: '', model: '', timeout: 600, modelType: 'text' };
+  llmStatus.value = '';
+}
+
+function editLlmProfile(p: any) {
+  llmEditingId.value = p.id;
+  llmForm.value = {
+    name: p.name || '',
+    provider: p.provider || 'deepseek',
+    apiKey: '',
+    hasApiKey: !!p.hasApiKey,
+    baseUrl: p.baseUrl || '',
+    model: p.model || '',
+    timeout: p.timeout || 600,
+    modelType: p.modelType || 'text',
+  };
+  llmStatus.value = '';
+}
+
+function cancelEditLlmProfile() {
+  resetLlmForm();
+}
+
+async function saveLlmProfile() {
+  if (!llmForm.value.name.trim()) { llmStatus.value = '❌ 请输入模型名称'; return; }
+  const payload: any = {
+    name: llmForm.value.name.trim(),
+    provider: llmForm.value.provider,
+    model: llmForm.value.model.trim(),
+    baseUrl: llmForm.value.baseUrl.trim(),
+    timeout: llmForm.value.timeout || 600,
+    modelType: llmForm.value.modelType,
+  };
+  if (llmForm.value.apiKey.trim()) payload.apiKey = llmForm.value.apiKey.trim();
+  try {
+    if (llmEditingId.value) {
+      await API.llmProfiles.update(llmEditingId.value, payload);
+    } else {
+      await API.llmProfiles.add(payload);
+    }
+    llmStatus.value = '✅ 已保存';
+    resetLlmForm();
+    await loadLlmProfiles();
+    await checkAgentStatus();
+    setTimeout(() => llmStatus.value = '', 3000);
+  } catch (e: any) {
+    llmStatus.value = '❌ ' + (e.message || '保存失败');
+  }
+}
+
+async function setDefaultLlmProfile(p: any) {
+  try {
+    await API.llmProfiles.setDefault(p.id);
+    await loadLlmProfiles();
+  } catch (e: any) {
+    llmStatus.value = '❌ ' + (e.message || '设置失败');
+  }
+}
+
+async function deleteLlmProfile(p: any) {
+  if (!confirm(`确定删除模型「${p.name}」？`)) return;
+  try {
+    await API.llmProfiles.remove(p.id);
+    if (llmEditingId.value === p.id) resetLlmForm();
+    await loadLlmProfiles();
+    await checkAgentStatus();
+  } catch (e: any) {
+    llmStatus.value = '❌ ' + (e.message || '删除失败');
+  }
+}
+
+async function testLlmProfile() {
+  const profile = llmEditingId.value
+    ? { profileRef: llmEditingId.value, provider: llmForm.value.provider, model: llmForm.value.model, baseUrl: llmForm.value.baseUrl, apiKey: llmForm.value.apiKey }
+    : { provider: llmForm.value.provider, model: llmForm.value.model, baseUrl: llmForm.value.baseUrl, apiKey: llmForm.value.apiKey };
+  if (profile.provider !== 'ollama' && !profile.apiKey && !profile.profileRef) {
+    llmStatus.value = '❌ 非 Ollama 提供商需要填写 API Key';
+    return;
+  }
+  llmStatus.value = '⏳ 正在测试连接...';
+  try {
+    const result = await API.llmProfiles.test(profile);
+    llmStatus.value = result.ok ? (result.message + (result.response ? ` → "${result.response}"` : '')) : result.message;
+  } catch (e) {
+    llmStatus.value = '❌ 测试异常: ' + (e.message || e);
+  }
+  setTimeout(() => {
+    if (llmStatus.value.startsWith('⏳')) llmStatus.value = '';
+  }, 15000);
 }
 
 async function saveReportSettings() {
@@ -490,6 +638,7 @@ async function saveHttpPort() {
 onMounted(async () => {
   await loadConfig();
   checkAgentStatus();
+  await loadLlmProfiles();
   await loadProjects();
   await loadTasks();
   await loadSchedulerStatus();

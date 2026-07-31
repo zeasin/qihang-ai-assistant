@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 
-const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.opencode', '__pycache__', '.cache']);
+const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '__pycache__', '.cache']);
 let _pendingProjects = [];
 
 function walkDir(dir, files, ignoreDirs = [], ignoreFiles = []) {

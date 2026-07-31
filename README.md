@@ -25,13 +25,13 @@
 │  │  ├─ database.js    — SQLite 数据层                │  │
 │  │  ├─ scheduler.js   — 定时任务调度器               │  │
 │  │  ├─ indexer.js     — 文件索引与向量嵌入           │  │
-│  │  ├─ orchestrator.js— AI 编排引擎                  │  │
+│  │  ├─ orchestrator.js— AI 编排引擎（LangChain）       │  │
+│  │  ├─ agent.js      — 智能体执行器（工具循环/流式）    │  │
+│  │  ├─ llm.js        — 模型工厂（DeepSeek/Ollama）      │  │
+│  │  ├─ tools.js      — 工具定义（数据集/知识库/文件）   │  │
 │  │  ├─ rag.js         — 语义检索                     │  │
 │  │  ├─ feishu.js      — 飞书集成（Bot + Webhook）    │  │
 │  │  ├─ httpserver.js  — HTTP 远程管理服务             │  │
-│  │  ├─ pi-agent.js    — PI Coding Agent 集成         │  │
-│  │  ├─ opencode.js    — opencode SDK 集成             │  │
-│  │  ├─ claude-code.js — Claude Agent SDK 集成         │  │
 │  │  └─ feishu-router.js—飞书消息路由                  │  │
 │  └────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────┘
@@ -61,14 +61,14 @@ npm run electron:dev
 │       ├── database.js        # SQLite 数据库操作
 │       ├── scheduler.js       # 定时任务调度器
 │       ├── indexer.js         # 文件索引与向量嵌入
-│       ├── orchestrator.js    # AI 编排引擎
+│       ├── orchestrator.js    # AI 编排引擎（LangChain）
+│       ├── agent.js           # 智能体执行器（工具循环/流式输出）
+│       ├── llm.js             # 模型工厂（DeepSeek/Ollama）
+│       ├── tools.js           # 工具定义（数据集/知识库/文件操作）
 │       ├── rag.js             # RAG 语义检索
 │       ├── feishu.js          # 飞书集成
 │       ├── feishu-router.js   # 飞书消息路由
 │       ├── httpserver.js      # HTTP 远程管理
-│       ├── pi-agent.js        # PI Agent 集成
-│       ├── opencode.js        # opencode SDK 集成
-│       ├── claude-code.js     # Claude Agent 集成
 │       ├── index-worker.js    # 索引子进程
 │       └── logger.js          # 日志工具
 ├── src/                       # 渲染进程（Vue 3 SPA）
@@ -140,7 +140,7 @@ npm run electron:build
 - **状态管理**: Pinia
 - **路由**: Vue Router
 - **数据库**: SQLite（better-sqlite3）
-- **AI Agent**: pi-coding-agent / opencode SDK / claude-agent-sdk
+- **AI 引擎**: LangChain.js（@langchain/openai + @langchain/ollama）
 - **语义检索**: Ollama / OpenAI 兼容 API
 - **飞书集成**: Webhook + WebSocket Bot
 - **Markdown 渲染**: marked + highlight.js + KaTeX

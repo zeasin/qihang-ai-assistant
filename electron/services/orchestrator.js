@@ -1,614 +1,215 @@
-const path = require('path');
-const fs = require('fs');
 const db = require('./database');
-const rag = require('./rag');
 const logger = require('./logger');
+const { runAgent, historyToMessages, buildUserContent } = require('./agent');
+const llm = require('./llm');
+const { buildCodingToolDefs, buildReportToolDefs } = require('./tools');
 
-let piSdk = null;
-let activeSession = null;
-
-async function ensurePi() {
-  if (!piSdk) {
-    logger.info('[Orchestrator] Loading pi agent SDK...');
-    piSdk = await import('@earendil-works/pi-coding-agent');
-    logger.info('[Orchestrator] pi agent SDK loaded');
-  }
-  return piSdk;
-}
-
-let TypeBox = null;
-async function ensureTypeBox() {
-  if (!TypeBox) TypeBox = await import('typebox');
-  return TypeBox;
-}
-
-async function createTools(dbRef) {
-  const sdk = piSdk;
-  await ensureTypeBox();
-  const { Type } = TypeBox;
-
-  const queryDataset = sdk.defineTool({
-    name: 'query_dataset',
-    label: 'Query Dataset',
-    description: '查询本地数据集中的记录。数据集用于存储结构化信息，如代办事项、客户信息、项目、Bug等。',
-    parameters: Type.Object({
-      datasetName: Type.String({ description: '数据集名称，如 todos, customers, projects, bugs' }),
-      conditions: Type.Optional(Type.String({ description: '查询条件关键字' })),
-      limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
-    }),
-    execute: async (callId, params) => {
-      logger.info(`[Orchestrator] Tool: query_dataset(${params.datasetName})`);
-      const all = dbRef.ds.list();
-      const ds = all.find(d => d.name === params.datasetName || d.id === params.datasetName);
-      if (!ds) {
-        const names = all.map(d => d.name).join(', ');
-        return { content: [{ type: 'text', text: `数据集 "${params.datasetName}" 不存在。可用数据集: ${names || '无'}` }], details: {} };
-      }
-      const rows = dbRef.ds.query(ds.id, params.conditions || '');
-      const limited = rows.slice(0, params.limit || 20);
-      logger.info(`[Orchestrator] Tool result: ${limited.length} records`);
-      return { content: [{ type: 'text', text: JSON.stringify(limited, null, 2) }], details: { count: rows.length } };
-    },
-  });
-
-  const searchKb = sdk.defineTool({
-    name: 'search_knowledge_base',
-    label: 'Search Knowledge Base',
-    description: '在本地知识库中搜索相关笔记/文档。',
-    parameters: Type.Object({
-      query: Type.String({ description: '搜索关键词或问题' }),
-      kbName: Type.Optional(Type.String({ description: '知识库名称（可选）' })),
-    }),
-    execute: async (callId, params) => {
-      logger.info(`[Orchestrator] Tool: search_knowledge_base("${params.query}")`);
-      const noteProjects = dbRef.project.list('note');
-      let targetProjects = noteProjects;
-      if (params.kbName) targetProjects = noteProjects.filter(p => p.name === params.kbName || p.name.includes(params.kbName));
-      if (!targetProjects.length) {
-        const names = noteProjects.map(p => p.name).join(', ');
-        return { content: [{ type: 'text', text: `知识库未找到。可用: ${names || '无'}` }], details: {} };
-      }
-      let results = [];
-      for (const p of targetProjects) {
-        try {
-          const docs = await rag.hybridSearch(p.id, params.query, 5, db);
-          results.push(...docs.map(d => ({ ...d, kbName: p.name })));
-        } catch (e) {
-          logger.warn(`[Orchestrator] KB search error for ${p.name}: ${e.message}`);
-        }
-      }
-      results.sort((a, b) => b.score - a.score);
-      const top = results.slice(0, 5);
-      if (!top.length) return { content: [{ type: 'text', text: '知识库中未找到相关内容' }], details: {} };
-      const text = top.map(d => `【${d.kbName || '知识库'}】\n${d.text}`).join('\n\n---\n\n');
-      return { content: [{ type: 'text', text }], details: { count: top.length } };
-    },
-  });
-
-  const listDatasets = sdk.defineTool({
-    name: 'list_datasets',
-    label: 'List Datasets',
-    description: '列出所有可用的数据集及其结构。',
-    parameters: Type.Object({}),
-    execute: async () => {
-      const all = dbRef.ds.list();
-      return { content: [{ type: 'text', text: all.length ? all.map(d => `- ${d.name} (${d.id}): ${d.schema_json}`).join('\n') : '暂无数据集' }], details: {} };
-    },
-  });
-
-  const getScheduled = sdk.defineTool({
-    name: 'list_scheduled_tasks',
-    label: 'List Scheduled Tasks',
-    description: '列出所有已配置的定时任务。',
-    parameters: Type.Object({}),
-    execute: async () => {
-      const tasks = dbRef.task.list();
-      return { content: [{ type: 'text', text: tasks.length ? tasks.map(t => `- ${t.name} (${t.task_type}) ${t.enabled ? '✓启用' : '✗停用'} cron: ${t.cron_expr || '无'}`).join('\n') : '暂无定时任务' }], details: {} };
-    },
-  });
-
-  const readProjectFile = sdk.defineTool({
-    name: 'read_project_file',
-    label: 'Read Project File',
-    description: '读取项目目录下的文件内容。',
-    parameters: Type.Object({
-      filePath: Type.String({ description: '相对于项目根目录的文件路径，或绝对路径' }),
-    }),
-    execute: async (callId, params) => {
-      const projectDir = dbRef.configGet('projectDir') || process.cwd();
-      const fullPath = path.isAbsolute(params.filePath) ? params.filePath : path.join(projectDir, params.filePath);
-      if (!fullPath.startsWith(projectDir) && !fullPath.startsWith(require('os').homedir())) {
-        return { content: [{ type: 'text', text: '无权访问该路径' }], details: {} };
-      }
-      try {
-        const content = fs.readFileSync(fullPath, 'utf-8');
-        return { content: [{ type: 'text', text: content.length > 10000 ? content.slice(0, 10000) + '\n... (截断)' : content }], details: {} };
-      } catch (e) {
-        return { content: [{ type: 'text', text: `读取失败: ${e.message}` }], details: {} };
-      }
-    },
-  });
-
-  return [queryDataset, searchKb, listDatasets, getScheduled, readProjectFile];
-}
-
-const SYSTEM_PROMPT = `你是一位智能办公助理，可以帮助用户处理各种任务。
+const SYSTEM_PROMPT = `你是一位个人本地知识库助理，将「数据集（数据中心）」与「本地笔记库」融为一体，帮助用户查询、分析和整理信息。
 
 ## 你的能力
 
-你有两类工具可以使用：
+你有一个统一的工具集，可跨两类数据工作：
 
-### 1. 内置工具 (built-in)
-- read, edit, write, bash, grep, find, ls — 用于阅读和操作文件/代码
-
-### 2. 自定义工具 (local data)
-- query_dataset — 查询本地数据集（结构化数据，如：代办事项、客户、项目、Bug等）
-- search_knowledge_base — 搜索知识库（非结构化笔记/文档）
+### 1. 数据查询
+- query_dataset — 查询本地数据集（结构化数据，如：待办事项、客户、项目、Bug 等）
+- search_knowledge_base — 语义搜索知识库（非结构化笔记/文档）
 - list_datasets — 查看可用的数据集
 - list_scheduled_tasks — 查看定时任务
-- read_project_file — 读取项目文件
+
+### 2. 文件/代码操作（仅在关联了项目目录时可用）
+- read_project_file, list_directory, grep, find — 阅读和搜索文件/代码
+- write_file, edit_file, bash — 修改文件和执行命令
 
 ## 工作流程
 
-当用户提问时，请遵循以下步骤：
+1. **理解意图**：判断问题涉及结构化数据、笔记文档、还是文件操作
+2. **查询数据集**：涉及待办、客户、项目等结构化数据时，先用 query_dataset 查询
+3. **搜索知识库**：涉及笔记、文档等非结构化信息时，用 search_knowledge_base 搜索
+4. **综合分析**：可将两类数据交叉比对（例如：查某项目的待办 + 查相关笔记），给出完整答案
+5. **如需操作文件**：使用文件/代码工具
 
-1. **理解意图**：判断用户需要查询什么类型的数据
-2. **查询数据集**：如果问题涉及代办、客户、项目等结构化数据，先用 query_dataset 查询
-3. **搜索知识库**：如果问题涉及笔记、文档等非结构化信息，用 search_knowledge_base 搜索
-4. **综合分析**：结合所有获取到的信息，给出完整答案
-5. **如需操作文件**：使用内置的 read/edit/write/bash 工具
+回答保持简洁、准确；数据来源不确定时说明推测而非编造。`;
 
-保持回答简洁、准确。`;
-
-async function createSession(projectDir, sessionDir) {
-  const sdk = await ensurePi();
-  logger.info('[Orchestrator] createSession: cwd=%s, sessionDir=%s', projectDir || process.cwd(), sessionDir || '(in-memory)');
-
-  logger.info('[Orchestrator] Creating tools...');
-  const tools = await createTools(db);
-  logger.info('[Orchestrator] Custom tools: %d', tools.length);
-
-  const builtinTools = ['read', 'bash', 'grep', 'find', 'ls'];
-  logger.info('[Orchestrator] Built-in tools: %s', builtinTools.join(', '));
-
-  const cwd = projectDir || process.cwd();
-  const sessionOptions = {
-    cwd,
-    tools: builtinTools,
-    customTools: tools,
-    sessionManager: sessionDir
-      ? sdk.SessionManager.continueRecent(cwd, sessionDir)
-      : sdk.SessionManager.inMemory(),
-  };
-
-  try {
-    logger.info('[Orchestrator] Calling createAgentSession...');
-    const result = await sdk.createAgentSession(sessionOptions);
-    logger.info('[Orchestrator] Session created: id=%s', result.session?.sessionId || 'unknown');
-    if (result.modelFallbackMessage) {
-      logger.warn('[Orchestrator] Model fallback: %s', result.modelFallbackMessage);
+/**
+ * 创建一个对话会话。
+ * @param {string} projectDir - 项目根目录（代码项目时传入）
+ * @param {string} [sessionId] - 数据库会话 ID，用于加载历史消息（多轮记忆）
+ */
+function createSession(projectDir, sessionId) {
+  let history = [];
+  if (sessionId) {
+    try {
+      history = db.chat.messages(sessionId);
+      logger.info('[Orchestrator] createSession: projectDir=%s, sessionId=%s, history=%d msgs', projectDir || '(none)', sessionId, history.length);
+    } catch (e) {
+      logger.warn('[Orchestrator] failed to load history for %s: %s', sessionId, e.message);
     }
-    activeSession = result.session;
-    logger.info('[Orchestrator] Session ready');
-    return result.session;
-  } catch (e) {
-    logger.error('[Orchestrator] Session creation FAILED: %s', e.message);
-    logger.error('[Orchestrator] Session creation stack: %s', e.stack);
-    throw e;
   }
+  return { projectDir: projectDir || '', sessionId: sessionId || null, messages: history };
 }
 
-async function chat(session, text, onDelta, onTool, onDone, onError, images) {
-  logger.info(`[Orchestrator] chat() called, text length: ${text.length}${images?.length ? `, images: ${images.length}` : ''}`);
+/**
+ * 执行一次对话。
+ * @param {Object} session - createSession 的返回值
+ * @param {string} text - 用户输入
+ * @param {Function} onDelta - (delta: string) => void
+ * @param {Function} onTool - (event: object) => void
+ * @param {Function} onDone - () => void
+ * @param {Function} onError - (err: string) => void
+ * @param {Array} [images] - [{ data, mimeType }]
+ * @param {number|string} [modelName] - 模型档案 id 或名称（多模型选择）
+ */
+async function chat(session, text, onDelta, onTool, onDone, onError, images, modelName) {
+  logger.info('[Orchestrator] chat() text length=%d, projectDir=%s, model=%s', text.length, session.projectDir || '(none)', modelName || 'default');
 
-  let hasTextDelta = false;
-  let completed = false;
+  let history = session.messages || [];
+  const last = history[history.length - 1];
+  // 最后一条用户消息若与本次输入相同，或本次输入是其增强版(如 RAG 注入提示词)，视为已持久化
+  const alreadyPersisted = last && last.role === 'user'
+    && (last.content === text || (text.includes(last.content) && text.length > last.content.length));
 
-  session.subscribe((event) => {
-    switch (event.type) {
-      case 'message_update': {
-        const msg = event.assistantMessageEvent;
-        if (!msg) { logger.debug('[Orchestrator] message_update without assistantMessageEvent'); break; }
-        if (msg.type === 'text_delta') {
-          const delta = msg.delta;
-          if (delta) {
-            hasTextDelta = true;
-            logger.info(`[Orchestrator] text_delta: ${delta.substring(0, 120)}`);
-            onDelta?.(delta);
-          }
-        } else if (msg.type === 'thinking_delta') {
-          logger.info(`[Orchestrator] thinking_delta: ${(msg.delta || '').substring(0, 120)}`);
-          onTool?.({ type: 'thinking', text: msg.delta });
-        } else if (msg.type === 'text' || msg.type === 'content') {
-          const content = msg.content || msg.text || '';
-          if (content) {
-            hasTextDelta = true;
-            logger.info(`[Orchestrator] text content: ${content.substring(0, 120)}`);
-            onDelta?.(content);
-          }
-        } else {
-          logger.info(`[Orchestrator] message_update type=${msg.type}`);
-        }
-        break;
-      }
-      case 'tool_execution_start':
-        logger.info(`[Orchestrator] tool_start: ${event.toolName} args=${JSON.stringify(event.args || {}).substring(0, 200)}`);
-        onTool?.({ type: 'start', name: event.toolName, args: event.args });
-        break;
-      case 'tool_execution_end':
-        logger.info(`[Orchestrator] tool_end: ${event.toolName} error=${event.isError} result=${JSON.stringify(event.result || {}).substring(0, 200)}`);
-        onTool?.({ type: 'end', name: event.toolName, error: event.isError });
-        break;
-      case 'agent_start':
-        logger.info('[Orchestrator] agent_start — pi agent 开始处理');
-        break;
-      case 'agent_end': {
-        logger.info('[Orchestrator] agent_end — pi agent 处理完成');
-        if (completed) break;
-        completed = true;
+  const { SystemMessage, HumanMessage } = await import('@langchain/core/messages');
+  const msgs = await historyToMessages(history);
+  if (alreadyPersisted) {
+    msgs[msgs.length - 1] = new HumanMessage({ content: buildUserContent(text, images) });
+  } else {
+    msgs.push(new HumanMessage({ content: buildUserContent(text, images) }));
+  }
 
-        if (hasTextDelta) {
-          onDone?.();
-        } else {
-          // 没有收到 text_delta，尝试从 agent_end 的 messages 中提取内容
-          let fallbackText = '';
-          try {
-            if (event.messages && Array.isArray(event.messages)) {
-              for (const m of event.messages) {
-                if (m.role === 'assistant' && m.content) {
-                  const content = typeof m.content === 'string' ? m.content :
-                    Array.isArray(m.content) ? m.content.map(c => c.text || c.content || '').join('') : '';
-                  if (content) {
-                    fallbackText = content;
-                    break;
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            logger.warn('[Orchestrator] Failed to extract fallback text from agent_end messages: %s', e.message);
-          }
+  const toolDefs = await buildCodingToolDefs(session.projectDir);
 
-          if (fallbackText) {
-            logger.info('[Orchestrator] Using fallback text from agent_end messages (%d chars)', fallbackText.length);
-            hasTextDelta = true;
-            onDelta?.(fallbackText);
-            onDone?.();
-          } else {
-            logger.warn('[Orchestrator] agent_end without any text content — reporting error');
-            onError?.('模型未返回有效回复，请检查模型配置或重试。可能原因：模型连接失败、API Key 未配置、或模型未正确响应。');
-          }
-        }
-        break;
-      }
-      case 'turn_start':
-        logger.info('[Orchestrator] turn_start — 新的一轮 LLM 调用');
-        break;
-      case 'turn_end': {
-        logger.info('[Orchestrator] turn_end — 本轮 LLM 调用结束');
-        if (!hasTextDelta && event.message) {
-          try {
-            const msg = event.message;
-            const content = typeof msg.content === 'string' ? msg.content :
-              Array.isArray(msg.content) ? msg.content.map(c => c.text || c.content || '').join('') : '';
-            if (content) {
-              hasTextDelta = true;
-              logger.info('[Orchestrator] Extracted text from turn_end message (%d chars)', content.length);
-              onDelta?.(content);
-            }
-          } catch (e) {
-            logger.warn('[Orchestrator] Failed to extract text from turn_end: %s', e.message);
-          }
-        }
-        break;
-      }
-      case 'message_start':
-        logger.info('[Orchestrator] message_start — 新消息开始');
-        break;
-      case 'message_end':
-        logger.info('[Orchestrator] message_end — 消息完成');
-        break;
-      default:
-        logger.info(`[Orchestrator] event: ${event.type} data=${JSON.stringify(event).substring(0, 300)}`);
-    }
-  });
-
-  const startTime = Date.now();
+  let reply = '';
   try {
-    logger.info('[Orchestrator] Calling session.prompt()...');
-    const promptOptions = images?.length ? { images } : undefined;
-    logger.info('[Orchestrator] prompt input length: %d, images: %d', text.length, images?.length || 0);
-
-    await session.prompt(text, promptOptions);
-    const elapsed = Date.now() - startTime;
-    logger.info('[Orchestrator] session.prompt() completed in %dms (hasTextDelta=%s)', elapsed, hasTextDelta);
-  } catch (e) {
-    const elapsed = Date.now() - startTime;
-    logger.error('[Orchestrator] session.prompt() FAILED after %dms: %s', elapsed, e.message);
-    logger.error('[Orchestrator] Error stack: %s', e.stack);
-    if (!completed) {
-      completed = true;
-      onError?.(e.message);
+    const { text: result, usedTools } = await runAgent({
+      messages: [new SystemMessage(SYSTEM_PROMPT), ...msgs],
+      toolDefs,
+      onDelta,
+      onTool,
+      onError,
+      maxIterations: 12,
+      modelName,
+    });
+    reply = result;
+    if (!reply) {
+      logger.warn('[Orchestrator] empty reply (usedTools=%s)', usedTools);
+      onError?.('模型未返回有效回复，请检查模型配置或重试。可能原因：模型连接失败、API Key 未配置、或模型未正确响应。');
+      return;
     }
-  } finally {
-    setTimeout(() => {
-      if (activeSession === session) {
-        session.dispose();
-        activeSession = null;
-        logger.info('[Orchestrator] Session disposed');
-      }
-    }, 1000);
+    // 追加到会话内存（持久化由调用方负责）
+    session.messages = session.messages || [];
+    if (!alreadyPersisted) session.messages.push({ role: 'user', content: text, images: images || null });
+    session.messages.push({ role: 'assistant', content: reply, images: null });
+    onDone?.();
+  } catch (e) {
+    logger.error('[Orchestrator] chat error: %s', e.message);
+    onError?.(e.message);
   }
 }
 
 async function checkStatus() {
   try {
-    await ensurePi();
+    const cfg = llm.resolveConfig();
+    const profile = llm.resolveProfile(null);
+    const ready = cfg.provider === 'ollama' || !!cfg.apiKey;
     return {
       installed: true,
-      version: '0.82.0',
-      modelsAvailable: -1,
-      firstModel: 'default',
+      version: 'langchain',
+      modelsAvailable: ready ? 1 : 0,
+      firstModel: profile ? `${profile.name} · ${cfg.model}` : cfg.model,
+      model: cfg.model,
+      provider: cfg.provider,
+      profileName: profile ? profile.name : null,
+      error: ready ? null : '未配置 API Key',
     };
   } catch (e) {
     return { installed: false, version: null, modelsAvailable: 0, firstModel: null, error: e.message };
   }
 }
 
-// ========== Daily Report Generation (AI-driven) ==========
-
-function getChinaDate(offsetDays = 0) {
-  const d = new Date();
-  const china = new Date(d.getTime() + 8 * 3600 * 1000 + offsetDays * 86400 * 1000);
-  return china.toISOString().slice(0, 10);
+/**
+ * 兼容旧接口：返回工具定义（新版内部使用）
+ * @param {Object} dbRef - 数据库模块
+ */
+async function createTools(dbRef) {
+  return buildCodingToolDefs(null);
 }
 
-async function createReportTools(kbId) {
-  const sdk = await ensurePi();
-  await ensureTypeBox();
-  const { Type } = TypeBox;
+// ========== 日报生成 (AI-driven) ==========
 
-  const today = getChinaDate();
+const REPORT_SYSTEM_PROMPT = `你是一位日报生成助手。请使用提供的工具查询今日数据，然后生成一份完整的综合日报。
 
-  return [
-    sdk.defineTool({
-      name: 'query_todos',
-      label: 'Query Todos',
-      description: '查询待办事项（plan_todos），可按状态( done / in_progress / pending )、优先级、日期范围过滤。不传参数则返回最近的待办。',
-      parameters: Type.Object({
-        status: Type.Optional(Type.String({ description: '过滤状态: done / in_progress / pending' })),
-        priority: Type.Optional(Type.String({ description: '过滤优先级: high / mid / low' })),
-        date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
-        date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
-        limit: Type.Optional(Type.Number({ description: '返回条数上限，默认30' })),
-      }),
-      execute: async (callId, params) => {
-        let sql = 'SELECT * FROM plan_todos WHERE 1=1';
-        const sqlParams = [];
-        if (params.status) { sql += ' AND status = ?'; sqlParams.push(params.status); }
-        if (params.priority) { sql += ' AND priority = ?'; sqlParams.push(params.priority); }
-        if (params.date_from) { sql += ' AND (created_at >= ? OR updated_at >= ?)'; sqlParams.push(params.date_from, params.date_from); }
-        if (params.date_to) { sql += ' AND (created_at <= ? OR updated_at <= ?)'; sqlParams.push(params.date_to, params.date_to); }
-        sql += ' ORDER BY created_at DESC LIMIT ?';
-        sqlParams.push(params.limit || 30);
-        const rows = db.q(sql, ...sqlParams);
-        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无待办数据' }], details: { count: rows.length } };
-      },
-    }),
+## 可用工具
+- query_todos — 查询待办事项（plan_todos，按状态、优先级、日期）
+- query_messages — 查询今日对话记录
+- query_documents — 查询今日更新的文档/笔记（可指定 project_id 过滤）
+- query_data_records — 查询数据中心记录
+- query_reminders — 查询已启用的提醒
+- get_today_info — 获取当前日期、项目信息
 
-    sdk.defineTool({
-      name: 'query_messages',
-      label: 'Query Messages',
-      description: '查询聊天/对话记录（prj_messages）。可过滤日期范围、角色( user / assistant )。',
-      parameters: Type.Object({
-        date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
-        date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
-        role: Type.Optional(Type.String({ description: '角色: user / assistant' })),
-        limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
-      }),
-      execute: async (callId, params) => {
-        let sql = "SELECT id, session_id, role, substr(content, 1, 200) as content, created_at FROM prj_messages WHERE 1=1";
-        const sqlParams = [];
-        if (params.role) { sql += ' AND role = ?'; sqlParams.push(params.role); }
-        if (params.date_from) { sql += ' AND created_at >= ?'; sqlParams.push(params.date_from); }
-        if (params.date_to) { sql += ' AND created_at <= ?'; sqlParams.push(params.date_to); }
-        sql += ' ORDER BY created_at DESC LIMIT ?';
-        sqlParams.push(params.limit || 20);
-        const rows = db.q(sql, ...sqlParams);
-        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无对话数据' }], details: { count: rows.length } };
-      },
-    }),
+## 要求
+1. 先调用 get_today_info 了解当前日期和项目
+2. 调用各查询工具获取今日数据
+3. 按用户要求的格式生成日报
+4. 数据为空的部分略过，不要编造
+5. 评分要合理，基于实际数据`;
 
-    sdk.defineTool({
-      name: 'query_documents',
-      label: 'Query Documents',
-      description: '查询知识库中文档更新记录（kb_documents）。可过滤知识库ID、日期范围。',
-      parameters: Type.Object({
-        project_id: Type.Optional(Type.Number({ description: '项目/知识库ID' })),
-        date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
-        date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
-        limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
-      }),
-      execute: async (callId, params) => {
-        let sql = "SELECT id, project_id, path, substr(content, 1, 300) as content, file_mtime FROM kb_documents WHERE 1=1";
-        const sqlParams = [];
-        if (params.project_id) { sql += ' AND project_id = ?'; sqlParams.push(params.project_id); }
-        if (params.date_from) { sql += ' AND file_mtime >= ?'; sqlParams.push(params.date_from); }
-        if (params.date_to) { sql += ' AND file_mtime <= ?'; sqlParams.push(params.date_to); }
-        sql += " AND path NOT LIKE '%node_modules%' AND path NOT LIKE '%.git%' ORDER BY file_mtime DESC LIMIT ?";
-        sqlParams.push(params.limit || 20);
-        const rows = db.q(sql, ...sqlParams);
-        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无文档更新' }], details: { count: rows.length } };
-      },
-    }),
-
-    sdk.defineTool({
-      name: 'query_data_records',
-      label: 'Query Data Records',
-      description: '查询数据中心记录（data_center_records）。可过滤数据集名称、日期范围。',
-      parameters: Type.Object({
-        dataset_name: Type.Optional(Type.String({ description: '数据集名称关键词（模糊匹配）' })),
-        date_from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
-        date_to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
-        limit: Type.Optional(Type.Number({ description: '返回条数上限，默认20' })),
-      }),
-      execute: async (callId, params) => {
-        let sql = "SELECT r.*, d.name as dataset_name FROM data_center_records r LEFT JOIN data_center_datasets d ON r.dataset_id = d.dataset_id WHERE 1=1";
-        const sqlParams = [];
-        if (params.dataset_name) {
-          sql += ' AND (d.name LIKE ? OR r.dataset_id IN (SELECT dataset_id FROM data_center_datasets WHERE name LIKE ?))';
-          sqlParams.push('%' + params.dataset_name + '%', '%' + params.dataset_name + '%');
-        }
-        if (params.date_from) { sql += ' AND r.created_at >= ?'; sqlParams.push(params.date_from); }
-        if (params.date_to) { sql += ' AND r.created_at <= ?'; sqlParams.push(params.date_to); }
-        sql += ' ORDER BY r.created_at DESC LIMIT ?';
-        sqlParams.push(params.limit || 20);
-        const rows = db.q(sql, ...sqlParams);
-        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无数据中心记录' }], details: { count: rows.length } };
-      },
-    }),
-
-    sdk.defineTool({
-      name: 'query_reminders',
-      label: 'Query Reminders',
-      description: '查询已启用的提醒事项（plan_reminders）。',
-      parameters: Type.Object({}),
-      execute: async () => {
-        const rows = db.q("SELECT * FROM plan_reminders WHERE enabled = 1 ORDER BY created_at DESC");
-        return { content: [{ type: 'text', text: rows.length ? JSON.stringify(rows, null, 2) : '暂无提醒' }], details: { count: rows.length } };
-      },
-    }),
-
-    sdk.defineTool({
-      name: 'get_today_info',
-      label: 'Get Today Info',
-          description: '获取当前日期信息（今天的中国日期、项目/知识库名称等）。',
-        parameters: Type.Object({}),
-        execute: async () => {
-          const projectId = kbId || null;
-          const projectName = projectId ? (db.qOne("SELECT name FROM prj_projects WHERE id = ?", projectId) || {}).name || '笔记库' : '笔记库';
-          const info = { today: getChinaDate(), yesterday: getChinaDate(-1), weekAgo: getChinaDate(-7), projectId, projectName };
-          return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }], details: {} };
-        },
-    }),
-  ];
-}
-
+/**
+ * 生成日报（供定时任务调用）
+ * @param {string} promptText - 完整提示词（系统要求 + 用户格式要求）
+ * @param {number} kbId - 知识库/项目 ID
+ * @returns {Promise<string>} 日报文本
+ */
 async function generateDailyReport(promptText, kbId) {
-  const sdk = await ensurePi();
-  logger.info('[Orchestrator] generateDailyReport: creating session with report tools');
-
-  const reportTools = await createReportTools(kbId);
-  const result = await sdk.createAgentSession({
-    cwd: process.cwd(),
-    tools: [],
-    sessionManager: sdk.SessionManager.inMemory(),
-  });
-  const session = result.session;
-  if (result.modelFallbackMessage) {
-    logger.warn('[Orchestrator] Report model fallback: %s', result.modelFallbackMessage);
+  logger.info('[Orchestrator] generateDailyReport: kbId=%s', kbId);
+  const toolDefs = await buildReportToolDefs(kbId);
+  const marker = '=== 用户格式要求 ===';
+  let systemPrompt = REPORT_SYSTEM_PROMPT;
+  let userPrompt = promptText;
+  const idx = promptText.indexOf(marker);
+  if (idx >= 0) {
+    userPrompt = promptText.slice(idx + marker.length).trim();
   }
-
-  // Manually register custom tools in the session's internal registry
-  const toolNames = [];
-  for (const tool of reportTools) {
-    tool.renderCall = tool.renderCall || (() => '');
-    tool.renderResult = tool.renderResult || (() => '');
-    tool.promptSnippet = tool.promptSnippet || tool.description || '';
-    tool.promptGuidelines = tool.promptGuidelines || '';
-    session._toolRegistry.set(tool.name, tool);
-    session._toolDefinitions[tool.name] = tool;
-    toolNames.push(tool.name);
-  }
-  session.setActiveToolsByName(toolNames);
-  logger.info(`[Orchestrator] Registered ${toolNames.length} report tools: ${toolNames.join(', ')}`);
-
-  return new Promise((resolve, reject) => {
-    let fullText = '';
-    let hasTools = false;
-    const startTime = Date.now();
-
-    session.subscribe((event) => {
-      switch (event.type) {
-        case 'message_update': {
-          const msg = event.assistantMessageEvent;
-          if (msg?.type === 'text_delta') {
-            fullText += msg.delta;
-          }
-          break;
-        }
-        case 'tool_execution_start':
-          hasTools = true;
-          logger.info(`[Orchestrator] Report tool: ${event.toolName}`);
-          break;
-        case 'tool_execution_end':
-          logger.info(`[Orchestrator] Report tool end: ${event.toolName}`);
-          break;
-      }
-    });
-
-    session.prompt(promptText)
-      .then(() => {
-        const elapsed = Date.now() - startTime;
-        logger.info(`[Orchestrator] Report generated in ${elapsed}ms, length: ${fullText.length}, usedTools: ${hasTools}`);
-        setTimeout(() => { try { session.dispose(); } catch {} }, 1000);
-        resolve(fullText);
-      })
-      .catch((err) => {
-        logger.error(`[Orchestrator] Report generation FAILED: ${err.message}`);
-        try { session.dispose(); } catch {}
-        reject(err);
-      });
+  const { SystemMessage, HumanMessage } = await import('@langchain/core/messages');
+  const { text } = await runAgent({
+    messages: [new SystemMessage(systemPrompt), new HumanMessage(userPrompt)],
+    toolDefs,
+    maxIterations: 15,
   });
+  logger.info('[Orchestrator] report generated, length=%d', text.length);
+  return text;
 }
 
+/**
+ * 项目分析（供洞察页面调用）
+ * @param {string} projectName
+ * @param {number} kbId
+ * @param {Array} files - [{ path, content }]
+ * @returns {Promise<string>}
+ */
 async function generateProjectAnalysis(projectName, kbId, files) {
-  const sdk = await ensurePi();
   logger.info('[Orchestrator] generateProjectAnalysis: project=%s', projectName);
-
-  const result = await sdk.createAgentSession({
-    cwd: process.cwd(),
-    tools: [],
-    sessionManager: sdk.SessionManager.inMemory(),
-  });
-  const session = result.session;
-
-  const fileList = files.map(f => `- ${f.path}\n\`\`\`\n${(f.content || '').slice(0, 2000)}\n\`\`\``).join('\n\n');
+  const fileList = (files || []).map(f => `- ${f.path}\n\`\`\`\n${(f.content || '').slice(0, 2000)}\n\`\`\``).join('\n\n');
   const promptText = `请对以下项目"${projectName}"进行详细分析，包括：
 1. 项目概述：该项目的主要内容和目的
 2. 技术/主题分析：涉及的技术栈、知识领域、核心概念
 3. 内容质量评估：文件数量、内容深度、完整性
 4. 改进建议：如何优化或扩展该项目
 
-项目文件列表（共 ${files.length} 个文件）：
+项目文件列表（共 ${(files || []).length} 个文件）：
 ${fileList}
 
 请用中文回答，使用 Markdown 格式。`;
 
-  return new Promise((resolve, reject) => {
-    let fullText = '';
-    const startTime = Date.now();
-
-    session.subscribe((event) => {
-      if (event.type === 'message_update') {
-        const msg = event.assistantMessageEvent;
-        if (msg?.type === 'text_delta') fullText += msg.delta;
-      }
-    });
-
-    session.prompt(promptText)
-      .then(() => {
-        const elapsed = Date.now() - startTime;
-        logger.info(`[Orchestrator] Project analysis generated in ${elapsed}ms, length: ${fullText.length}`);
-        setTimeout(() => { try { session.dispose(); } catch {} }, 1000);
-        resolve(fullText);
-      })
-      .catch((err) => {
-        logger.error(`[Orchestrator] Project analysis FAILED: ${err.message}`);
-        try { session.dispose(); } catch {}
-        reject(err);
-      });
+  const { SystemMessage, HumanMessage } = await import('@langchain/core/messages');
+  const { text } = await runAgent({
+    messages: [
+      new SystemMessage('你是一位项目分析专家，擅长从文件内容中总结项目全貌并给出改进建议。'),
+      new HumanMessage(promptText),
+    ],
+    toolDefs: [],
+    maxIterations: 1,
   });
+  return text;
 }
 
 module.exports = { createSession, chat, checkStatus, createTools, generateDailyReport, generateProjectAnalysis };

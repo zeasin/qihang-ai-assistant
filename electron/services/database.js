@@ -20,6 +20,7 @@ async function getDb() {
     db = new SQL.Database(buf);
   }
   initSchema();
+  migrateLlmProfiles();
   if (isNew) initDefaultConfig();
   return db;
 }
@@ -33,6 +34,20 @@ function saveDb() {
 function initSchema() {
   db.run(`
     CREATE TABLE IF NOT EXISTS sys_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+    CREATE TABLE IF NOT EXISTS llm_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      provider TEXT DEFAULT 'deepseek',
+      api_key TEXT,
+      base_url TEXT,
+      model TEXT,
+      timeout INTEGER DEFAULT 600,
+      model_type TEXT DEFAULT 'text',
+      is_default INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
+    );
 
     CREATE TABLE IF NOT EXISTS prj_sessions (
       id TEXT PRIMARY KEY,
@@ -508,6 +523,45 @@ const reminder = {
   getActive: () => q("SELECT * FROM plan_reminders WHERE enabled = 1"),
 };
 
+// ========== LLM Profiles (multi-model) ==========
+const llmProfile = {
+  list: () => q('SELECT * FROM llm_profiles ORDER BY is_default DESC, id ASC'),
+  get: (id) => qOne('SELECT * FROM llm_profiles WHERE id = ?', id),
+  getDefault: () => qOne('SELECT * FROM llm_profiles WHERE is_default = 1 ORDER BY id ASC') || qOne('SELECT * FROM llm_profiles ORDER BY id ASC LIMIT 1'),
+  add: (data) => {
+    const isFirst = qOne('SELECT COUNT(*) as c FROM llm_profiles').c === 0;
+    run('INSERT INTO llm_profiles (name, provider, api_key, base_url, model, timeout, model_type, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      data.name, data.provider || 'deepseek', data.api_key ?? data.apiKey ?? '', data.base_url ?? data.baseUrl ?? '', data.model || '', data.timeout || 600, data.model_type ?? data.modelType ?? 'text', data.is_default || (isFirst ? 1 : 0));
+    const r = qOne('SELECT * FROM llm_profiles WHERE name = ? ORDER BY id DESC', data.name);
+    return r;
+  },
+  update: (id, data) => {
+    const fields = []; const params = [];
+    if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
+    if (data.provider !== undefined) { fields.push('provider = ?'); params.push(data.provider); }
+    if (data.api_key !== undefined || data.apiKey !== undefined) { fields.push('api_key = ?'); params.push(data.api_key !== undefined ? data.api_key : data.apiKey); }
+    if (data.base_url !== undefined || data.baseUrl !== undefined) { fields.push('base_url = ?'); params.push(data.base_url !== undefined ? data.base_url : data.baseUrl); }
+    if (data.model !== undefined) { fields.push('model = ?'); params.push(data.model); }
+    if (data.timeout !== undefined) { fields.push('timeout = ?'); params.push(data.timeout); }
+    if (data.model_type !== undefined || data.modelType !== undefined) { fields.push('model_type = ?'); params.push(data.model_type !== undefined ? data.model_type : data.modelType); }
+    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE llm_profiles SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+    return qOne('SELECT * FROM llm_profiles WHERE id = ?', id);
+  },
+  setDefault: (id) => {
+    run('UPDATE llm_profiles SET is_default = 0 WHERE is_default = 1');
+    run('UPDATE llm_profiles SET is_default = 1 WHERE id = ?', id);
+  },
+  remove: (id) => {
+    const p = qOne('SELECT * FROM llm_profiles WHERE id = ?', id);
+    if (!p) return;
+    run('DELETE FROM llm_profiles WHERE id = ?', id);
+    if (p.is_default) {
+      const next = qOne('SELECT * FROM llm_profiles ORDER BY id ASC LIMIT 1');
+      if (next) run('UPDATE llm_profiles SET is_default = 1 WHERE id = ?', next.id);
+    }
+  },
+};
+
 // ========== Todos ==========
 const todo = {
   list: () => q('SELECT * FROM plan_todos ORDER BY sort_order ASC, created_at DESC'),
@@ -531,8 +585,26 @@ const todo = {
   remove: (id) => run('DELETE FROM plan_todos WHERE id = ?', id),
 };
 
+// 迁移旧版 sys_config 中的 LLM 配置到 llm_profiles（仅当 llm_profiles 为空时）
+function migrateLlmProfiles() {
+  try {
+    const count = qOne('SELECT COUNT(*) as c FROM llm_profiles');
+    if (!count || count.c > 0) return;
+    const provider = configGet('llmProvider') || 'deepseek';
+    const model = configGet('llmModel');
+    const apiKey = configGet('llmApiKey') || '';
+    const baseUrl = configGet('llmBaseUrl') || '';
+    if (!model && !apiKey) return;
+    run('INSERT INTO llm_profiles (name, provider, api_key, base_url, model, timeout, model_type, is_default) VALUES (?, ?, ?, ?, ?, 600, ?, 1)',
+      '默认模型', provider, apiKey, baseUrl, model || 'deepseek-chat', provider === 'ollama' ? 'multimodal' : 'text');
+    logger.info('[DB] migrated legacy LLM config to llm_profiles (model=%s)', model);
+  } catch (e) {
+    logger.warn('[DB] migrateLlmProfiles failed: %s', e.message);
+  }
+}
+
 function close() {
   if (db) { saveDb(); db.close(); db = null; }
 }
 
-module.exports = { getDb, close, q, qOne, run, runMany, runRaw, save, configGet, configSet, project, chat, dm, ds, task, reminder, todo };
+module.exports = { getDb, close, q, qOne, run, runMany, runRaw, save, configGet, configSet, project, chat, dm, ds, task, reminder, todo, llmProfile, migrateLlmProfiles };
