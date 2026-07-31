@@ -1064,6 +1064,12 @@ ipcMain.handle('feishu:webhook:test', async (_, { url }) => {
   const result = await feishu.sendViaWebhook(url, '🔔 启航AI工作台 桌面端连接测试成功！');
   return result;
 });
+ipcMain.handle('feishu:bot:save', (_, { app_id, app_secret }) => {
+  db.configSet('feishuAppId', app_id || '');
+  db.configSet('feishuAppSecret', app_secret || '');
+  logger.info('[Feishu] Bot credentials saved');
+  return { ok: true };
+});
 ipcMain.handle('feishu:send', async (_, { message }) => {
   const url = db.configGet('feishuWebhookUrl');
   if (!url) return { ok: false, error: 'Webhook URL 未配置' };

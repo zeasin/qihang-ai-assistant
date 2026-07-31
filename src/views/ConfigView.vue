@@ -208,6 +208,7 @@
           </div>
         </div>
         <div class="flex" style="gap:8px;margin-top:8px;">
+          <button class="btn btn-primary" @click="saveFeishuBot">保存</button>
           <button class="btn btn-primary" @click="startFeishuBot">{{ feishuRunning ? '重启 Bot' : '启动 Bot' }}</button>
           <button v-if="feishuRunning" class="btn btn-danger" @click="stopFeishuBot">停止 Bot</button>
           <button class="btn btn-secondary" @click="testFeishuBot">测试</button>
@@ -413,9 +414,19 @@ async function testWebhook() {
   setTimeout(() => webhookStatus.value = '', 5000);
 }
 
+async function saveFeishuBot() {
+  if (!feishuAppId.value || !feishuAppSecret.value) { feishuStatus.value = '❌ 请先填写 App ID 和 App Secret'; return; }
+  try {
+    await API.feishu.saveBot(feishuAppId.value, feishuAppSecret.value);
+    feishuStatus.value = '✅ 配置已保存';
+    setTimeout(() => feishuStatus.value = '', 3000);
+  } catch (e: any) { feishuStatus.value = '❌ ' + (e.message || '保存失败'); }
+}
+
 async function startFeishuBot() {
   if (!feishuAppId.value || !feishuAppSecret.value) { feishuStatus.value = '❌ 请先填写 App ID 和 App Secret'; return; }
   try {
+    await API.feishu.saveBot(feishuAppId.value, feishuAppSecret.value);
     const ok = await API.service.startFeishu({ app_id: feishuAppId.value, app_secret: feishuAppSecret.value });
     feishuRunning.value = true;
     feishuStatus.value = ok ? '✅ Bot 已启动' : '❌ 启动失败，请检查配置';
