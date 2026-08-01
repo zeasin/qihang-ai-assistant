@@ -40,8 +40,8 @@
       </div>
 
       <div class="card card-prereq">
-        <h2 style="font-size:17px;">📋 使用前必读：三个前置条件</h2>
-        <p class="text-muted mb-2">应用启动后，需要完成以下三个配置才能正常使用所有功能。</p>
+        <h2 style="font-size:17px;">📋 使用前必读：两个前置条件</h2>
+        <p class="text-muted mb-2">应用启动后，需要完成以下配置才能正常使用所有功能。</p>
 
         <div class="prereq-item">
           <div class="prereq-number">1</div>
@@ -55,27 +55,6 @@
 
         <div class="prereq-item">
           <div class="prereq-number">2</div>
-          <div class="prereq-content">
-            <strong>准备向量模型（用于知识库语义搜索）</strong>
-            <p class="text-muted">推荐使用 Ollama 本地运行 <code>bge-m3</code> 模型，完全免费离线：</p>
-            <pre class="code-block"># 1. 下载安装 Ollama（https://ollama.com/download）
-# 2. 拉取 bge-m3 模型
-ollama pull bge-m3
-
-# 3. 确认 Ollama 服务运行中（默认 http://127.0.0.1:11434）</pre>
-            <p class="text-muted">然后进入应用「设置 → 嵌入模型配置」，填写：</p>
-            <ul>
-              <li>提供商名称：<code>Ollama</code></li>
-              <li>模型名称：<code>bge-m3</code></li>
-              <li>服务地址：<code>http://127.0.0.1:11434</code></li>
-              <li>API Key：留空</li>
-            </ul>
-            <p class="text-muted">保存后可在知识库「概览」Tab 中点击「索引」按钮建立向量索引。</p>
-          </div>
-        </div>
-
-        <div class="prereq-item">
-          <div class="prereq-number">3</div>
           <div class="prereq-content">
             <strong>设置笔记库目录</strong>
             <p class="text-muted">笔记库是知识检索和 AI 问答的数据基础。进入「设置 → 笔记库设置」，选择一个包含 Markdown 文件的本地文件夹作为笔记库。保存后即可在知识库中浏览文件，并让 AI 基于你的笔记回答问题。</p>
@@ -98,7 +77,8 @@ ollama pull bge-m3
       <div class="card">
         <h2>🧭 页面导航</h2>
         <table class="help-table">
-          <tr><th>菜单</th><th>说明</th></tr>
+          <thead><tr><th>菜单</th><th>说明</th></tr></thead>
+          <tbody>
           <tr><td>💬 对话</td><td>AI 对话工作台，支持多轮对话、图片识别、模型切换，pi agent 驱动</td></tr>
           <tr><td>💻 编程</td><td>代码项目工作台，管理项目文件树，基于项目的 AI 编程对话</td></tr>
           <tr><td>📁 知识库</td><td>文件浏览 + 概览看板（统计、日报、待办、提醒、索引管理）</td></tr>
@@ -108,17 +88,17 @@ ollama pull bge-m3
           <tr><td>📋 日志</td><td>操作日志查看，支持级别过滤和自动刷新</td></tr>
           <tr><td>🔧 工具箱</td><td>通用识别、识题、试卷识别、数据导入/采集/加工等工具</td></tr>
           <tr><td>❓ 帮助</td><td>使用指南（当前页面）</td></tr>
+          </tbody>
         </table>
       </div>
 
       <div class="card">
         <h2>📁 知识库</h2>
-        <p class="text-muted mb-2">浏览和管理本地 Markdown 笔记文件，支持索引和语义搜索。</p>
+        <p class="text-muted mb-2">浏览和管理本地 Markdown 笔记文件，支持文件搜索和预览。</p>
         <ul>
           <li><strong>文件浏览</strong> — 左侧目录树浏览笔记文件，点击查看 Markdown 渲染内容，支持代码高亮</li>
-          <li><strong>索引</strong> — 点击工具栏的 📇 按钮，系统自动扫描文件、分段并生成向量嵌入</li>
-          <li><strong>搜索</strong> — 支持文件名关键词搜索 + 语义搜索（需先配置嵌入模型并完成索引）</li>
-          <li><strong>概览 Tab</strong> — 查看向量模型状态、文档数/片段数/嵌入进度、综合日报、待办、提醒</li>
+          <li><strong>搜索</strong> — 支持文件名关键词搜索，快速定位笔记文件</li>
+          <li><strong>概览 Tab</strong> — 查看综合日报、待办、提醒等看板信息</li>
         </ul>
       </div>
 
@@ -138,13 +118,15 @@ ollama pull bge-m3
         <h2>🤖 AI 助理</h2>
         <p class="text-muted mb-2">基于 pi agent 引擎的本地 AI 助理，对话页支持图片上传/粘贴，可在输入框上方切换模型。</p>
         <table class="help-table">
-          <tr><th>能力</th><th>说明</th></tr>
+          <thead><tr><th>能力</th><th>说明</th></tr></thead>
+          <tbody>
           <tr><td>💬 日常问答</td><td>通用对话，无需绑定项目即可提问</td></tr>
-          <tr><td>📚 笔记库检索</td><td>基于笔记库内容进行 RAG 语义检索回答</td></tr>
+          <tr><td>📚 笔记库检索</td><td>基于笔记库内容检索并回答问题</td></tr>
           <tr><td>💾 数据集查询</td><td>通过结构化查询访问数据中心记录</td></tr>
           <tr><td>📁 项目文件操作</td><td>读写文件、目录浏览、grep 搜索、执行命令</td></tr>
           <tr><td>📅 日报生成</td><td>自动汇总待办、对话、文档等生成综合日报</td></tr>
           <tr><td>🖼️ 图片识别</td><td>支持粘贴或上传图片，AI 自动识别内容</td></tr>
+          </tbody>
         </table>
         <p class="text-muted">对话模型通过 pi agent 配置（终端运行 <code>pi</code> 命令设置），支持 DeepSeek、OpenAI 兼容接口、Ollama 本地模型等。</p>
       </div>
@@ -153,7 +135,8 @@ ollama pull bge-m3
         <h2>⚙️ 系统配置</h2>
         <p class="text-muted mb-2">所有配置通过设置页面管理，无需手动编辑文件。</p>
         <table class="help-table">
-          <tr><th>配置项</th><th>说明</th></tr>
+          <thead><tr><th>配置项</th><th>说明</th></tr></thead>
+          <tbody>
           <tr><td>LLM 对话模型</td><td>通过 pi agent 配置（<code>pi</code> 命令），对话页可临时切换模型</td></tr>
           <tr><td>笔记库目录</td><td>本地笔记库路径，知识浏览与 AI 检索共用</td></tr>
           <tr><td>嵌入模型</td><td>语义检索用的向量模型（Ollama 或 OpenAI 兼容 API）</td></tr>
@@ -162,32 +145,33 @@ ollama pull bge-m3
           <tr><td>飞书 Webhook</td><td>消息推送 URL，用于发送日报和提醒到飞书群</td></tr>
           <tr><td>飞书 Bot</td><td>App ID / Secret，WebSocket 长连接接收消息，可在飞书内直接对话</td></tr>
           <tr><td>日报设置</td><td>每日 AI 综合日报，自定义提示词和保留天数</td></tr>
+          </tbody>
         </table>
       </div>
 
       <div class="card">
         <h2>❓ 常见问题</h2>
         <table class="help-table">
-          <tr><th>问题</th><th>原因</th><th>解决</th></tr>
+          <thead><tr><th>问题</th><th>原因</th><th>解决</th></tr></thead>
+          <tbody>
           <tr><td>对话为空或超时</td><td>pi agent 未安装或模型未配置</td><td>运行 <code>npm install -g @earendil-works/pi-coding-agent</code>，然后 <code>pi</code> 配置模型</td></tr>
-          <tr><td>语义搜索无结果</td><td>笔记库未索引或嵌入模型未配置</td><td>在知识库「概览」Tab 点击索引按钮，检查设置页嵌入模型配置</td></tr>
-          <tr><td>索引失败</td><td>嵌入模型服务未启动或地址错误</td><td>确认 Ollama 运行中或 API 地址正确，在设置页点「测试连接」</td></tr>
+          <tr><td>AI 答非所问，没有用到笔记</td><td>知识库未索引或未配置嵌入模型</td><td>在知识库「概览」Tab 点击索引按钮，检查嵌入模型配置</td></tr>
           <tr><td>飞书消息收不到</td><td>Webhook 或 Bot 配置有误</td><td>在设置页检查飞书配置，点「测试」验证</td></tr>
           <tr><td>定时任务未执行</td><td>调度器未开启</td><td>在设置页确认调度器运行中，检查任务是否已启用</td></tr>
           <tr><td>可以完全离线使用吗</td><td>—</td><td>可以。对话模型和嵌入模型都配置为 Ollama 本地模型即可完全离线</td></tr>
-          <tr><td>AI 答非所问，没有用到笔记</td><td>知识库未索引或未配置嵌入模型</td><td>在知识库「概览」Tab 点击索引按钮，检查嵌入模型配置</td></tr>
           <tr><td>提示"模型连接失败"</td><td>pi agent 模型配置有误或 Ollama 未启动</td><td>运行 <code>pi</code> 检查配置，Ollama 需先 <code>ollama pull</code> 模型并确保服务运行</td></tr>
           <tr><td>数据会丢失吗</td><td>—</td><td>数据保存在本机数据库，正常退出不丢失；建议定期备份 <code>memory.db</code> 和笔记目录</td></tr>
+          </tbody>
         </table>
       </div>
 
       <div class="card">
         <h2>🔒 数据与隐私</h2>
         <ul>
-          <li>所有数据保存在应用目录下的本地数据库（<code>memory.db</code>）与你的笔记文件夹中，不上传任何云端</li>
+          <li>所有数据保存在本机数据库（<code>~/.qihang-work-ai/qihang-work-ai.db</code>）与你的笔记文件夹中，不上传任何云端</li>
           <li>对话内容默认会发送给你配置的模型服务商（DeepSeek 等）用于生成回复</li>
           <li>如需<strong>完全离线</strong>：使用 Ollama 作为对话模型与嵌入模型即可（除软件自动更新外无任何网络请求）</li>
-          <li>建议定期备份 <code>memory.db</code> 和笔记目录，后续版本将提供一键备份/恢复</li>
+          <li>建议定期备份数据库文件和笔记目录，后续版本将提供一键备份/恢复</li>
         </ul>
       </div>
     </div>
