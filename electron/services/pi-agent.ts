@@ -118,6 +118,50 @@ export async function resolvePiModel(modelPattern: string | undefined): Promise<
   return bundle.modelRegistry.find(modelPattern.slice(0, idx), modelPattern.slice(idx + 1)) || null;
 }
 
+export interface PiModelInfo {
+  provider: string;
+  providerLabel: string;
+  id: string;
+  name: string;
+  pattern: string;
+  configured: boolean;
+}
+
+/**
+ * 列出 pi agent 可用的模型（来自 ~/.pi/agent 的 ModelRegistry）。
+ * 优先返回已配置认证的模型（getAvailable），一个都没有时兜底列出全部内置模型。
+ */
+export async function listPiModels(): Promise<{ models: PiModelInfo[]; error?: string }> {
+  try {
+    const bundle = await getRuntime();
+    const registry = bundle.modelRegistry;
+    const available = (registry.getAvailable() || []) as any[];
+    const configured = available.length > 0;
+    const list = (configured ? available : (registry.getAll() || [])) as any[];
+    const models: PiModelInfo[] = list.map((m: any) => {
+      const provider: string = m.provider || '';
+      const id: string = m.id || '';
+      let providerLabel = provider;
+      try { providerLabel = registry.getProviderDisplayName(provider) || provider; } catch {}
+      return {
+        provider,
+        providerLabel,
+        id,
+        name: m.name || id,
+        pattern: provider && id ? `${provider}/${id}` : id,
+        configured,
+      };
+    });
+    models.sort(
+      (a, b) => a.providerLabel.localeCompare(b.providerLabel) || a.name.localeCompare(b.name),
+    );
+    return { models };
+  } catch (e: any) {
+    logger.warn('[PiAgent] listPiModels failed: %s', e && e.message ? e.message : e);
+    return { models: [], error: (e && e.message) || String(e) };
+  }
+}
+
 // ---- 自定义工具：笔记库搜索（进程内直接访问项目服务） ----
 import * as db from './database';
 import * as rag from './rag';

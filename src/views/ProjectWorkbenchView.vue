@@ -73,16 +73,6 @@
             <h3 class="chat-title">{{ currentSession?.title || '对话' }}</h3>
             <span class="chat-project-badge" v-if="currentProject">📁 {{ currentProject.name }}</span>
           </div>
-          <div class="chat-header-right">
-            <div class="model-switcher" v-if="llmProfiles.length">
-              <span class="model-label">模型:</span>
-              <select v-model="selectedModelId" class="model-select" title="选择对话使用的大模型">
-                <option v-for="p in llmProfiles" :key="p.id" :value="p.id">
-                  {{ p.name }} · {{ p.model }}{{ p.isDefault ? ' ⭐' : '' }}
-                </option>
-              </select>
-            </div>
-          </div>
         </div>
 
         <!-- 消息列表 -->
@@ -146,6 +136,12 @@
                     </svg>
                   </button>
                   <input ref="fileInputRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
+                  <select class="model-selector" v-model="selectedModel" :disabled="isStreaming" title="选择模型">
+                    <option value="">默认模型</option>
+                    <option v-for="m in piModels" :key="m.pattern" :value="m.pattern">
+                      {{ m.providerLabel }} · {{ m.name }}
+                    </option>
+                  </select>
                 <span class="input-hint">Enter 发送 · Shift+Enter 换行 · pi agent 驱动</span>
               </div>
               <div class="input-right">
@@ -200,12 +196,6 @@
               <label class="type-radio" :class="{ active: projectForm.type === 'code' }">
                 <input type="radio" v-model="projectForm.type" value="code"> 代码库
               </label>
-              <label class="type-radio" :class="{ active: projectForm.type === 'note' }">
-                <input type="radio" v-model="projectForm.type" value="note"> 笔记库
-              </label>
-              <label class="type-radio" :class="{ active: projectForm.type === 'hybrid' }">
-                <input type="radio" v-model="projectForm.type" value="hybrid"> 混合
-              </label>
             </div>
           </div>
           <div class="form-group">
@@ -251,14 +241,15 @@ const inputText = ref('');
 const isStreaming = ref(false);
 const composing = ref(false);
 const thinkingText = ref('');
-const llmProfiles = ref<any[]>([]);
-const selectedModelId = ref<number | null>(null);
 const inputRef = ref<HTMLTextAreaElement>();
 const messagesContainer = ref<HTMLElement>();
 const pendingImages = ref<{ data: string; mimeType: string }[]>([]);const fileInputRef = ref<HTMLInputElement | null>(null);
 const showProjectModal = ref(false);
 const editingProject = ref<any>(null);
 const projectForm = ref({ name: '', description: '', dir: '', type: 'code' });
+const piModels = ref<{ provider: string; providerLabel: string; id: string; name: string; pattern: string; configured: boolean }[]>([]);
+const selectedModel = ref('');
+const WORKBENCH_MODEL_KEY = 'workbench_model';
 
 // ========== 计算属性 ==========
 const currentProject = computed(() => {
@@ -273,16 +264,13 @@ async function loadProjects() {
   } catch { projects.value = []; }
 }
 
-async function loadLlmProfiles() {
+async function loadPiModels() {
   try {
-    llmProfiles.value = await API.llmProfiles.list();
-    const defaultP = llmProfiles.value.find(p => p.isDefault) || llmProfiles.value[0];
-    if (defaultP && selectedModelId.value === null) {
-      selectedModelId.value = defaultP.id;
-    } else if (!defaultP) {
-      selectedModelId.value = null;
-    }
-  } catch { llmProfiles.value = []; }
+    const res = await API.pi.models();
+    piModels.value = (res?.models || []).filter((m) => m.pattern);
+    const saved = localStorage.getItem(WORKBENCH_MODEL_KEY);
+    if (saved && piModels.value.some((m) => m.pattern === saved)) selectedModel.value = saved;
+  } catch { piModels.value = []; }
 }
 
 async function loadSessions(projectId: number) {
@@ -617,7 +605,9 @@ async function doSend(text: string) {
   API.on('coding:error', onError);
 
   try {
-    await API.coding.send(text, sid, projectDir, undefined, images.length ? images : undefined, selectedModelId.value || undefined);
+    await API.coding.send(text, sid, projectDir, undefined, images.length ? images : undefined, selectedModel.value || undefined);
+    if (selectedModel.value) localStorage.setItem(WORKBENCH_MODEL_KEY, selectedModel.value);
+    else localStorage.removeItem(WORKBENCH_MODEL_KEY);
   } catch (err: any) {
     isStreaming.value = false;
     const msg = messages.value[msgIdx];
@@ -737,7 +727,7 @@ async function deleteProject(project: any) {
 // ========== 生命周期 ==========
 onMounted(async () => {
   await loadProjects();
-  await loadLlmProfiles();
+  await loadPiModels();
   if (projects.value.length > 0) {
     const firstNote = projects.value.find(p => p.type === 'note') || projects.value[0];
     expandedProjects.add(firstNote.id);
@@ -1015,6 +1005,17 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+.model-selector {
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  color: #1e293b;
+  max-width: 180px;
+  outline: none;
+}
+
 .chat-title {
   font-size: 15px;
   font-weight: 600;
@@ -1034,39 +1035,6 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.model-switcher {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.model-label {
-  font-size: 12px;
-  color: #64748b;
-  font-weight: 500;
-}
-
-.model-select {
-  padding: 4px 28px 4px 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 12px;
-  background: white;
-  color: #1e293b;
-  cursor: pointer;
-  outline: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  max-width: 260px;
-}
-
-.model-select:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
 }
 
 /* ========== 消息列表 ========== */

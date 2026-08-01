@@ -22,7 +22,7 @@ npm run electron:dev
 
 # 3. 打包构建
 npm run electron:build</pre>
-        <p class="tip">提示：首次使用请先到设置页配置 AI 模型、嵌入模型，并在概览页添加笔记库。</p>
+        <p class="tip">提示：首次使用请先到设置页配置笔记库目录和嵌入模型。</p>
       </div>
 
       <div class="card">
@@ -34,7 +34,7 @@ npm run electron:build</pre>
           <tr><td>📁 知识库</td><td>Markdown 笔记管理，目录树浏览、编辑器、Zen 模式</td></tr>
           <tr><td>🗃️ 数据</td><td>多数据集管理，Excel/JSON 批量导入，AI 智能填充</td></tr>
           <tr><td>🔔 任务</td><td>待办 + 定时提醒统一管理</td></tr>
-          <tr><td>⚙️ 设置</td><td>系统配置：LLM 模型、嵌入模型、AI 助理、飞书、定时任务等</td></tr>
+          <tr><td>⚙️ 设置</td><td>系统配置：笔记库、嵌入模型、飞书、定时任务等</td></tr>
           <tr><td>📋 日志</td><td>操作日志查看</td></tr>
           <tr><td>❓ 帮助</td><td>使用指南（当前页面）</td></tr>
         </table>
@@ -47,7 +47,7 @@ npm run electron:build</pre>
         <ul>
           <li><strong>目录树</strong> — 侧边栏树状结构浏览，右键新建/重命名/删除文件或目录</li>
           <li><strong>编辑器</strong> — 分屏实时 Markdown 预览，支持 Zen 模式全屏写作、标签管理</li>
-          <li><strong>索引</strong> — 在概览页按笔记库名称逐库索引，系统自动分段并生成向量嵌入</li>
+          <li><strong>索引</strong> — 在概览页索引唯一笔记库，系统自动分段并生成向量嵌入</li>
           <li><strong>搜索</strong> — 文件名关键词搜索 + 语义搜索（基于向量相似度，需配置嵌入模型）</li>
         </ul>
       </div>
@@ -83,7 +83,7 @@ npm run electron:build</pre>
 
       <div class="card">
         <h2>🤖 AI 助理</h2>
-        <p class="text-muted mb-2">基于 LangChain 的统一本地助理，一个引擎搞定所有场景。</p>
+        <p class="text-muted mb-2">基于 pi agent 引擎的本地 AI 助理，一个引擎搞定所有场景。</p>
         <table class="help-table">
           <tr><th>能力</th><th>说明</th></tr>
           <tr><td>💾 数据集查询</td><td>通过结构化查询工具访问数据中心的记录数据</td></tr>
@@ -91,7 +91,7 @@ npm run electron:build</pre>
           <tr><td>📁 项目文件操作</td><td>读写文件、目录浏览、grep 搜索，可执行命令</td></tr>
           <tr><td>📅 日报生成</td><td>自动汇总待办、消息、文档等生成综合日报</td></tr>
         </table>
-        <p class="text-muted">模型配置在设置页「对话模型配置」中管理，支持 DeepSeek（OpenAI 兼容）或本地 Ollama。</p>
+        <p class="text-muted">对话模型直接使用 pi agent 配置，无需在应用内重复配置。</p>
       </div>
 
       <div class="card">
@@ -99,13 +99,13 @@ npm run electron:build</pre>
         <p class="text-muted mb-2">所有配置通过设置页面管理，无需手动编辑文件。</p>
         <table class="help-table">
           <tr><th>配置项</th><th>说明</th></tr>
+          <tr><td>笔记库目录</td><td>唯一的本地笔记库路径，知识浏览与 AI 检索共用</td></tr>
           <tr><td>嵌入模型</td><td>语义检索用的向量模型（Ollama 或 API）</td></tr>
-          <tr><td>AI 助理状态</td><td>查看统一助理（LangChain）的模型配置与可用状态</td></tr>
           <tr><td>定时任务</td><td>管理内置定时任务（日报、消息汇总等），支持飞书通知</td></tr>
           <tr><td>飞书 Webhook</td><td>消息推送 URL</td></tr>
           <tr><td>飞书 Bot</td><td>App ID / Secret，WebSocket 长连接接收消息</td></tr>
           <tr><td>日报设置</td><td>每日 AI 综合日报，自定义提示词和保留天数</td></tr>
-          <tr><td>笔记库索引配置</td><td>每个笔记库可单独配置排除目录和文件</td></tr>
+          <tr><td>笔记库索引配置</td><td>配置笔记库索引时排除的目录和文件</td></tr>
         </table>
 
       </div>
@@ -114,7 +114,7 @@ npm run electron:build</pre>
         <h2>❓ 常见问题</h2>
         <table class="help-table">
           <tr><th>问题</th><th>原因</th><th>解决</th></tr>
-          <tr><td>对话为空或超时</td><td>LLM 地址或网络不可达</td><td>检查 API 地址和网络，超时设 600s</td></tr>
+          <tr><td>对话为空或超时</td><td>pi agent 模型未配置或网络不可达</td><td>运行 <code>pi</code> 命令配置登录和模型</td></tr>
           <tr><td>语义搜索无结果</td><td>笔记库未索引或嵌入模型未配置</td><td>在概览页点击索引按钮，检查嵌入模型配置</td></tr>
           <tr><td>索引失败</td><td>嵌入模型服务未启动</td><td>确认 Ollama 运行或 API 地址正确</td></tr>
           <tr><td>飞书消息收不到</td><td>Webhook 未配置或 Bot 未启动</td><td>在设置页检查飞书配置</td></tr>

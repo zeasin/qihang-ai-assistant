@@ -6,6 +6,23 @@
 
     <div class="content-body">
 
+      <!-- Note Library Settings -->
+      <div class="card">
+        <h2>📚 笔记库设置</h2>
+        <div class="text-muted mb-2">设置唯一的笔记库目录。知识库浏览、语义检索和 AI 对话都会使用此目录。</div>
+        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
+          <div class="form-group" style="flex:1;min-width:300px;">
+            <label style="font-size:12px;">笔记库目录</label>
+            <div class="input-with-btn">
+              <input v-model="notesDir" type="text" class="form-control" placeholder="选择笔记库目录..." readonly>
+              <button class="btn btn-secondary" @click="pickNotesDir">选择</button>
+            </div>
+          </div>
+          <button class="btn btn-primary" @click="saveNotesDir" style="margin-bottom:12px;">保存</button>
+        </div>
+        <span v-if="notesDirStatus" class="text-muted" :style="{ color: notesDirStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ notesDirStatus }}</span>
+      </div>
+
       <!-- Scheduled Tasks -->
       <div class="card">
         <h2>⏰ 定时任务</h2>
@@ -29,106 +46,6 @@
           </tbody>
         </table>
         <div v-else class="text-muted" style="padding:12px 0;">暂无定时任务。</div>
-      </div>
-
-      <!-- AI 助理状态 -->
-      <div class="card">
-        <div class="card-title-row">
-          <h2>🤖 AI 助理</h2>
-          <button class="btn btn-sm btn-secondary" @click="showHelp = true">帮助</button>
-        </div>
-        <div class="agent-grid">
-          <div class="agent-card" :class="agentStatus.pi.installed ? 'installed' : 'missing'">
-            <div class="agent-icon">🤖</div>
-            <div class="agent-info">
-              <div class="agent-name">统一助理 (LangChain)</div>
-              <div class="agent-version" v-if="agentStatus.pi.installed">v{{ agentStatus.pi.version }}</div>
-              <div class="agent-version" v-else>引擎未初始化</div>
-              <div class="agent-meta" v-if="agentStatus.pi.installed">
-                <span class="badge badge-primary">{{ agentStatus.pi.firstModel || agentStatus.pi.model || '未配置模型' }}</span>
-                <span v-if="!agentStatus.pi.error" class="badge badge-success">✅ 可用</span>
-                <span v-else class="badge badge-gray">{{ agentStatus.pi.error }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="text-muted" style="margin-top:8px;font-size:12px;">基于 LangChain 的统一本地助理：数据集查询 · 笔记库检索 · 项目文件操作，使用下方「对话模型」配置。</div>
-      </div>
-
-      <!-- LLM (对话模型) 配置：多模型 -->
-      <div class="card">
-        <div class="card-title-row">
-          <h2>💬 对话模型配置</h2>
-          <span class="text-muted" style="font-size:12px;">可配置多条模型，第一条自动设为默认；对话时可在页面上切换模型</span>
-        </div>
-
-        <!-- 模型列表 -->
-        <table v-if="llmProfiles.length" class="config-table">
-          <thead><tr><th>名称</th><th>提供商</th><th>模型</th><th>API 地址</th><th>类型</th><th>默认</th><th>操作</th></tr></thead>
-          <tbody>
-            <tr v-for="p in llmProfiles" :key="p.id">
-              <td><strong>{{ p.name }}</strong></td>
-              <td><span class="badge" :class="p.provider === 'ollama' ? 'badge-gray' : 'badge-primary'">{{ p.provider === 'ollama' ? 'Ollama' : 'OpenAI 兼容' }}</span></td>
-              <td><code>{{ p.model }}</code></td>
-              <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;word-break:break-all;"><code>{{ p.baseUrl }}</code></td>
-              <td><span class="badge badge-gray">{{ p.modelType === 'multimodal' ? '多模态' : '文本' }}</span></td>
-              <td>{{ p.isDefault ? '⭐ 默认' : '' }}</td>
-              <td>
-                <button class="btn btn-sm btn-secondary" @click="editLlmProfile(p)">编辑</button>
-                <button v-if="!p.isDefault" class="btn btn-sm btn-secondary" @click="setDefaultLlmProfile(p)">设为默认</button>
-                <button class="btn btn-sm btn-secondary" style="color:#ef4444;" @click="deleteLlmProfile(p)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else class="text-muted" style="padding:12px 0;">暂无模型，请点击下方「添加模型」配置。</div>
-
-        <!-- 模型表单 -->
-        <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
-          <h3 style="font-size:14px;margin:0 0 12px;">{{ llmEditingId ? '编辑模型' : '添加模型' }}</h3>
-          <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
-            <div class="form-group" style="flex:1;min-width:120px;">
-              <label style="font-size:12px;">名称 *</label>
-              <input v-model="llmForm.name" type="text" class="form-control" placeholder="如: DeepSeek / 本地 Ollama">
-            </div>
-            <div class="form-group" style="flex:1;min-width:130px;">
-              <label style="font-size:12px;">提供商</label>
-              <select v-model="llmForm.provider" class="form-control">
-                <option value="deepseek">DeepSeek (OpenAI 兼容)</option>
-                <option value="ollama">Ollama (本地)</option>
-              </select>
-            </div>
-            <div class="form-group" style="flex:1;min-width:150px;">
-              <label style="font-size:12px;">模型名称</label>
-              <input v-model="llmForm.model" type="text" class="form-control" :placeholder="llmForm.provider === 'ollama' ? 'qwen2.5 / deepseek-r1 ...' : 'deepseek-chat'">
-            </div>
-            <div class="form-group" style="flex:1;min-width:200px;">
-              <label style="font-size:12px;">API Key（Ollama 可留空）</label>
-              <input v-model="llmForm.apiKey" type="password" class="form-control" :placeholder="llmForm.hasApiKey ? '已保存，留空不修改' : 'sk-...'">
-            </div>
-            <div class="form-group" style="flex:1;min-width:200px;">
-              <label style="font-size:12px;">服务地址</label>
-              <input v-model="llmForm.baseUrl" type="text" class="form-control" :placeholder="llmForm.provider === 'ollama' ? 'http://127.0.0.1:11434' : 'https://api.deepseek.com/v1'">
-            </div>
-            <div class="form-group" style="flex:0 0 90px;">
-              <label style="font-size:12px;">超时(秒)</label>
-              <input v-model.number="llmForm.timeout" type="number" min="10" max="900" class="form-control">
-            </div>
-            <div class="form-group" style="flex:0 0 110px;">
-              <label style="font-size:12px;">模型类型</label>
-              <select v-model="llmForm.modelType" class="form-control">
-                <option value="text">文本模型</option>
-                <option value="multimodal">多模态(识图)</option>
-              </select>
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
-            <button class="btn btn-primary" @click="saveLlmProfile">{{ llmEditingId ? '保存修改' : '添加模型' }}</button>
-            <button v-if="llmEditingId" class="btn btn-secondary" @click="cancelEditLlmProfile">取消</button>
-            <button class="btn btn-secondary" @click="testLlmProfile">测试连接</button>
-            <span v-if="llmStatus" class="text-muted" :style="{ color: llmStatus.startsWith('✅') ? '#22c55e' : llmStatus.startsWith('⏳') ? '#f59e0b' : '#ef4444' }">{{ llmStatus }}</span>
-          </div>
-        </div>
       </div>
 
       <!-- Embedding Model Configuration -->
@@ -157,25 +74,25 @@
       <!-- 笔记库索引排除配置 -->
       <div class="card">
         <h2>📂 笔记库索引配置</h2>
-        <div class="text-muted mb-2">配置每个笔记库索引时排除的目录和文件（逗号分隔，支持通配符 *）。</div>
-        <div v-for="p in noteProjects" :key="p.id" class="project-ignore-config">
+        <div class="text-muted mb-2">配置笔记库索引时排除的目录和文件（逗号分隔，支持通配符 *）。</div>
+        <div v-if="noteProject" class="project-ignore-config">
           <div class="project-ignore-header">
-            <span class="project-ignore-name">{{ p.name }}</span>
-            <span class="project-ignore-dir">{{ p.dir }}</span>
+            <span class="project-ignore-name">{{ noteProject.name }}</span>
+            <span class="project-ignore-dir">{{ noteProject.dir }}</span>
           </div>
           <div class="form-row" style="gap:8px;flex-wrap:wrap;">
             <div class="form-group" style="flex:1;min-width:200px;">
               <label style="font-size:12px;color:var(--text-muted);">排除目录</label>
-              <input v-model="p.ignore_dirs_local" type="text" class="form-control" placeholder="dist, build, temp">
+              <input v-model="noteProject.ignore_dirs_local" type="text" class="form-control" placeholder="dist, build, temp">
             </div>
             <div class="form-group" style="flex:1;min-width:200px;">
               <label style="font-size:12px;color:var(--text-muted);">排除文件</label>
-              <input v-model="p.ignore_files_local" type="text" class="form-control" placeholder="draft*, *test*, tmp_*.md">
+              <input v-model="noteProject.ignore_files_local" type="text" class="form-control" placeholder="draft*, *test*, tmp_*.md">
             </div>
-            <button class="btn btn-sm btn-primary" @click="saveProjectIgnore(p)" style="align-self:end;margin-bottom:12px;">保存</button>
+            <button class="btn btn-sm btn-primary" @click="saveProjectIgnore(noteProject)" style="align-self:end;margin-bottom:12px;">保存</button>
           </div>
         </div>
-        <div v-if="!noteProjects.length" class="text-muted" style="padding:12px 0;">暂无笔记库项目。</div>
+        <div v-if="!noteProject" class="text-muted" style="padding:12px 0;">暂无笔记库，请先在「笔记库设置」中配置目录。</div>
       </div>
 
       <!-- Feishu Webhook -->
@@ -283,36 +200,15 @@
       </div>
 
       </div>
-
-    <!-- Help Modal -->
-    <div v-if="showHelp" class="modal-overlay" @click.self="showHelp = false">
-      <div class="modal">
-        <div class="modal-header">
-          <h3>🤖 AI 助理说明</h3>
-        </div>
-        <div class="modal-body">
-          <div class="help-section">
-            <h4>🧠 统一助理 (LangChain)</h4>
-            <p>基于 LangChain 的本地知识库助理，支持数据集查询、笔记库语义检索、项目文件读写与命令执行。</p>
-            <p class="text-muted" style="margin-top:8px;">配置下方「对话模型」即可使用，支持 DeepSeek（OpenAI 兼容）或本地 Ollama。</p>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-primary" @click="showHelp = false">知道了</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 
 const API = window.electronAPI;
 
 const projects = ref<any[]>([]);
-const agentStatus = ref({ pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null } });
-const showHelp = ref(false);
 
 const webhookUrl = ref('');
 const webhookStatus = ref('');
@@ -339,11 +235,8 @@ const embeddingApiKey = ref('');
 const embeddingStatus = ref('');
 const httpPort = ref('15173');
 const httpPortStatus = ref('');
-// LLM (对话模型) 多模型管理
-const llmProfiles = ref<any[]>([]);
-const llmEditingId = ref<number | null>(null);
-const llmForm = ref({ name: '', provider: 'deepseek', apiKey: '', hasApiKey: false, baseUrl: '', model: '', timeout: 600, modelType: 'text' });
-const llmStatus = ref('');
+const notesDir = ref('');
+const notesDirStatus = ref('');
 
 
 async function loadProjects() {
@@ -357,6 +250,32 @@ const noteProjects = computed(() => projects.value
     ignore_files_local: p.ignore_files || '',
   }))
 );
+const noteProject = computed(() => noteProjects.value[0] || null);
+async function loadNotesDir() {
+  const list = await API.kb.list();
+  if (list.length) {
+    notesDir.value = list[0].dir || '';
+  } else {
+    notesDir.value = '';
+  }
+}
+async function pickNotesDir() {
+  try {
+    const dir = await API.dialog.openDirectory();
+    if (dir) notesDir.value = dir;
+  } catch {}
+}
+async function saveNotesDir() {
+  if (!notesDir.value.trim()) { notesDirStatus.value = '❌ 请先选择笔记库目录'; return; }
+  try {
+    const p = await API.kb.setDir(notesDir.value.trim());
+    notesDirStatus.value = '✅ 已保存，笔记库: ' + (p?.name || '');
+    await loadProjects();
+    setTimeout(() => notesDirStatus.value = '', 3000);
+  } catch (e: any) {
+    notesDirStatus.value = '❌ ' + (e.message || '保存失败');
+  }
+}
 async function saveProjectIgnore(p: any) {
   try {
     await API.project.update(p.id, { ignore_dirs: p.ignore_dirs_local, ignore_files: p.ignore_files_local });
@@ -385,13 +304,6 @@ async function toggleFeishu(t: any) {
     await API.task.update(t.id, { notify_feishu: !t.notify_feishu });
     t.notify_feishu = !t.notify_feishu;
   } catch {}
-}
-
-async function checkAgentStatus() {
-  try {
-    const s = await API.agent.status();
-    agentStatus.value = s;
-  } catch { agentStatus.value = { pi: { installed: false, version: null, modelsAvailable: 0, firstModel: null } }; }
 }
 
 async function saveWebhook() {
@@ -472,105 +384,6 @@ async function loadConfig() {
   } catch { console.warn('加载配置失败'); }
 }
 
-async function loadLlmProfiles() {
-  try {
-    llmProfiles.value = await API.llmProfiles.list();
-  } catch { llmProfiles.value = []; }
-}
-
-function resetLlmForm() {
-  llmEditingId.value = null;
-  llmForm.value = { name: '', provider: 'deepseek', apiKey: '', hasApiKey: false, baseUrl: '', model: '', timeout: 600, modelType: 'text' };
-  llmStatus.value = '';
-}
-
-function editLlmProfile(p: any) {
-  llmEditingId.value = p.id;
-  llmForm.value = {
-    name: p.name || '',
-    provider: p.provider || 'deepseek',
-    apiKey: '',
-    hasApiKey: !!p.hasApiKey,
-    baseUrl: p.baseUrl || '',
-    model: p.model || '',
-    timeout: p.timeout || 600,
-    modelType: p.modelType || 'text',
-  };
-  llmStatus.value = '';
-}
-
-function cancelEditLlmProfile() {
-  resetLlmForm();
-}
-
-async function saveLlmProfile() {
-  if (!llmForm.value.name.trim()) { llmStatus.value = '❌ 请输入模型名称'; return; }
-  const payload: any = {
-    name: llmForm.value.name.trim(),
-    provider: llmForm.value.provider,
-    model: llmForm.value.model.trim(),
-    baseUrl: llmForm.value.baseUrl.trim(),
-    timeout: llmForm.value.timeout || 600,
-    modelType: llmForm.value.modelType,
-  };
-  if (llmForm.value.apiKey.trim()) payload.apiKey = llmForm.value.apiKey.trim();
-  try {
-    if (llmEditingId.value) {
-      await API.llmProfiles.update(llmEditingId.value, payload);
-    } else {
-      await API.llmProfiles.add(payload);
-    }
-    llmStatus.value = '✅ 已保存';
-    resetLlmForm();
-    await loadLlmProfiles();
-    await checkAgentStatus();
-    setTimeout(() => llmStatus.value = '', 3000);
-  } catch (e: any) {
-    llmStatus.value = '❌ ' + (e.message || '保存失败');
-  }
-}
-
-async function setDefaultLlmProfile(p: any) {
-  try {
-    await API.llmProfiles.setDefault(p.id);
-    await loadLlmProfiles();
-  } catch (e: any) {
-    llmStatus.value = '❌ ' + (e.message || '设置失败');
-  }
-}
-
-async function deleteLlmProfile(p: any) {
-  if (!confirm(`确定删除模型「${p.name}」？`)) return;
-  try {
-    await API.llmProfiles.remove(p.id);
-    if (llmEditingId.value === p.id) resetLlmForm();
-    await loadLlmProfiles();
-    await checkAgentStatus();
-  } catch (e: any) {
-    llmStatus.value = '❌ ' + (e.message || '删除失败');
-  }
-}
-
-async function testLlmProfile() {
-  const profile = llmEditingId.value
-    ? { profileRef: llmEditingId.value, provider: llmForm.value.provider, model: llmForm.value.model, baseUrl: llmForm.value.baseUrl, apiKey: llmForm.value.apiKey }
-    : { provider: llmForm.value.provider, model: llmForm.value.model, baseUrl: llmForm.value.baseUrl, apiKey: llmForm.value.apiKey };
-  if (profile.provider !== 'ollama' && !profile.apiKey && !profile.profileRef) {
-    llmStatus.value = '❌ 非 Ollama 提供商需要填写 API Key';
-    return;
-  }
-  llmStatus.value = '⏳ 正在测试连接...';
-  try {
-    const result = await API.llmProfiles.test(profile);
-    llmStatus.value = result.ok ? (result.message + (result.response ? ` → "${result.response}"` : '')) : result.message;
-  } catch (e) {
-    llmStatus.value = '❌ 测试异常: ' + (e.message || e);
-  }
-  setTimeout(() => {
-    if (llmStatus.value.startsWith('⏳')) llmStatus.value = '';
-  }, 15000);
-}
-
 async function saveReportSettings() {
   try {
     await API.config.set({
@@ -647,9 +460,8 @@ async function saveHttpPort() {
 
 onMounted(async () => {
   await loadConfig();
-  checkAgentStatus();
-  await loadLlmProfiles();
   await loadProjects();
+  await loadNotesDir();
   await loadTasks();
   await loadSchedulerStatus();
   try {
@@ -740,6 +552,8 @@ onBeforeUnmount(() => {});
 .form-group { margin-bottom: 12px; }
 .form-group label { display: block; font-size: 13px; font-weight: 500; color: #5c5f66; margin-bottom: 4px; }
 .form-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.input-with-btn { display: flex; gap: 8px; }
+.input-with-btn .form-control { flex: 1; }
 .flex { display: flex; align-items: center; }
 .text-muted { color: var(--text-muted); font-size: 13px; }
 .mb-2 { margin-bottom: 8px; }

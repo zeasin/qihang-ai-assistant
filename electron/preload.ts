@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   kb: {
     list: () => ipcRenderer.invoke('kb:list'),
     add: (name: string, path: string) => ipcRenderer.invoke('kb:add', { name, path }),
+    setDir: (dir: string) => ipcRenderer.invoke('kb:setDir', { dir }),
     remove: (id: number) => ipcRenderer.invoke('kb:remove', { id }),
     scan: (id: number) => ipcRenderer.invoke('kb:scan', { id }),
     search: (id: number, query: string) => ipcRenderer.invoke('kb:search', { id, query }),
@@ -99,6 +100,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Agent
   agent: {
     status: () => ipcRenderer.invoke('agent:status'),
+  },
+
+  // pi agent 模型
+  pi: {
+    models: () => ipcRenderer.invoke('pi:models'),
   },
 
   // LLM Profiles (multi-model)

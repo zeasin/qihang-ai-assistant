@@ -35,7 +35,7 @@ try {
 import * as db from './services/database';
 import * as orchestrator from './services/orchestrator';
 import * as llm from './services/llm';
-import { runPi } from './services/pi-agent';
+import { runPi, listPiModels } from './services/pi-agent';
 import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
 import * as indexer from './services/indexer';
@@ -485,6 +485,17 @@ ipcMain.handle('code:search', (_, { projectId, query }) => {
 ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
   return db.project.add(name, 'note', dirPath, '', '');
 });
+ipcMain.handle('kb:setDir', (_, { dir }) => {
+  const notes = db.project.list('note');
+  let p = notes[0];
+  if (!p) {
+    p = db.project.add('笔记库', 'note', dir, '', '');
+  } else if (p.dir !== dir) {
+    db.project.update(p.id, { dir });
+  }
+  db.project.setDefault(p.id);
+  return db.project.get(p.id);
+});
 ipcMain.handle('kb:remove', (_, { id }) => db.project.remove(id));
 let _indexingLock = false;
 
@@ -750,6 +761,7 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
 
 // 将应用内模型档案映射为 pi 的 model pattern；无法映射时用 pi 默认模型
 function piModelPattern(modelName) {
+  if (modelName.includes('/')) return modelName; // 已是 pi 原生 provider/id pattern，直传
   if (!modelName) return undefined;
   try {
     const profile = llm.resolveProfile(modelName);
@@ -763,6 +775,9 @@ function piModelPattern(modelName) {
     return undefined;
   }
 }
+
+// --- pi agent 模型列表 ---
+ipcMain.handle('pi:models', async () => listPiModels());
 
 // --- Projects ---
 ipcMain.handle('project:list', (_, { type } = {}) => db.project.list(type));

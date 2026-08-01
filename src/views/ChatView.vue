@@ -31,8 +31,19 @@
 
     <!-- ========== 右栏：对话区 ========== -->
     <div class="chat-main">
+      <!-- 无对话时：未配置笔记库 → 首次引导 -->
+      <div v-if="!currentSessionId && kbLoaded && !defaultKbId" class="chat-empty">
+        <div class="empty-icon">📚</div>
+        <div class="empty-title">欢迎使用启航 AI 助理</div>
+        <div class="empty-desc">
+          第一步：配置本地笔记库路径<br>
+          笔记库用于知识检索与 AI 问答，可在设置页随时修改
+        </div>
+        <button class="btn btn-primary btn-lg" @click="setupNotesDir">📂 选择笔记库目录</button>
+      </div>
+
       <!-- 无对话时 -->
-      <div v-if="!currentSessionId" class="chat-empty">
+      <div v-else-if="!currentSessionId" class="chat-empty">
         <div class="empty-icon">🤖</div>
         <div class="empty-title">启航 AI 助理</div>
         <div class="empty-desc">
@@ -47,23 +58,6 @@
         <div class="chat-header">
           <div class="chat-header-left">
             <h3 class="chat-title">{{ currentSession?.title || '对话' }}</h3>
-          </div>
-          <div class="chat-header-right">
-            <div class="kb-switcher" v-if="kbLibraries.length">
-              <span class="header-label">笔记库:</span>
-              <select v-model="selectedKbId" class="header-select" title="附加知识库上下文">
-                <option :value="null">不附加</option>
-                <option v-for="p in kbLibraries" :key="p.id" :value="p.id">{{ p.name }}</option>
-              </select>
-            </div>
-            <div class="model-switcher" v-if="llmProfiles.length">
-              <span class="header-label">模型:</span>
-              <select v-model="selectedModelId" class="header-select" title="选择对话使用的大模型">
-                <option v-for="p in llmProfiles" :key="p.id" :value="p.id">
-                  {{ p.name }} · {{ p.model }}{{ p.isDefault ? ' ⭐' : '' }}
-                </option>
-              </select>
-            </div>
           </div>
         </div>
 
@@ -98,7 +92,7 @@
             <textarea
               v-model="inputText"
               class="chat-input"
-              :placeholder="selectedKbId ? '输入问题，Enter 发送... (已附加笔记库上下文)' : '输入问题，Enter 发送...'"
+              :placeholder="defaultKbId ? '输入问题，Enter 发送... (已附加笔记库上下文)' : '输入问题，Enter 发送...'"
               @keydown.enter.exact.prevent="sendMessage"
               @paste="handlePaste"
               @compositionstart="composing = true"
@@ -123,6 +117,12 @@
                   </svg>
                 </button>
                 <input ref="fileInputRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
+                <select class="model-selector" v-model="selectedModel" :disabled="isStreaming" title="选择模型">
+                  <option value="">默认模型</option>
+                  <option v-for="m in piModels" :key="m.pattern" :value="m.pattern">
+                    {{ m.providerLabel }} · {{ m.name }}
+                  </option>
+                </select>
                 <span class="input-hint">Enter 发送 · Shift+Enter 换行 · pi agent 驱动</span>
               </div>
               <div class="input-right">
@@ -161,32 +161,49 @@ const inputText = ref('');
 const isStreaming = ref(false);
 const composing = ref(false);
 const thinkingText = ref('');
-const llmProfiles = ref<any[]>([]);
-const selectedModelId = ref<number | null>(null);
-const kbLibraries = ref<any[]>([]);
-const selectedKbId = ref<number | null>(null);
+const defaultKbId = ref<number | null>(null);
+const kbLoaded = ref(false);
 const inputRef = ref<HTMLTextAreaElement>();
 const messagesContainer = ref<HTMLElement>();
 const pendingImages = ref<{ data: string; mimeType: string }[]>([]);
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const piModels = ref<{ provider: string; providerLabel: string; id: string; name: string; pattern: string; configured: boolean }[]>([]);
+const selectedModel = ref('');
+const modelsLoaded = ref(false);
 
 const CHAT_STATE_KEY = 'chat_home_state';
+const CHAT_MODEL_KEY = 'chat_home_model';
 
 // ========== 加载数据 ==========
-async function loadLlmProfiles() {
-  try {
-    llmProfiles.value = await API.llmProfiles.list();
-    const defaultP = llmProfiles.value.find(p => p.isDefault) || llmProfiles.value[0];
-    if (defaultP && selectedModelId.value === null) {
-      selectedModelId.value = defaultP.id;
-    }
-  } catch { llmProfiles.value = []; }
-}
-
 async function loadKbLibraries() {
   try {
-    kbLibraries.value = await API.kb.list();
-  } catch { kbLibraries.value = []; }
+    const list = await API.kb.list();
+    defaultKbId.value = list.length ? list[0].id : null;
+  } catch { defaultKbId.value = null; }
+  kbLoaded.value = true;
+}
+
+async function loadPiModels() {
+  try {
+    const res = await API.pi.models();
+    piModels.value = (res?.models || []).filter((m) => m.pattern);
+    const saved = localStorage.getItem(CHAT_MODEL_KEY);
+    if (saved && piModels.value.some((m) => m.pattern === saved)) selectedModel.value = saved;
+  } catch { piModels.value = []; }
+  modelsLoaded.value = true;
+}
+
+async function setupNotesDir() {
+  try {
+    const dir = await API.dialog.openDirectory();
+    if (!dir) return;
+    const p = await API.kb.setDir(dir);
+    await loadKbLibraries();
+    await loadSessions();
+    await newSession();
+  } catch (e: any) {
+    alert('配置失败: ' + (e.message || e));
+  }
 }
 
 async function loadSessions() {
@@ -352,7 +369,7 @@ async function doSend(text: string) {
   scrollToBottom();
 
   const sid = currentSessionId.value;
-  const kbIds = selectedKbId.value ? [selectedKbId.value] : undefined;
+  const kbIds = defaultKbId.value ? [defaultKbId.value] : undefined;
 
   API.removeAllListeners('chat:delta');
   API.removeAllListeners('chat:status');
@@ -419,7 +436,9 @@ async function doSend(text: string) {
   API.on('chat:error', onError);
 
   try {
-    await API.chat.send(text, sid, '', kbIds, images.length ? images : undefined, 'general', selectedModelId.value || undefined);
+    await API.chat.send(text, sid, '', kbIds, images.length ? images : undefined, 'general', selectedModel.value || undefined);
+    if (selectedModel.value) localStorage.setItem(CHAT_MODEL_KEY, selectedModel.value);
+    else localStorage.removeItem(CHAT_MODEL_KEY);
   } catch (err: any) {
     isStreaming.value = false;
     const msg = messages.value[msgIdx];
@@ -457,7 +476,7 @@ const autoResizeTextarea = () => {
 
 // ========== 生命周期 ==========
 onMounted(async () => {
-  await Promise.all([loadLlmProfiles(), loadKbLibraries(), loadSessions()]);
+  await Promise.all([loadKbLibraries(), loadSessions(), loadPiModels()]);
   await restoreState();
 });
 
@@ -639,6 +658,11 @@ onBeforeUnmount(() => {
   margin-bottom: 8px;
 }
 
+.btn-lg {
+  padding: 10px 24px;
+  font-size: 14px;
+}
+
 .chat-header {
   display: flex;
   align-items: center;
@@ -656,37 +680,15 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-.chat-header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.kb-switcher,
-.model-switcher {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.header-label {
+.model-selector {
   font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.header-select {
-  padding: 4px 8px;
+  padding: 3px 6px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  background: white;
+  border-radius: 6px;
+  background: var(--bg-primary);
   color: var(--text-primary);
-  outline: none;
   max-width: 180px;
-}
-
-.header-select:focus {
-  border-color: var(--primary);
+  outline: none;
 }
 
 .chat-messages {

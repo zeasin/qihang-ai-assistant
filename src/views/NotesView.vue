@@ -10,12 +10,8 @@
           </button>
         </div>
         <div class="project-bar">
-          <select class="proj-select" v-model="selectedKbId" @change="onKbChange">
-            <option value="" disabled>选择项目</option>
-            <option v-for="p in kbList" :key="p.id" :value="p.id">
-              {{ p.name }}{{ p.is_default ? ' ★' : '' }}
-            </option>
-          </select>
+          <span v-if="selectedProject" class="proj-name">{{ selectedProject.name }}</span>
+          <span v-else class="proj-name text-muted">未配置笔记库</span>
           <template v-if="selectedProject?.type === 'note'">
           <button class="btn-icon" :disabled="indexing" @click="indexCurrentProject" :title="hasIndexed ? '重新索引' : '构建索引'">{{ indexing ? '⏳' : '📇' }}</button>
           <span class="index-status">{{ indexing ? progressText : (hasIndexed ? '已索引' : '') }}</span>
@@ -44,7 +40,7 @@
 
           <template v-if="!searchActive">
           <div v-if="!selectedKbId" class="tree-placeholder">
-            <div class="placeholder-text">请选择笔记库</div>
+            <div class="placeholder-text">未配置笔记库，请到设置页配置</div>
           </div>
           <div v-else-if="treeData.length === 0" class="tree-placeholder">
             <div class="placeholder-text">暂无文件</div>
@@ -85,16 +81,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import TreeNode from '@/components/TreeNode.vue';
 
 const API = window.electronAPI;
-const route = useRoute();
-const router = useRouter();
 
 const kbList = ref<any[]>([]);
 const selectedKbId = ref('');
@@ -138,44 +131,16 @@ const renderedContent = computed(() => {
   return '<pre><code class="hljs ' + (lang ? 'language-' + lang : '') + '">' + highlighted + '</code></pre>';
 });
 
-// 从 URL 查询参数同步 kbId
-watch(() => route.query.kbId, (newId) => {
-  if (newId && newId !== String(selectedKbId.value)) {
-    selectedKbId.value = Number(newId);
-    loadFileTree();
-    loadIndexedState(selectedKbId.value);
-  }
-});
-
-// 监听 kbId 变化，同步到 URL
-watch(selectedKbId, (newId, oldId) => {
-  if (newId && newId !== oldId) {
-    router.replace({ query: { ...route.query, kbId: newId } });
-    selectedFile.value = null;
-    fileContent.value = '';
-  } else if (!newId) {
-    router.replace({ query: {} });
-  }
-});
-
 async function loadKbList() {
   try {
-    const list = await API.project.list();
+    const list = await API.kb.list();
     kbList.value = list;
-    // 优先使用 URL 中的 kbId
-    const urlKbId = Number(route.query.kbId);
-    if (urlKbId && list.find((k: any) => k.id === urlKbId)) {
-      selectedKbId.value = urlKbId;
-    } else if (list.length > 0) {
-      // 没有 URL 参数时选中第一个或默认
-      const defaultKb = list.find((k: any) => k.is_default === 1 || k.is_default === true);
-      selectedKbId.value = defaultKb ? defaultKb.id : list[0].id;
-    } else {
-      selectedKbId.value = '';
-    }
-    if (selectedKbId.value) {
+    if (list.length > 0) {
+      selectedKbId.value = list[0].id;
       await loadFileTree();
       await loadIndexedState(selectedKbId.value);
+    } else {
+      selectedKbId.value = '';
     }
   } catch (e) {
     console.warn('加载笔记库失败:', e);
@@ -219,14 +184,6 @@ async function loadIndexedState(projectId: number | string) {
     indexedState.value[projectId] = false;
   }
 }
-
-const onKbChange = async () => {
-  selectedFile.value = null;
-  fileContent.value = '';
-  treeData.value = [];
-  await loadFileTree();
-  await loadIndexedState(selectedKbId.value);
-};
 
 function escapeHtml(text: string): string {
   if (!text) return '';
@@ -376,6 +333,16 @@ onUnmounted(() => {
 }
 .project-bar .proj-select:focus {
   border-color: var(--primary);
+}
+
+.project-bar .proj-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .btn-icon {

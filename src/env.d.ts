@@ -36,6 +36,7 @@ interface ElectronAPI {
   kb: {
     list: () => Promise<any[]>;
     add: (name: string, path: string) => Promise<any>;
+    setDir: (dir: string) => Promise<any>;
     remove: (id: string) => Promise<void>;
     scan: (id: string) => Promise<any>;
     search: (id: string, query: string) => Promise<any[]>;
@@ -51,7 +52,7 @@ interface ElectronAPI {
     remove: (datasetId: string) => Promise<void>;
   };
   chat: {
-    send: (question: string, sessionId?: string, projectDir?: string, kbIds?: string[], images?: any[], agent?: string) => Promise<void>;
+    send: (question: string, sessionId?: string, projectDir?: string, kbIds?: string[], images?: any[], agent?: string, modelName?: string) => Promise<void>;
     createSession: (sessionId?: string, projectId?: number, title?: string, mode?: string, agent?: string, source?: string) => Promise<any>;
     getSessions: (projectId?: number) => Promise<any[]>;
     getSessionsBySource: (source: string, projectId?: number) => Promise<any[]>;
@@ -69,6 +70,12 @@ interface ElectronAPI {
   };
   agent: {
     status: () => Promise<{ pi: any; langchain?: any }>;
+  };
+  pi: {
+    models: () => Promise<{
+      models: { provider: string; providerLabel: string; id: string; name: string; pattern: string; configured: boolean }[];
+      error?: string;
+    }>;
   };
   llmProfiles: {
     list: () => Promise<any[]>;

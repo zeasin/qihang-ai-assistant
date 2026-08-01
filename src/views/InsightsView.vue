@@ -51,8 +51,7 @@
         <div v-else class="index-empty">
           <div class="index-empty-icon">📭</div>
           <div class="index-empty-text">没有配置笔记库</div>
-          <div class="index-empty-desc">请先添加一个笔记库目录，系统会自动索引其中的 Markdown 文件</div>
-          <button class="index-add-btn" @click="addNoteProject">➕ 添加笔记库</button>
+          <div class="index-empty-desc">请到「设置」页配置笔记库目录，系统会自动索引其中的 Markdown 文件</div>
         </div>
       </div>
 
@@ -61,10 +60,6 @@
           <!-- 搜索 -->
           <div class="search-card">
             <div class="search-bar">
-              <select v-model="searchKbId" class="search-kb-select">
-                <option value="">全部笔记库</option>
-                <option v-for="kb in kbList" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
-              </select>
               <input v-model="searchQuery" class="search-input" placeholder="搜索笔记..." @keyup.enter="performSearch">
               <button class="search-btn" @click="performSearch">搜索</button>
             </div>
@@ -178,30 +173,14 @@
       </div>
     </div>
   </div>
-
-  <!-- 新建笔记库名称输入 -->
-  <div class="modal-overlay" :class="{ visible: showNamePrompt }" @click.self="showNamePrompt = false">
-    <div class="prompt-box">
-      <div class="prompt-title">新建笔记库</div>
-      <input v-model="newProjectName" class="prompt-input" placeholder="请输入笔记库名称" @keyup.enter="confirmAddProject" ref="nameInputRef">
-      <div class="prompt-actions">
-        <button class="btn btn-secondary" @click="showNamePrompt = false">取消</button>
-        <button class="btn btn-primary" @click="confirmAddProject">确定</button>
-      </div>
-    </div>
-  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 
 const API = window.electronAPI;
 
 const kbList = ref<any[]>([]);
-const showNamePrompt = ref(false);
-const newProjectName = ref('');
-const nameInputRef = ref<HTMLInputElement | null>(null);
-const searchKbId = ref('');
 const searchQuery = ref('');
 const searchResults = ref<any[]>([]);
 const showSearchResults = ref(false);
@@ -348,8 +327,9 @@ const performSearch = async () => {
   const query = searchQuery.value.trim();
   if (!query) return;
   lastQuery.value = query;
+  const kbId = kbList.value[0]?.id || '';
   try {
-    const results = await API.kb.search(searchKbId.value, query);
+    const results = await API.kb.search(kbId, query);
     searchResults.value = results.map((r: any, i: number) => ({
       id: i,
       title: r.source ? r.source.split(/[\\/]/).pop() : '未知',
@@ -455,28 +435,6 @@ async function loadIndexerInfo() {
     indexerInfo.value = await API.insights.indexerInfo();
     libraryStats.value = await API.insights.libraryStats();
   } catch {}
-}
-
-async function addNoteProject() {
-  showNamePrompt.value = true;
-  newProjectName.value = '';
-  await nextTick();
-  nameInputRef.value?.focus();
-}
-
-async function confirmAddProject() {
-  const name = newProjectName.value.trim();
-  if (!name) return;
-  showNamePrompt.value = false;
-  const dir = await API.dialog.openDirectory();
-  if (!dir) return;
-  try {
-    await API.kb.add(name, dir);
-    const list = await API.kb.list();
-    kbList.value = list;
-  } catch (e) {
-    alert('添加失败: ' + (e.message || e));
-  }
 }
 
 async function indexProject(id: number) {
