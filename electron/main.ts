@@ -40,7 +40,6 @@ import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
 import * as indexer from './services/indexer';
 import logger from './services/logger';
-import * as httpserver from './services/httpserver';
 import { createTrayIcon } from './icon';
 import * as rag from './services/rag';
 
@@ -77,10 +76,6 @@ function updateTrayMenu(servicesStatus?) {
     {
       label: `自动索引: ${s.indexer ? '● 运行中' : '○ 已停止'}`,
       click: () => mainWindow?.webContents.send('service:toggle', 'indexer'),
-    },
-    {
-      label: `远程访问: ${s.httpserver ? '● 运行中' : '○ 已停止'}`,
-      enabled: false,
     },
     { type: 'separator' },
     {
@@ -159,7 +154,6 @@ function stopAllServices() {
   feishu.stop();
   scheduler.stop();
   indexer.stop();
-  httpserver.stop();
 }
 
 function getServicesStatus() {
@@ -167,7 +161,6 @@ function getServicesStatus() {
     feishu: feishu.isRunning(),
     scheduler: scheduler.isRunning(),
     indexer: indexer.isRunning(),
-    httpserver: httpserver.isRunning(),
   };
 }
 
@@ -1160,7 +1153,6 @@ ipcMain.handle('config:get', () => {
     dailyReportRetentionDays: db.configGet('daily_report_retention_days') || '30',
     dailyReportPrompt: db.configGet('daily_report_prompt') || '',
     dailyReportTemplate: db.configGet('daily_report_template') || scheduler.DEFAULT_REPORT_TEMPLATE || '',
-    httpPort: db.configGet('httpPort') || '15173',
   };
 });
 ipcMain.handle('config:set', (_, cfg) => {
@@ -1216,10 +1208,6 @@ app.whenReady().then(async () => {
     logger.info('Auto-starting Feishu bot from saved config...');
     startFeishu({ app_id: savedAppId, app_secret: savedAppSecret });
   }
-
-  const port = parseInt(db.configGet('httpPort') || '15173', 10);
-  httpserver.start(port, db);
-  logger.info('[HttpServer] Started on port %d', port);
 
   scheduler.start();
   logger.info('[Scheduler] auto-started');

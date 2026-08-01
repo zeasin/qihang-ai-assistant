@@ -119,18 +119,7 @@ npm run electron:build</pre>
           <tr><td>索引失败</td><td>嵌入模型服务未启动</td><td>确认 Ollama 运行或 API 地址正确</td></tr>
           <tr><td>飞书消息收不到</td><td>Webhook 未配置或 Bot 未启动</td><td>在设置页检查飞书配置</td></tr>
           <tr><td>定时任务未执行</td><td>调度器未开启</td><td>在设置页确认调度器运行中</td></tr>
-          <tr><td>远程访问无法连接</td><td>端口未开放或防火墙阻止</td><td>在设置页配置 HTTP 端口并重启，检查防火墙设置</td></tr>
         </table>
-      </div>
-
-      <div class="card">
-        <h2>🌐 远程访问</h2>
-        <p class="text-muted mb-2">启航AI工作台内置 HTTP 服务，可通过浏览器远程访问部分功能。</p>
-        <ul>
-          <li><strong>开启方式</strong> — 在设置页 → HTTP 远程管理 中配置端口（默认 <code>15173</code>），保存后重启应用</li>
-          <li><strong>访问地址</strong> — 同一网络下通过浏览器访问 <code>http://本机IP:端口</code> 即可</li>
-          <li><strong>功能范围</strong> — 笔记库浏览、数据查看、状态监控等</li>
-        </ul>
       </div>
 
       <div class="card">

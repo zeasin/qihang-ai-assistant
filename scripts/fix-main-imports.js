@@ -16,7 +16,6 @@ const subs = [
   ["const scheduler = require('./services/scheduler');", "import * as scheduler from './services/scheduler';"],
   ["const indexer = require('./services/indexer');", "import * as indexer from './services/indexer';"],
   ["const logger = require('./services/logger');", "import * as logger from './services/logger';"],
-  ["const httpserver = require('./services/httpserver');", "import * as httpserver from './services/httpserver';"],
   ['const { createTrayIcon } = require("./icon");', "import { createTrayIcon } from './icon';"],
   ['const rag = require("./services/rag");', "import * as rag from './services/rag';"],
   ["const wt = require('worker_threads');", "import * as wt from 'worker_threads';"],
