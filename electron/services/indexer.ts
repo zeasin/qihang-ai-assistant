@@ -7,22 +7,15 @@ import logger from './logger';
 let watchers = new Map();
 let running = false;
 
-async function indexSingle(projectId, onProgress?) {
-  const project = db.project.get(projectId);
-  if (!project) throw new Error(`项目 ${projectId} 不存在`);
-  if (project.type !== 'note') throw new Error(`项目 ${project.name} 不是笔记库类型`);
-  logger.info(`[Indexer] indexing: ${project.name} (${project.dir})`);
-
-  // 读取项目级忽略配置
-  const ignoreDirs = project.ignore_dirs ? project.ignore_dirs.split(',').map(s => s.trim()).filter(Boolean) : [];
-  const ignoreFiles = project.ignore_files ? project.ignore_files.split(',').map(s => s.trim()).filter(Boolean) : [];
+async function indexSingle(dir, onProgress?) {
+  logger.info(`[Indexer] indexing: ${dir}`);
 
   // 清空旧索引
-  db.project.deleteDocs(projectId);
+  db.project.deleteDocs();
 
   // 扫描文件，写入 kb_documents 和 kb_chunks（纯文本）
   const files: any[] = [];
-  walkDir(project.dir, files, ignoreDirs, ignoreFiles);
+  walkDir(dir, files, [], []);
   const total = files.length;
   for (let i = 0; i < total; i++) {
     const file = files[i];
@@ -30,7 +23,7 @@ async function indexSingle(projectId, onProgress?) {
     const content = fs.readFileSync(file, 'utf-8');
     const stat = fs.statSync(file);
     const title = rag.extractTitle(content) || path.basename(file, '.md');
-    const docId = db.project.insertDoc(projectId, file, content, stat.mtimeMs, title);
+    const docId = db.project.insertDoc(file, content, stat.mtimeMs, title);
     const chunks = rag.chunkText(content);
     for (const chunk of chunks) {
       db.project.insertChunk(docId, chunk, null);
@@ -40,7 +33,7 @@ async function indexSingle(projectId, onProgress?) {
 
   // 为所有新 chunk 生成向量嵌入
   if (onProgress) onProgress({ phase: 'embed', current: 0, total: 0, file: '' });
-  const embedded = await rag.indexProjectChunks(projectId, db, onProgress);
+  const embedded = await rag.indexProjectChunks(db, onProgress);
   logger.info(`[Indexer] done: ${total} files, ${embedded} chunks embedded`);
   return { totalChunks: embedded, files: total };
 }
@@ -49,7 +42,7 @@ async function indexAll(onProgress?) {
   const noteProjects = db.project.list('note');
   for (const p of noteProjects) {
     try {
-      await indexSingle(p.id, onProgress);
+      await indexSingle(p.dir, onProgress);
     } catch (e) {
       logger.error(`[Indexer] error indexing ${p.name}:`, e.message);
     }
@@ -65,9 +58,9 @@ function watchAll() {
       const watcher = fs.watch(p.dir, { recursive: true }, (eventType, filename) => {
         if (!filename || !filename.endsWith('.md')) return;
         logger.info(`[Indexer] change detected: ${filename}`);
-        debounceIndex(p.id);
+        debounceIndex(p.dir);
       });
-      watchers.set(p.id, watcher);
+      watchers.set(p.dir, watcher);
     } catch (e) {
       logger.error(`[Indexer] watch error for ${p.name}:`, e.message);
     }
@@ -75,12 +68,12 @@ function watchAll() {
 }
 
 const debounceTimers = new Map();
-function debounceIndex(projectId) {
-  if (debounceTimers.has(projectId)) clearTimeout(debounceTimers.get(projectId));
-  debounceTimers.set(projectId, setTimeout(async () => {
-    debounceTimers.delete(projectId);
+function debounceIndex(dir) {
+  if (debounceTimers.has(dir)) clearTimeout(debounceTimers.get(dir));
+  debounceTimers.set(dir, setTimeout(async () => {
+    debounceTimers.delete(dir);
     try {
-      await indexSingle(projectId);
+      await indexSingle(dir);
     } catch (e) {
       logger.error(`[Indexer] debounce index error:`, e.message);
     }

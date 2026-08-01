@@ -17,9 +17,9 @@ interface ElectronAPI {
     openDirectory: () => Promise<string | null>;
   };
   notes: {
-    tree: (projectId: number) => Promise<TreeNode[]>;
+    tree: (dir: string) => Promise<TreeNode[]>;
     treeChildren: (dirPath: string) => Promise<TreeNode[]>;
-    read: (projectId: number, filePath: string) => Promise<{ ok: boolean; content?: string; error?: string; filePath?: string }>;
+    read: (dir: string, filePath: string) => Promise<{ ok: boolean; content?: string; error?: string; filePath?: string }>;
   };
   log: {
     lines: (options?: { count?: number; tail?: boolean }) => Promise<string[]>;
@@ -34,13 +34,14 @@ interface ElectronAPI {
     testBot: (appId: string, appSecret: string) => Promise<{ ok: boolean; botName?: string; error?: string }>;
   };
   kb: {
+    getDir: () => Promise<string>;
     list: () => Promise<any[]>;
     add: (name: string, path: string) => Promise<any>;
     setDir: (dir: string) => Promise<any>;
-    remove: (id: string) => Promise<void>;
-    scan: (id: string) => Promise<any>;
-    search: (id: string, query: string) => Promise<any[]>;
-    status: (id: string) => Promise<any>;
+    remove: () => Promise<void>;
+    scan: (dir: string) => Promise<any>;
+    search: (dir: string, query: string) => Promise<any[]>;
+    status: (dir: string) => Promise<any>;
   };
   ds: {
     list: () => Promise<any[]>;

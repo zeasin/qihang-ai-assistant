@@ -178,9 +178,8 @@ const CHAT_MODEL_KEY = 'chat_home_model';
 // ========== 加载数据 ==========
 async function loadKbLibraries() {
   try {
-    const list = await API.kb.list();
-    defaultKbId.value = list.length ? list[0].id : null;
-    kbDir.value = list.length ? list[0].dir || '' : '';
+    kbDir.value = await API.kb.getDir();
+    defaultKbId.value = kbDir.value ? 1 : null;
   } catch { defaultKbId.value = null; kbDir.value = ''; }
   kbLoaded.value = true;
 }

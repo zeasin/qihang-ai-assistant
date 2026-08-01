@@ -12,9 +12,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   },
   notes: {
-    tree: (projectId: number) => ipcRenderer.invoke('notes:tree', { projectId }),
+    tree: (dir: string) => ipcRenderer.invoke('notes:tree', { dir }),
     treeChildren: (dirPath: string) => ipcRenderer.invoke('notes:treeChildren', { dirPath }),
-    read: (projectId: number, filePath: string) => ipcRenderer.invoke('notes:read', { projectId, filePath }),
+    read: (dir: string, filePath: string) => ipcRenderer.invoke('notes:read', { dir, filePath }),
   },
   log: {
     lines: (options: unknown) => ipcRenderer.invoke('log:lines', options),
@@ -35,14 +35,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   kb: {
+    getDir: () => ipcRenderer.invoke('kb:getDir'),
     list: () => ipcRenderer.invoke('kb:list'),
     add: (name: string, path: string) => ipcRenderer.invoke('kb:add', { name, path }),
     setDir: (dir: string) => ipcRenderer.invoke('kb:setDir', { dir }),
-    remove: (id: number) => ipcRenderer.invoke('kb:remove', { id }),
-    scan: (id: number) => ipcRenderer.invoke('kb:scan', { id }),
-    search: (id: number, query: string) => ipcRenderer.invoke('kb:search', { id, query }),
-    status: (id: number) => ipcRenderer.invoke('kb:status', { id }),
-    setDefault: (id: number) => ipcRenderer.invoke('kb:setDefault', { id }),
+    remove: () => ipcRenderer.invoke('kb:remove'),
+    scan: (dir: string) => ipcRenderer.invoke('kb:scan', { dir }),
+    search: (dir: string, query: string) => ipcRenderer.invoke('kb:search', { dir, query }),
+    status: (dir: string) => ipcRenderer.invoke('kb:status', { dir }),
+    setDefault: () => ipcRenderer.invoke('kb:setDefault'),
     getDefault: () => ipcRenderer.invoke('kb:getDefault'),
   },
 

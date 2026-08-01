@@ -328,7 +328,7 @@ const feishuMessageHandler = async (msg) => {
         const rag = require('./services/rag');
         let allResults: any[] = [];
         for (const projectId of context.projectIds) {
-          const docs = await rag.hybridSearch(projectId, context.cleanText, 5, db);
+          const docs = await rag.hybridSearch(context.cleanText, 5, db);
           allResults.push(...docs);
         }
         allResults.sort((a, b) => b.score - a.score);
@@ -418,28 +418,36 @@ function startFeishu(configData) {
 
 // ========== IPC Handlers ==========
 
-// --- Projects (Knowledge Base) ---
+// --- Knowledge Base (config.json 驱动) ---
+function ensureNoteProject(dir: string) {
+  const notes = db.project.list('note');
+  let p = notes[0] || null;
+  if (!p) {
+    p = db.project.add('笔记库', 'note', dir, '', '');
+  } else if (p.dir !== dir) {
+    db.project.update(p.id, { dir });
+  }
+  return p;
+}
+
+ipcMain.handle('kb:getDir', () => appConfig.getNotesDir());
+
 ipcMain.handle('kb:list', () => {
   const dir = appConfig.getNotesDir();
   if (!dir) return [];
-  const notes = db.project.list('note');
-  if (notes.length === 0) return [];
-  const p = notes[0];
-  return [{ id: p.id, name: p.name || '笔记库', dir, totalDocs: db.project.docCount(p.id) }];
+  return [{ id: 0, name: '笔记库', dir, totalDocs: 0 }];
 });
-ipcMain.handle('notes:tree', (_, { projectId }) => {
-  const project = db.project.get(projectId);
-  if (!project || !fs.existsSync(project.dir)) return [];
-  return listDir(project.dir);
+ipcMain.handle('notes:tree', (_, { dir }) => {
+  if (!dir || !fs.existsSync(dir)) return [];
+  return listDir(dir);
 });
 ipcMain.handle('notes:treeChildren', (_, { dirPath }) => {
   return listDir(dirPath);
 });
-ipcMain.handle('notes:read', (_, { projectId, filePath }) => {
-  const project = db.project.get(projectId);
-  if (!project) return { ok: false, error: '笔记库不存在' };
-  const fullPath = path.isAbsolute(filePath) ? filePath : path.join(project.dir, filePath);
-  if (!fullPath.startsWith(project.dir)) return { ok: false, error: '路径越权' };
+ipcMain.handle('notes:read', (_, { dir, filePath }) => {
+  if (!dir || !fs.existsSync(dir)) return { ok: false, error: '笔记库不存在' };
+  const fullPath = path.isAbsolute(filePath) ? filePath : path.join(dir, filePath);
+  if (!fullPath.startsWith(dir)) return { ok: false, error: '路径越权' };
   if (!fs.existsSync(fullPath)) return { ok: false, error: '文件不存在' };
   try {
     const buf = fs.readFileSync(fullPath);
@@ -487,25 +495,13 @@ ipcMain.handle('code:search', (_, { projectId, query }) => {
 ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
   if (!dirPath) return null;
   appConfig.setNotesDir(dirPath);
-  const notes = db.project.list('note');
-  let p = notes[0] || null;
-  if (!p) {
-    p = db.project.add('笔记库', 'note', dirPath, '', '');
-  } else if (p.dir !== dirPath) {
-    db.project.update(p.id, { dir: dirPath });
-  }
+  const p = ensureNoteProject(dirPath);
   return db.project.get(p.id);
 });
 ipcMain.handle('kb:setDir', (_, { dir }) => {
   if (!dir) return null;
   appConfig.setNotesDir(dir);
-  const notes = db.project.list('note');
-  let p = notes[0] || null;
-  if (!p) {
-    p = db.project.add('笔记库', 'note', dir, '', '');
-  } else if (p.dir !== dir) {
-    db.project.update(p.id, { dir });
-  }
+  const p = ensureNoteProject(dir);
   return db.project.get(p.id);
 });
 ipcMain.handle('kb:remove', () => {
@@ -523,12 +519,12 @@ function handleWorkerMessages(worker, sendProgress, resolve, track) {
       if (msg.type === 'progress') {
         sendProgress(msg);
       } else if (msg.type === 'deleteOld') {
-        db.runRaw('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', [msg.projectId]);
-        db.runRaw('DELETE FROM kb_documents WHERE project_id = ?', [msg.projectId]);
+        db.runRaw('DELETE FROM kb_chunks', []);
+        db.runRaw('DELETE FROM kb_documents', []);
         db.save();
       } else if (msg.type === 'doc') {
-        db.runRaw("INSERT INTO kb_documents (project_id, path, content, indexed_at, file_mtime, title) VALUES (?, ?, ?, datetime('now', '+8 hours'), ?, ?)", [msg.projectId, msg.path, msg.content, msg.fileMtime || null, msg.title || '']);
-        const docRow = db.qOne('SELECT id FROM kb_documents WHERE project_id = ? AND path = ?', msg.projectId, msg.path);
+        db.runRaw("INSERT INTO kb_documents (path, content, indexed_at, file_mtime, title) VALUES (?, ?, datetime('now', '+8 hours'), ?, ?)", [msg.path, msg.content, msg.fileMtime || null, msg.title || '']);
+        const docRow = db.qOne('SELECT id FROM kb_documents WHERE path = ?', msg.path);
         if (docRow) {
           for (const c of msg.chunks) {
             db.runRaw('INSERT INTO kb_chunks (doc_id, content) VALUES (?, ?)', [docRow.id, c.content]);
@@ -543,8 +539,8 @@ model: appConfig.getConfig('embeddingModel') || '',
           host: appConfig.getConfig('embeddingBaseUrl') || 'http://127.0.0.1:11434',
           apiKey: appConfig.getConfig('embeddingApiKey') || '',
         };
-        const rows = db.q(`SELECT c.id, c.content FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id WHERE d.project_id = ? AND c.embedding IS NULL`, msg.projectId);
-        worker.send({ type: 'embed', projectId: msg.projectId, chunks: rows, config: embedConfig });
+        const rows = db.q(`SELECT c.id, c.content FROM kb_chunks c WHERE c.embedding IS NULL`);
+        worker.send({ type: 'embed', chunks: rows, config: embedConfig });
       } else if (msg.type === 'embedding') {
         db.runRaw('UPDATE kb_chunks SET embedding = ? WHERE id = ?', [JSON.stringify(msg.vector), msg.chunkId]);
         if (++_docBatchCount % 10 === 0) db.save();
@@ -570,15 +566,14 @@ model: appConfig.getConfig('embeddingModel') || '',
   worker.on('exit', () => { _indexingLock = false; resolve({}); });
 }
 
-ipcMain.handle('kb:scan', async (_, { id }) => {
+ipcMain.handle('kb:scan', async (_, { dir }) => {
+  if (!dir) return { error: '笔记库目录未配置' };
   if (_indexingLock) return { error: '正在索引中，请稍后再试' };
   try {
-    const project = db.project.get(id);
-    if (!project || project.type !== 'note') return { error: '只有笔记库类型可以使用此接口' };
     _indexingLock = true;
     const sendProgress = (data) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('kb:scan-progress', { id, ...data });
+        mainWindow.webContents.send('kb:scan-progress', { id: 0, ...data });
       }
     };
     sendProgress({ phase: 'scan', current: 0, total: 0, file: '' });
@@ -589,7 +584,7 @@ ipcMain.handle('kb:scan', async (_, { id }) => {
     return new Promise((resolve) => {
       const track = { fileCount: 0, chunkCount: 0, embedded: 0 };
       handleWorkerMessages(worker, sendProgress, resolve, track);
-      worker.send({ type: 'start', projects: [{ id: project.id, name: project.name, dir: project.dir, ignore_dirs: project.ignore_dirs, ignore_files: project.ignore_files }] });
+      worker.send({ type: 'start', projects: [{ name: '笔记库', dir, ignore_dirs: '', ignore_files: '' }] });
     });
   } catch (e) {
     _indexingLock = false;
@@ -600,23 +595,21 @@ ipcMain.handle('kb:setDefault', () => ({ ok: true }));
 ipcMain.handle('kb:getDefault', () => {
   const dir = appConfig.getNotesDir();
   if (!dir) return null;
-  const notes = db.project.list('note');
-  if (notes.length === 0) return null;
-  return notes[0];
+  return { id: 0, name: '笔记库', dir };
 });
-ipcMain.handle('kb:search', async (_, { id, query }) => {
+ipcMain.handle('kb:search', async (_, { dir, query }) => {
   try {
-    if (!query) return [];
+    if (!query || !dir) return [];
     const rag = require('./services/rag');
-    const results = await rag.hybridSearch(id, query, 10, db);
+    const results = await rag.hybridSearch(query, 10, db);
     return results;
   } catch {
     return [];
   }
 });
-ipcMain.handle('kb:status', (_, { id }) => {
-  const total = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)", id) || {}).c || 0;
-  const embedded = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE embedding IS NOT NULL AND doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)", id) || {}).c || 0;
+ipcMain.handle('kb:status', () => {
+  const total = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks") || {}).c || 0;
+  const embedded = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE embedding IS NOT NULL") || {}).c || 0;
   return { indexed: total > 0, chunks: total, embedded };
 });
 
@@ -878,8 +871,8 @@ ipcMain.handle('insights:reports', () => {
 ipcMain.handle('insights:weeklyReports', () => {
   return db.q("SELECT id, type, report_date, content, substr(content, 1, 100) as summary, created_at FROM ai_analysis WHERE type = 'weekly_report' ORDER BY created_at DESC LIMIT 10");
 });
-ipcMain.handle('insights:subProjects', (_, { projectId }) => {
-  const rows = db.q("SELECT path, content, file_mtime FROM kb_documents WHERE project_id = ?", projectId);
+ipcMain.handle('insights:subProjects', () => {
+  const rows = db.q("SELECT path, content, file_mtime FROM kb_documents");
   const dirMap: any = {};
   for (const row of rows) {
     const dir = row.path ? row.path.split(/[\\/]/).slice(-2, -1)[0] || '根目录' : '根目录';
@@ -889,7 +882,7 @@ ipcMain.handle('insights:subProjects', (_, { projectId }) => {
     dirMap[dir].files.push(row.path);
   }
   const result: any[] = Object.values(dirMap);
-  const analyses = db.q("SELECT dir_path, content FROM ai_analysis WHERE type = 'project_analysis' AND project_id = ?", projectId);
+  const analyses = db.q("SELECT dir_path, content FROM ai_analysis WHERE type = 'project_analysis'");
   for (const p of result) {
     const a = analyses.find(a => a.dir_path === p.name);
     if (a) p.analysis = a.content;
@@ -897,8 +890,8 @@ ipcMain.handle('insights:subProjects', (_, { projectId }) => {
   }
   return result;
 });
-ipcMain.handle('insights:tags', (_, { projectId }) => {
-  const rows = db.q("SELECT content FROM kb_documents WHERE project_id = ?", projectId);
+ipcMain.handle('insights:tags', () => {
+  const rows = db.q("SELECT content FROM kb_documents");
   const tagCount: any = {};
   for (const row of rows) {
     const content = row.content || '';
@@ -922,8 +915,8 @@ ipcMain.handle('insights:tags', (_, { projectId }) => {
   }
   return (Object.entries(tagCount) as any[]).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
 });
-ipcMain.handle('insights:heatmap', (_, { projectId }) => {
-  const rows = db.q("SELECT file_mtime FROM kb_documents WHERE project_id = ? AND file_mtime IS NOT NULL", projectId);
+ipcMain.handle('insights:heatmap', () => {
+  const rows = db.q("SELECT file_mtime FROM kb_documents WHERE file_mtime IS NOT NULL");
   const dateCount: any = {};
   const now = Date.now();
   for (const row of rows) {
@@ -940,7 +933,7 @@ ipcMain.handle('insights:heatmap', (_, { projectId }) => {
   return heatmap;
 });
 ipcMain.handle('insights:analyzeProject', async (_, { projectId, projectName }) => {
-  const rows = db.q("SELECT path, content FROM kb_documents WHERE project_id = ? AND path LIKE ?", projectId, `%${projectName}%`);
+  const rows = db.q("SELECT path, content FROM kb_documents WHERE path LIKE ?", `%${projectName}%`);
   if (!rows.length) return { error: '该项目没有可分析的文件' };
   try {
     const text = await orchestrator.generateProjectAnalysis(projectName, projectId, rows);
@@ -980,7 +973,7 @@ ipcMain.handle('service:indexAll', async () => {
   const worker = fork(path.join(__dirname, 'services', 'index-worker.js'));
 
   const noteProjects = db.project.list('note');
-  const projects = noteProjects.map(p => ({ id: p.id, name: p.name, dir: p.dir, ignore_dirs: p.ignore_dirs, ignore_files: p.ignore_files }));
+  const projects = noteProjects.map(p => ({ name: p.name, dir: p.dir, ignore_dirs: p.ignore_dirs, ignore_files: p.ignore_files }));
 
   return new Promise((resolve) => {
     handleWorkerMessages(worker, sendProgress, resolve, null);
@@ -1005,13 +998,10 @@ ipcMain.handle('insights:indexerInfo', () => {
 });
 
 ipcMain.handle('insights:libraryStats', () => {
-  const projects = db.project.list('note');
-  return projects.map(p => {
-    const docCount = (db.qOne("SELECT COUNT(*) as c FROM kb_documents WHERE project_id = ?", p.id) || {}).c || 0;
-    const chunkCount = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)", p.id) || {}).c || 0;
-    const embeddedCount = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE embedding IS NOT NULL AND doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)", p.id) || {}).c || 0;
-    return { projectId: p.id, name: p.name, docCount, chunkCount, embeddedCount };
-  });
+  const docCount = (db.qOne("SELECT COUNT(*) as c FROM kb_documents") || {}).c || 0;
+  const chunkCount = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks") || {}).c || 0;
+  const embeddedCount = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE embedding IS NOT NULL") || {}).c || 0;
+  return [{ projectId: 0, name: '笔记库', docCount, chunkCount, embeddedCount }];
 });
 
 // --- Dialog ---

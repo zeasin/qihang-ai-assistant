@@ -241,12 +241,7 @@ const noteProjects = computed(() => projects.value
 );
 const noteProject = computed(() => noteProjects.value[0] || null);
 async function loadNotesDir() {
-  const list = await API.kb.list();
-  if (list.length) {
-    notesDir.value = list[0].dir || '';
-  } else {
-    notesDir.value = '';
-  }
+  notesDir.value = await API.kb.getDir();
 }
 async function pickNotesDir() {
   try {

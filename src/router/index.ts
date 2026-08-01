@@ -24,11 +24,7 @@ const routes = [
     path: '/data-module',
     redirect: '/data'
   },
-  {
-    path: '/insights',
-    name: 'Insights',
-    component: () => import('@/views/InsightsView.vue')
-  },
+  
   {
     path: '/planner',
     name: 'Planner',

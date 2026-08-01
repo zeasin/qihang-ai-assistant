@@ -84,8 +84,8 @@ function cosineSimilarity(a, b) {
  * @param {object} db - database module（内部 require，避免循环依赖）
  * @returns {Promise<number>} 嵌入的 chunk 数量
  */
-async function indexProjectChunks(projectId, db, onProgress) {
-  const rows = db.q('SELECT id, content FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?) AND embedding IS NULL', projectId);
+async function indexProjectChunks(db, onProgress) {
+  const rows = db.q('SELECT id, content FROM kb_chunks WHERE embedding IS NULL');
   if (!rows.length) return 0;
 
   let embedded = 0;
@@ -100,7 +100,7 @@ async function indexProjectChunks(projectId, db, onProgress) {
       logger.error(`[RAG] embed error for chunk ${row.id}:`, e.message);
     }
   }
-  logger.info(`[RAG] embedded ${embedded}/${total} chunks for project ${projectId}`);
+  logger.info(`[RAG] embedded ${embedded}/${total} chunks`);
   return embedded;
 }
 
@@ -181,20 +181,12 @@ function positionalWeight(term, queryLen, wordPositions) {
   const weight = 1.0 - (pos / (queryLen - 1)) * 0.5;
   return Math.max(weight, 0.5);
 }
-function keywordSearch(projectId, query, topK = 10, db) {
+function keywordSearch(query, topK = 10, db) {
   const { words, phrase, segmenterWords, queryChars, queryCharSet, wordPositions } = tokenize(query);
   if (words.length === 0 && !phrase) return [];
   logger.info(`[RAG] keywordSearch query="${query}" → words=[${words.join(', ')}]`);
 
-  // 1. 获取所有文档，计算文件名/文件夹/标题得分
-  let docs;
-  if (projectId) {
-    docs = db.q(`SELECT id, path, COALESCE(title, '') as title, project_id
-      FROM kb_documents WHERE project_id = ?`, projectId);
-  } else {
-    docs = db.q(`SELECT id, path, COALESCE(title, '') as title, project_id
-      FROM kb_documents`);
-  }
+  const docs = db.q(`SELECT id, path, COALESCE(title, '') as title FROM kb_documents`);
   if (!docs.length) return [];
 
   const docData = new Map();
@@ -249,22 +241,14 @@ function keywordSearch(projectId, query, topK = 10, db) {
 
     const displayTitle = doc.title || basename;
     docData.set(doc.id, {
-      path: doc.path, title: displayTitle, project_id: doc.project_id,
+      path: doc.path, title: displayTitle,
       fileNameScore, folderScore, titleScore, contentScore: 0, bestChunk: "",
       matchedChars, phraseMatched, contentMatchedChars: new Set(),
     });
   }
 
-  // 2. BM25 内容评分
-  let rows;
-  if (projectId) {
-    rows = db.q(`SELECT c.id, c.content, d.id as doc_id
-      FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
-      WHERE d.project_id = ?`, projectId);
-  } else {
-    rows = db.q(`SELECT c.id, c.content, d.id as doc_id
-      FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id`);
-  }
+  const rows = db.q(`SELECT c.id, c.content, d.id as doc_id
+    FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id`);
 
   if (rows.length) {
     const docLenList = rows.map(r => r.content.length);
@@ -388,7 +372,6 @@ function keywordSearch(projectId, query, topK = 10, db) {
       source: fs.path,
       score: totalScore,
       title: fs.title,
-      project_id: fs.project_id,
       fileNameScore: fs.fileNameScore,
       folderScore: fs.folderScore,
       titleScore: fs.titleScore,
@@ -425,23 +408,16 @@ function keywordSearch(projectId, query, topK = 10, db) {
   return top;
 }
 
-async function hybridSearch(projectId, query, topK = 10, db) {
+async function hybridSearch(query, topK = 10, db) {
   let vectorResults: any[] = [];
   try {
     const queryEmb = await embed(query);
-    let rows;
-    if (projectId) {
-      rows = db.q(`SELECT c.id, c.content, c.embedding, d.path, d.project_id
-        FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
-        WHERE d.project_id = ? AND c.embedding IS NOT NULL`, projectId);
-    } else {
-      rows = db.q(`SELECT c.id, c.content, c.embedding, d.path, d.project_id
-        FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
-        WHERE c.embedding IS NOT NULL`);
-    }
+    const rows = db.q(`SELECT c.id, c.content, c.embedding, d.path
+      FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
+      WHERE c.embedding IS NOT NULL`);
     if (rows.length) {
       vectorResults = rows.map(r => ({
-        text: r.content, source: r.path, project_id: r.project_id,
+        text: r.content, source: r.path,
         score: cosineSimilarity(queryEmb, JSON.parse(r.embedding)),
         title: r.path ? r.path.split(/[\\/]/).pop() : '未知',
         _type: 'vector',
@@ -451,7 +427,7 @@ async function hybridSearch(projectId, query, topK = 10, db) {
     }
   } catch {}
 
-  const keywordResults = keywordSearch(projectId, query, topK * 3, db);
+  const keywordResults = keywordSearch(query, topK * 3, db);
   for (const r of keywordResults) r._type = 'keyword';
 
   if (!vectorResults.length) return keywordResults.slice(0, topK);
@@ -508,19 +484,12 @@ async function hybridSearch(projectId, query, topK = 10, db) {
  * @param {object} db - database module
  * @returns {Promise<Array>} [{ text, source, score, title }]
  */
-async function searchByVector(projectId, query, topK = 5, db) {
+async function searchByVector(query, topK = 5, db) {
   const queryEmb = await embed(query);
 
-  let rows;
-  if (projectId) {
-    rows = db.q(`SELECT c.id, c.content, c.embedding, d.path
-      FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
-      WHERE d.project_id = ? AND c.embedding IS NOT NULL`, projectId);
-  } else {
-    rows = db.q(`SELECT c.id, c.content, c.embedding, d.path
-      FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
-      WHERE c.embedding IS NOT NULL`);
-  }
+  const rows = db.q(`SELECT c.id, c.content, c.embedding, d.path
+    FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id
+    WHERE c.embedding IS NOT NULL`);
 
   if (!rows.length) return [];
 

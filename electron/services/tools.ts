@@ -288,7 +288,7 @@ async function searchKbTool({ query, kbName }, projectDir) {
   let results: any[] = [];
   for (const p of targetProjects) {
     try {
-      const docs = await rag.hybridSearch(p.id, query, 5, db);
+      const docs = await rag.hybridSearch(query, 5, db);
       results.push(...docs.map(d => ({ ...d, kbName: p.name })));
     } catch (e) {
       logger.warn('[Tools] KB search error for %s: %s', p.name, e.message);
@@ -458,10 +458,9 @@ async function queryMessagesTool({ date_from, date_to, role, limit }) {
   return rows.length ? JSON.stringify(rows, null, 2) : '暂无对话数据';
 }
 
-async function queryDocumentsTool({ project_id, date_from, date_to, limit }) {
-  let sql = "SELECT id, project_id, path, substr(content, 1, 300) as content, file_mtime FROM kb_documents WHERE 1=1";
+async function queryDocumentsTool({ date_from, date_to, limit }) {
+  let sql = "SELECT id, path, substr(content, 1, 300) as content, file_mtime FROM kb_documents WHERE 1=1";
   const p: any[] = [];
-  if (project_id) { sql += ' AND project_id = ?'; p.push(project_id); }
   if (date_from) { sql += ' AND file_mtime >= ?'; p.push(date_from); }
   if (date_to) { sql += ' AND file_mtime <= ?'; p.push(date_to); }
   sql += " AND path NOT LIKE '%node_modules%' AND path NOT LIKE '%.git%' ORDER BY file_mtime DESC LIMIT ?";
@@ -546,7 +545,7 @@ async function buildReportToolDefs(kbId) {
   return [
     { name: 'query_todos', description: '查询待办事项（plan_todos），可按状态( done / in_progress / pending )、优先级、日期范围过滤。不传参数则返回最近的待办。', schema: z.object({ status: z.string().optional().nullable().describe('过滤状态: done / in_progress / pending'), priority: z.string().optional().nullable().describe('过滤优先级: high / mid / low'), date_from: z.string().optional().nullable().describe('起始日期 YYYY-MM-DD'), date_to: z.string().optional().nullable().describe('结束日期 YYYY-MM-DD'), limit: z.coerce.number().optional().nullable().describe('返回条数上限，默认30') }), func: queryTodosTool },
     { name: 'query_messages', description: '查询聊天/对话记录（prj_messages）。可过滤日期范围、角色( user / assistant )。', schema: z.object({ date_from: z.string().optional().nullable(), date_to: z.string().optional().nullable(), role: z.string().optional().nullable().describe('角色: user / assistant'), limit: z.coerce.number().optional().nullable().describe('默认20') }), func: queryMessagesTool },
-    { name: 'query_documents', description: '查询知识库中文档更新记录（kb_documents）。可过滤知识库ID、日期范围。', schema: z.object({ project_id: z.coerce.number().optional().nullable().describe('项目/知识库ID'), date_from: z.string().optional().nullable(), date_to: z.string().optional().nullable(), limit: z.coerce.number().optional().nullable().describe('默认20') }), func: queryDocumentsTool },
+    { name: 'query_documents', description: '查询知识库中文档更新记录（kb_documents）。可过滤日期范围。', schema: z.object({ date_from: z.string().optional().nullable(), date_to: z.string().optional().nullable(), limit: z.coerce.number().optional().nullable().describe('默认20') }), func: queryDocumentsTool },
     { name: 'query_data_records', description: '查询数据中心记录（data_center_records）。可过滤数据集名称、日期范围。', schema: z.object({ dataset_name: z.string().optional().nullable().describe('数据集名称关键词（模糊匹配）'), date_from: z.string().optional().nullable(), date_to: z.string().optional().nullable(), limit: z.coerce.number().optional().nullable().describe('默认20') }), func: queryDataRecordsTool },
     { name: 'query_reminders', description: '查询已启用的提醒事项（plan_reminders）。', schema: z.object({}), func: queryRemindersTool },
     { name: 'get_today_info', description: '获取当前日期信息（今天的中国日期、项目/知识库名称等）。', schema: z.object({}), func: async (args, ctx) => getTodayInfoTool(args, kbId) },

@@ -339,7 +339,7 @@ const SYSTEM_PROMPT = `你是一位日报生成助手。请使用提供的工具
 ## 可用工具
 - query_todos — 查询待办事项（plan_todos，按状态、优先级、日期）
 - query_messages — 查询今日对话记录
-- query_documents — 查询今日更新的文档/笔记（可指定 project_id 过滤）
+- query_documents — 查询今日更新的文档/笔记
 - query_data_records — 查询数据中心记录
 - query_reminders — 查询已启用的提醒
 - get_today_info — 获取当前日期、项目信息
@@ -578,52 +578,30 @@ const executors = {
   },
   'auto_index': async (task) => {
     logger.info(`[Scheduler] auto-index triggered: ${task.name}`);
-    const projectIds: any[] = [task.project_id].filter(Boolean);
-    if (!projectIds.length) {
-      const config = JSON.parse(task.params_json || '{}');
-      projectIds.push(...(config.project_ids || (config.kb_id ? [config.kb_id] : [])));
-    }
-    if (projectIds.length) {
-      for (const projectId of projectIds) {
-        try {
-          const indexer = require('./indexer');
-          await indexer.indexSingle(projectId);
-        } catch (e) {
-          logger.error(`[Scheduler] index error for ${projectId}: ${e.message}`);
-        }
+    const noteProjects = db.project.list('note');
+    for (const p of noteProjects) {
+      try {
+        const indexer = require('./indexer');
+        await indexer.indexSingle(p.dir);
+      } catch (e) {
+        logger.error(`[Scheduler] index error for ${p.name}: ${e.message}`);
       }
     }
   },
 'daily_report': async (task) => {
     logger.info(`[Scheduler] daily report: ${task.name}`);
-    let mainProjectId: any = null;
     let today = getChinaDate();
     try {
-      let projectIds = [task.project_id].filter(Boolean);
-      if (!projectIds.length) {
-        const config = JSON.parse(task.params_json || '{}');
-        projectIds = config.project_ids;
-        if (!projectIds || !projectIds.length) {
-          if (config.kb_id) {
-            projectIds = [config.kb_id];
-          } else {
-            const firstProject = db.qOne("SELECT id FROM prj_projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
-            if (firstProject) projectIds = [firstProject.id];
-          }
-        }
-      }
-      if (!projectIds || !projectIds.length) { logger.warn('[Scheduler] daily_report: no project available'); return; }
-      today = getChinaDate();
-      const projectNames = projectIds.map(id => (db.qOne("SELECT name FROM prj_projects WHERE id = ?", id) || {}).name || '笔记库').join(', ');
-      mainProjectId = projectIds[0];
+      const firstProject = db.qOne("SELECT id, name FROM prj_projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
+      const mainProjectId = firstProject ? firstProject.id : null;
+      const kbName = firstProject ? firstProject.name : '笔记库';
+      if (!mainProjectId) { logger.warn('[Scheduler] daily_report: no note project available'); return; }
 
-      // ========== Default User Prompt (editable in config page) ==========
+      today = getChinaDate();
+
       const DEFAULT_USER_PROMPT = '请按以下格式生成日报：\n\n## 日报格式要求\n使用 Markdown 格式，包含以下板块：\n\n### 1️⃣ 今日概览\n- ✅ 完成任务数量、📋 待办数量、💬 对话次数、📝 笔记更新数、🗂️ 新增记录数\n\n### 2️⃣ 今日完成\n- 列出今日完成的任务，高优先级的用 ⭐ 标记\n\n### 3️⃣ 待办事项\n- 逾期的用 🔴 标记并注明逾期天数\n- 进行中的用 🔄 标记\n- 高优先级的用 🔴 标记\n\n### 4️⃣ 对话与沟通\n- 今日对话次数和简要摘要\n\n### 5️⃣ 笔记与记录\n- 更新的文档和新增的记录\n\n### 6️⃣ 今日提醒\n- 已启用的提醒（如有）\n\n### 7️⃣ 综合评估\n- 根据完成任务、待办处理、知识沉淀等维度给出今日效率评分（0-100分）\n- 给出具体的改进行动建议\n\n## 注意事项\n- 数据为空的部分可以略过，不要编造数据\n- 评分要合理，基于实际数据给出\n- 建议要具体、可执行\n- 语言简洁专业，使用中文';
 
-      // User-editable part (from config.json or default)
       const userPart = appConfig.getConfig('daily_report_prompt') || DEFAULT_USER_PROMPT;
-
-      // Combine: system (hardcoded) + user (editable)
       const fullPrompt = SYSTEM_PROMPT + '\n\n=== 用户格式要求 ===\n\n' + userPart;
 
       logger.info('[Scheduler] Calling AI to generate daily report...');
@@ -635,7 +613,6 @@ const executors = {
         mainProjectId, r, fullPrompt, today);
       logger.info(`[Scheduler] daily report saved for project ${mainProjectId}`);
 
-      // Cleanup: keep only last N days of reports
       const retentionDays = parseInt(appConfig.getConfig('daily_report_retention_days') || '30', 10);
       db.run("DELETE FROM ai_analysis WHERE type = 'daily_report' AND report_date < ?", getChinaDate(-retentionDays));
 
@@ -649,12 +626,14 @@ const executors = {
       }
     } catch (e) {
       logger.error(`[Scheduler] daily_report error: ${e.message}`);
-      // Fallback: try the old template system
       try {
         logger.info('[Scheduler] Falling back to template-based report...');
+        const firstProject = db.qOne("SELECT id, name FROM prj_projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
+        const mainProjectId = firstProject ? firstProject.id : null;
+        const kbName = firstProject ? firstProject.name : '笔记库';
         const fallbackData = {
           today: getChinaDate(), yesterday: getChinaDate(-1),
-          greeting: '🌅 早上好', kbName: mainProjectId ? (db.qOne("SELECT name FROM prj_projects WHERE id = ?", mainProjectId) || {}).name || '笔记库' : '笔记库',
+          greeting: '🌅 早上好', kbName,
           doneToday: db.q("SELECT title, priority FROM plan_todos WHERE status = 'done' AND updated_at >= ?", getChinaDate()),
           pendingTodos: [],
           overdueTodos: [],

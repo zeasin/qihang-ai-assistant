@@ -201,7 +201,7 @@ function kbSearchTool(): any {
         const topK = Math.min(params.topK || 5, 10);
         for (const p of targetProjects) {
           try {
-            const docs = await rag.hybridSearch(p.id, params.query, topK, db as any);
+            const docs = await rag.hybridSearch(params.query, topK, db as any);
             results.push(...docs.map((d) => ({ ...d, kbName: p.name })));
           } catch (e: any) {
             logger.warn('[PiAgent] KB search error for %s: %s', p.name, e.message);

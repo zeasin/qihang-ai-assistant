@@ -86,13 +86,11 @@ function initSchema() {
 
     CREATE TABLE IF NOT EXISTS kb_documents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER NOT NULL REFERENCES prj_projects(id),
-      path TEXT NOT NULL,
+      path TEXT NOT NULL UNIQUE,
       content TEXT NOT NULL,
       indexed_at TEXT,
       file_mtime INTEGER,
-      title TEXT DEFAULT '',
-      UNIQUE(project_id, path)
+      title TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS kb_chunks (
@@ -268,8 +266,6 @@ const project = {
     }
   },
   remove: (id) => {
-    run('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', id);
-    run('DELETE FROM kb_documents WHERE project_id = ?', id);
     run('DELETE FROM ai_analysis WHERE project_id = ?', id);
     let sessions: any[] = [];
     try { sessions = q('SELECT id FROM prj_sessions WHERE project_id = ?', id); } catch {}
@@ -280,12 +276,12 @@ const project = {
     run('DELETE FROM prj_projects WHERE id = ?', id);
   },
   // Document operations (for note-type projects)
-  docCount: (projectId) => {
-    try { const r = qOne('SELECT COUNT(*) as c FROM kb_documents WHERE project_id = ?', projectId); return r ? r.c : 0; } catch { return 0; }
+  docCount: () => {
+    try { const r = qOne('SELECT COUNT(*) as c FROM kb_documents'); return r ? r.c : 0; } catch { return 0; }
   },
-  insertDoc: (projectId, pathVal, content, fileMtime, title) => {
-    run("INSERT OR REPLACE INTO kb_documents (project_id, path, content, indexed_at, file_mtime, title) VALUES (?, ?, ?, datetime('now', '+8 hours'), ?, ?)", projectId, pathVal, content, fileMtime || null, title || '');
-    const r = qOne('SELECT id FROM kb_documents WHERE project_id = ? AND path = ?', projectId, pathVal);
+  insertDoc: (pathVal, content, fileMtime, title) => {
+    run("INSERT OR REPLACE INTO kb_documents (path, content, indexed_at, file_mtime, title) VALUES (?, ?, datetime('now', '+8 hours'), ?, ?)", pathVal, content, fileMtime || null, title || '');
+    const r = qOne('SELECT id FROM kb_documents WHERE path = ?', pathVal);
     return r.id;
   },
   insertChunk: (docId, content, embedding) => {
@@ -295,10 +291,10 @@ const project = {
       run('INSERT INTO kb_chunks (doc_id, content) VALUES (?, ?)', docId, content);
     }
   },
-  getChunks: (projectId) => q('SELECT c.content FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id WHERE d.project_id = ?', projectId).map(r => r.content),
-  deleteDocs: (projectId) => {
-    run('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', projectId);
-    run('DELETE FROM kb_documents WHERE project_id = ?', projectId);
+  getChunks: () => q('SELECT c.content FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id').map(r => r.content),
+  deleteDocs: () => {
+    run('DELETE FROM kb_chunks');
+    run('DELETE FROM kb_documents');
   },
 };
 

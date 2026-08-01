@@ -60,7 +60,7 @@ async function embed(text, config) {
 }
 
 async function scanProject(project) {
-  const { id, dir, ignore_dirs, ignore_files } = project;
+  const { dir, ignore_dirs, ignore_files } = project;
   console.log(`[IndexWorker] 开始扫描: ${project.name} (${dir})`);
 
   const ignoreDirs = ignore_dirs ? ignore_dirs.split(',').map(s => s.trim()) : [];
@@ -70,7 +70,7 @@ async function scanProject(project) {
   walkDir(dir, files, ignoreDirs, ignoreFiles);
   console.log(`[IndexWorker] 扫描到 ${files.length} 个 .md 文件`);
 
-  (process as any).send({ type: 'deleteOld', projectId: id });
+  (process as any).send({ type: 'deleteOld' });
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -80,7 +80,7 @@ async function scanProject(project) {
     const chunks = chunkText(content);
 
     (process as any).send({
-      type: 'doc', projectId: id, path: file, content,
+      type: 'doc', path: file, content,
       fileMtime: stat.mtimeMs, title,
       chunks: chunks.map(c => ({ content: c })),
     });
@@ -91,11 +91,11 @@ async function scanProject(project) {
     console.log(`[IndexWorker]   [${i + 1}/${files.length}] ${path.basename(file)} → ${chunks.length} chunks`);
   }
 
-  (process as any).send({ type: 'scanDone', projectId: id, fileCount: files.length });
+  (process as any).send({ type: 'scanDone', fileCount: files.length });
 }
 
 async function embedChunks(msg) {
-  const { projectId, chunks, config } = msg;
+  const { chunks, config } = msg;
   const total = chunks.length;
   console.log(`[IndexWorker] 生成嵌入向量: ${total} 个 chunk, 模型=${config.model} @ ${config.host}`);
 
@@ -103,7 +103,7 @@ async function embedChunks(msg) {
   for (const chunk of chunks) {
     try {
       const vector = await embed(chunk.content, config);
-      (process as any).send({ type: 'embedding', projectId, chunkId: chunk.id, vector });
+      (process as any).send({ type: 'embedding', chunkId: chunk.id, vector });
       embedded++;
       if (embedded === total || embedded % 10 === 0) {
         (process as any).send({ type: 'progress', phase: 'embed', current: embedded, total, file: '' });
@@ -115,7 +115,7 @@ async function embedChunks(msg) {
   }
 
   console.log(`[IndexWorker] 嵌入完成: ${embedded}/${total}`);
-  (process as any).send({ type: 'embedDone', projectId, embedded });
+  (process as any).send({ type: 'embedDone', embedded });
 }
 
 function startNextProject() {
