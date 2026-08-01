@@ -540,7 +540,7 @@ function handleWorkerMessages(worker, sendProgress, resolve, track) {
       } else if (msg.type === 'scanDone') {
         db.save();
         const embedConfig = {
-          model: appConfig.getConfig('embeddingModel') || 'bge-m3',
+model: appConfig.getConfig('embeddingModel') || '',
           host: appConfig.getConfig('embeddingBaseUrl') || 'http://127.0.0.1:11434',
           apiKey: appConfig.getConfig('embeddingApiKey') || '',
         };
@@ -775,21 +775,10 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
   }
 });
 
-// 将应用内模型档案映射为 pi 的 model pattern；无法映射时用 pi 默认模型
+// 模型映射：pi 原生 pattern 直传，其余用 pi 默认模型
 function piModelPattern(modelName) {
-  if (modelName.includes('/')) return modelName; // 已是 pi 原生 provider/id pattern，直传
-  if (!modelName) return undefined;
-  try {
-    const profile = llm.resolveProfile(modelName);
-    if (!profile || !profile.model) return undefined;
-    const m = profile.model;
-    if (/deepseek|sensenova|glm|qwen|kimi|moonshot/i.test(m)) {
-      return `sensenova/${m}`;
-    }
-    return m;
-  } catch {
-    return undefined;
-  }
+  if (modelName && modelName.includes('/')) return modelName;
+  return undefined;
 }
 
 // --- pi agent 模型列表 ---
@@ -819,47 +808,6 @@ ipcMain.handle('project:delete', (_, { id }) => db.project.remove(id));
 ipcMain.handle('agent:status', async () => {
   const status = await orchestrator.checkStatus();
   return { pi: status, langchain: status };
-});
-
-// --- LLM Profiles (multi-model) ---
-ipcMain.handle('llm:profiles:list', () => {
-  return db.llmProfile.list().map(p => ({
-    id: p.id,
-    name: p.name,
-    provider: p.provider,
-    apiKey: p.api_key ? '****' : '',
-    hasApiKey: !!p.api_key,
-    baseUrl: p.base_url,
-    model: p.model,
-    timeout: p.timeout,
-    modelType: p.model_type,
-    isDefault: !!p.is_default,
-  }));
-});
-ipcMain.handle('llm:profiles:add', (_, data) => {
-  const p = db.llmProfile.add(data);
-  return p ? { id: p.id, name: p.name, isDefault: !!p.is_default } : null;
-});
-ipcMain.handle('llm:profiles:update', (_, { id, data }) => {
-  const p = db.llmProfile.update(id, data);
-  return p ? { id: p.id, name: p.name, isDefault: !!p.is_default } : null;
-});
-ipcMain.handle('llm:profiles:setDefault', (_, { id }) => {
-  db.llmProfile.setDefault(id);
-  return { ok: true };
-});
-ipcMain.handle('llm:profiles:delete', (_, { id }) => {
-  db.llmProfile.remove(id);
-  return { ok: true };
-});
-ipcMain.handle('llm:profiles:test', async (_, data) => {
-  return llm.testConnection({
-    profileRef: data.profileRef,
-    provider: data.provider,
-    model: data.model,
-    apiKey: data.apiKey,
-    baseUrl: data.baseUrl,
-  });
 });
 
 // --- Service Management ---
@@ -1076,7 +1024,7 @@ ipcMain.handle('insights:clearIndex', () => {
 ipcMain.handle('insights:indexerInfo', () => {
   return {
     running: indexer.isRunning(),
-    model: appConfig.getConfig('embeddingModel') || 'bge-m3',
+    model: appConfig.getConfig('embeddingModel') || '',
     host: appConfig.getConfig('embeddingBaseUrl') || 'http://127.0.0.1:11434',
     docCount: (db.qOne("SELECT COUNT(*) as c FROM kb_documents") || {}).c || 0,
     chunkCount: (db.qOne("SELECT COUNT(*) as c FROM kb_chunks") || {}).c || 0,
@@ -1167,7 +1115,7 @@ ipcMain.handle('config:get', () => {
     llmModel: appConfig.getConfig('llmModel') || '',
     llmApiKey: appConfig.getConfig('llmApiKey') || '',
     llmBaseUrl: appConfig.getConfig('llmBaseUrl') || '',
-    embeddingModel: appConfig.getConfig('embeddingModel') || 'bge-m3',
+    embeddingModel: appConfig.getConfig('embeddingModel') || '',
     embeddingProvider: appConfig.getConfig('embeddingProvider') || 'Ollama',
     embeddingBaseUrl: appConfig.getConfig('embeddingBaseUrl') || 'http://127.0.0.1:11434',
     embeddingApiKey: appConfig.getConfig('embeddingApiKey') || '',
@@ -1218,29 +1166,11 @@ app.whenReady().then(async () => {
     logger.error('DB init error: %s', e);
   }
   startupElapsed('db loaded');
-  // 一次性迁移：将 sys_config 中已有的设置复制到 config.json（配置来源此后以 config.json 为准）
-  // 注意：llmProvider/llmModel/llmApiKey/llmBaseUrl 已被 llm_profiles 取代，不再迁移（见 database.ts obsoleteKeys）
-  const MIGRATE_KEYS = [
-    'embeddingModel', 'embeddingProvider', 'embeddingBaseUrl', 'embeddingApiKey',
-    'feishuWebhookUrl', 'feishuAppId', 'feishuAppSecret', 'feishuChatId',
-    'daily_report_retention_days', 'daily_report_prompt', 'daily_report_template',
-  ];
-  const migratePatch: any = {};
-  for (const key of MIGRATE_KEYS) {
-    if (!appConfig.hasConfigKey(key)) {
-      const v = db.configGet(key);
-      if (v) migratePatch[key] = v;
-    }
-  }
-  if (Object.keys(migratePatch).length) {
-    appConfig.saveConfig(migratePatch);
-    logger.info('[AppConfig] 已从数据库迁移 %d 项设置到 config.json', Object.keys(migratePatch).length);
-  }
   createTray();
 
   // 配置嵌入模型（从 config.json 读取）
   rag.configure({
-    model: appConfig.getConfig("embeddingModel") || "bge-m3",
+    model: appConfig.getConfig("embeddingModel") || "",
     host: appConfig.getConfig("embeddingBaseUrl") || "http://127.0.0.1:11434",
     apiKey: appConfig.getConfig("embeddingApiKey") || '',
   });

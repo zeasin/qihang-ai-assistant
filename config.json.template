@@ -4,7 +4,7 @@
   "feishuAppId": "",
   "feishuAppSecret": "",
   "feishuChatId": "",
-  "embeddingModel": "bge-m3",
+  "embeddingModel": "",
   "embeddingProvider": "Ollama",
   "embeddingBaseUrl": "http://127.0.0.1:11434",
   "embeddingApiKey": "",

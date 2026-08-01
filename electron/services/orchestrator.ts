@@ -219,7 +219,7 @@ async function chat(session, text, onDelta, onTool, onDone, onError?, images?, m
 async function checkStatus() {
   try {
     const cfg = llm.resolveConfig();
-    const profile = llm.resolveProfile(null);
+    const profile = llm.resolveProfile(null) as any;
     const ready = cfg.provider === 'ollama' || !!cfg.apiKey;
     return {
       installed: true,

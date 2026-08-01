@@ -366,7 +366,7 @@ async function loadConfig() {
     feishuAppSecret.value = cfg.feishuAppSecret || '';
     reportRetentionDays.value = cfg.dailyReportRetentionDays || '30';
     reportPrompt.value = cfg.dailyReportPrompt || '';
-    embeddingModel.value = cfg.embeddingModel || 'bge-m3';
+    embeddingModel.value = cfg.embeddingModel || '';
     embeddingProvider.value = cfg.embeddingProvider || 'Ollama';
     embeddingBaseUrl.value = cfg.embeddingBaseUrl || 'http://127.0.0.1:11434';
     embeddingApiKey.value = cfg.embeddingApiKey || '';

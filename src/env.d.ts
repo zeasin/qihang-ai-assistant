@@ -77,14 +77,6 @@ interface ElectronAPI {
       error?: string;
     }>;
   };
-  llmProfiles: {
-    list: () => Promise<any[]>;
-    add: (data: any) => Promise<any>;
-    update: (id: number, data: any) => Promise<any>;
-    setDefault: (id: number) => Promise<{ ok: boolean }>;
-    remove: (id: number) => Promise<{ ok: boolean }>;
-    test: (data: any) => Promise<{ ok: boolean; message: string; response?: string }>;
-  };
   service: {
     status: () => Promise<{ feishu: boolean; scheduler: boolean; indexer: boolean }>;
     startFeishu: (config: any) => Promise<boolean>;

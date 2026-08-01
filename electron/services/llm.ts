@@ -68,26 +68,8 @@ function getLlmConfig() {
  * @returns {Object|null} { id, name, provider, apiKey, baseUrl, model, timeout, modelType }
  */
 function resolveProfile(ref) {
-  let profile: any = null;
-  if (ref !== undefined && ref !== null && ref !== '') {
-    if (typeof ref === 'number' || /^\d+$/.test(String(ref))) {
-      profile = db.llmProfile.get(Number(ref));
-    } else {
-      profile = db.llmProfile.list().find(p => p.name === ref) || null;
-    }
-  }
-  if (!profile) profile = db.llmProfile.getDefault();
-  if (!profile) return null;
-  return {
-    id: profile.id,
-    name: profile.name,
-    provider: profile.provider || DEFAULTS.provider,
-    apiKey: profile.api_key || '',
-    baseUrl: profile.base_url || '',
-    model: profile.model || '',
-    timeout: profile.timeout || 600,
-    modelType: profile.model_type || 'text',
-  };
+  // llm_profiles 表已移除，模型配置由 pi agent 的 ModelRegistry 管理
+  return null;
 }
 
 /**

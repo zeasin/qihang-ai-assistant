@@ -7,6 +7,7 @@ const DB_PATH = path.join(DB_DIR, 'qihang-work-ai.db');
 
 let SQL: any = null;
 let db: any = null;
+let saveTimer: any = null;
 
 async function getDb() {
   if (db) return db;
@@ -20,8 +21,6 @@ async function getDb() {
     db = new SQL.Database(buf);
   }
   initSchema();
-  migrateLlmProfiles();
-  if (isNew) initDefaultConfig();
   return db;
 }
 
@@ -31,9 +30,6 @@ function saveDb() {
   fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
 
-// 防抖合并写入：run() 不再每次全量落盘（80MB export + 写盘开销大），
-// 由 setImmediate 防抖汇总为一次；close() 时确保最终落盘。
-let saveTimer: any = null;
 function scheduleSave() {
   if (saveTimer) return;
   saveTimer = setImmediate(() => {
@@ -41,31 +37,10 @@ function scheduleSave() {
     saveDb();
   });
 }
-function flushSave() {
-  if (saveTimer) {
-    clearImmediate(saveTimer);
-    saveTimer = null;
-  }
-  saveDb();
-}
 
 function initSchema() {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS sys_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-
-    CREATE TABLE IF NOT EXISTS llm_profiles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      provider TEXT DEFAULT 'deepseek',
-      api_key TEXT,
-      base_url TEXT,
-      model TEXT,
-      timeout INTEGER DEFAULT 600,
-      model_type TEXT DEFAULT 'text',
-      is_default INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
-      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
-    );
+  db.run(`DROP TABLE IF EXISTS sys_config;
+    DROP TABLE IF EXISTS llm_profiles;
 
     CREATE TABLE IF NOT EXISTS prj_sessions (
       id TEXT PRIMARY KEY,
@@ -225,45 +200,22 @@ function initSchema() {
     );
 
   `);
-
-  const obsoleteKeys = ['projectDir', 'ollamaHost', 'labels', 'embedModel', 'llmProvider', 'llmModel', 'llmApiKey', 'llmBaseUrl'];
-  let deleted = 0;
-  for (const key of obsoleteKeys) {
-    run('DELETE FROM sys_config WHERE key = ?', key);
-    deleted += db.getRowsModified();
-  }
-  if (deleted > 0) logger.info('[DB] 已清理 %d 个废弃配置键', deleted);
-  scheduleSave();
-}
-
-function initDefaultConfig() {
-  const defaultConfig = {
-    embeddingModel: 'bge-m3',
-    embeddingProvider: 'Ollama',
-    embeddingBaseUrl: 'http://127.0.0.1:11434',
-    embeddingApiKey: '',
-    feishuWebhookUrl: '',
-    feishuAppId: '',
-    feishuAppSecret: '',
-    daily_report_retention_days: '30',
-    daily_report_prompt: '请按以下格式生成日报：\n\n## 日报格式要求\n使用 Markdown 格式，包含以下板块：\n\n### 1️⃣ 今日概览\n- ✅ 完成任务数量、📋 待办数量、💬 对话次数、📝 笔记更新数、🗂️ 新增记录数\n\n### 2️⃣ 今日完成\n- 列出今日完成的任务，高优先级的用 ⭐ 标记\n\n### 3️⃣ 待办事项\n- 逾期的用 🔴 标记并注明逾期天数\n- 进行中的用 🔄 标记\n- 高优先级的用 🔴 标记\n\n### 4️⃣ 对话与沟通\n- 今日对话次数和简要摘要\n\n### 5️⃣ 笔记与记录\n- 更新的文档和新增的记录\n\n### 6️⃣ 今日提醒\n- 已启用的提醒（如有）\n\n### 7️⃣ 综合评估\n- 根据完成任务、待办处理、知识沉淀等维度给出今日效率评分（0-100分）\n- 给出具体的改进行动建议\n\n## 注意事项\n- 数据为空的部分可以略过，不要编造数据\n- 评分要合理，基于实际数据给出\n- 建议要具体、可执行\n- 语言简洁专业，使用中文',
-    daily_report_template: '{{greetingLine}}\n\n📅 {{today}}\n\n{{overview}}\n\n{{doneSection}}\n{{overdueSection}}\n{{pendingSection}}\n{{reminderSection}}\n{{worklogSection}}\n{{chatSection}}\n{{recordSection}}\n{{docSection}}\n\n{{analysisSection}}\n\n{{footer}}',
-  };
-  for (const [key, value] of Object.entries(defaultConfig)) {
-    run('INSERT INTO sys_config (key, value) VALUES (?, ?)', key, value);
-  }
-  saveDb();
 }
 
 // ========== Helpers ==========
 
 function q(sql, ...params) {
-  const stmt = db.prepare(sql);
-  if (params && params.length) stmt.bind(params);
-  const rows: any[] = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+  try {
+    const stmt = db.prepare(sql);
+    if (params && params.length) stmt.bind(params);
+    const rows: any[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject());
+    stmt.free();
+    return rows;
+  } catch (e) {
+    logger.error('[DB] SQL error: %s | SQL: %s', e.message, sql.slice(0, 200));
+    throw e;
+  }
 }
 
 function qOne(sql, ...params) {
@@ -292,15 +244,6 @@ function runRaw(sql, params) {
 
 function save() {
   saveDb();
-}
-
-// ========== Config ==========
-function configGet(key) {
-  const r = qOne('SELECT value FROM sys_config WHERE key = ?', key);
-  return r ? r.value : null;
-}
-function configSet(key, value) {
-  run('INSERT OR REPLACE INTO sys_config (key, value) VALUES (?, ?)', key, value);
 }
 
 // ========== Projects (unified: note + code) ==========
@@ -544,45 +487,6 @@ const reminder = {
   getActive: () => q("SELECT * FROM plan_reminders WHERE enabled = 1"),
 };
 
-// ========== LLM Profiles (multi-model) ==========
-const llmProfile = {
-  list: () => q('SELECT * FROM llm_profiles ORDER BY is_default DESC, id ASC'),
-  get: (id) => qOne('SELECT * FROM llm_profiles WHERE id = ?', id),
-  getDefault: () => qOne('SELECT * FROM llm_profiles WHERE is_default = 1 ORDER BY id ASC') || qOne('SELECT * FROM llm_profiles ORDER BY id ASC LIMIT 1'),
-  add: (data) => {
-    const isFirst = qOne('SELECT COUNT(*) as c FROM llm_profiles').c === 0;
-    run('INSERT INTO llm_profiles (name, provider, api_key, base_url, model, timeout, model_type, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      data.name, data.provider || 'deepseek', data.api_key ?? data.apiKey ?? '', data.base_url ?? data.baseUrl ?? '', data.model || '', data.timeout || 600, data.model_type ?? data.modelType ?? 'text', data.is_default || (isFirst ? 1 : 0));
-    const r = qOne('SELECT * FROM llm_profiles WHERE name = ? ORDER BY id DESC', data.name);
-    return r;
-  },
-  update: (id, data) => {
-    const fields: any[] = []; const params: any[] = [];
-    if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
-    if (data.provider !== undefined) { fields.push('provider = ?'); params.push(data.provider); }
-    if (data.api_key !== undefined || data.apiKey !== undefined) { fields.push('api_key = ?'); params.push(data.api_key !== undefined ? data.api_key : data.apiKey); }
-    if (data.base_url !== undefined || data.baseUrl !== undefined) { fields.push('base_url = ?'); params.push(data.base_url !== undefined ? data.base_url : data.baseUrl); }
-    if (data.model !== undefined) { fields.push('model = ?'); params.push(data.model); }
-    if (data.timeout !== undefined) { fields.push('timeout = ?'); params.push(data.timeout); }
-    if (data.model_type !== undefined || data.modelType !== undefined) { fields.push('model_type = ?'); params.push(data.model_type !== undefined ? data.model_type : data.modelType); }
-    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE llm_profiles SET ${fields.join(', ')} WHERE id = ?`, ...params); }
-    return qOne('SELECT * FROM llm_profiles WHERE id = ?', id);
-  },
-  setDefault: (id) => {
-    run('UPDATE llm_profiles SET is_default = 0 WHERE is_default = 1');
-    run('UPDATE llm_profiles SET is_default = 1 WHERE id = ?', id);
-  },
-  remove: (id) => {
-    const p = qOne('SELECT * FROM llm_profiles WHERE id = ?', id);
-    if (!p) return;
-    run('DELETE FROM llm_profiles WHERE id = ?', id);
-    if (p.is_default) {
-      const next = qOne('SELECT * FROM llm_profiles ORDER BY id ASC LIMIT 1');
-      if (next) run('UPDATE llm_profiles SET is_default = 1 WHERE id = ?', next.id);
-    }
-  },
-};
-
 // ========== Todos ==========
 const todo = {
   list: () => q('SELECT * FROM plan_todos ORDER BY sort_order ASC, created_at DESC'),
@@ -606,26 +510,8 @@ const todo = {
   remove: (id) => run('DELETE FROM plan_todos WHERE id = ?', id),
 };
 
-// 迁移旧版 sys_config 中的 LLM 配置到 llm_profiles（仅当 llm_profiles 为空时）
-function migrateLlmProfiles() {
-  try {
-    const count = qOne('SELECT COUNT(*) as c FROM llm_profiles');
-    if (!count || count.c > 0) return;
-    const provider = configGet('llmProvider') || 'deepseek';
-    const model = configGet('llmModel');
-    const apiKey = configGet('llmApiKey') || '';
-    const baseUrl = configGet('llmBaseUrl') || '';
-    if (!model && !apiKey) return;
-    run('INSERT INTO llm_profiles (name, provider, api_key, base_url, model, timeout, model_type, is_default) VALUES (?, ?, ?, ?, ?, 600, ?, 1)',
-      '默认模型', provider, apiKey, baseUrl, model || 'deepseek-chat', provider === 'ollama' ? 'multimodal' : 'text');
-    logger.info('[DB] migrated legacy LLM config to llm_profiles (model=%s)', model);
-  } catch (e) {
-    logger.warn('[DB] migrateLlmProfiles failed: %s', e.message);
-  }
-}
-
 function close() {
-  if (db) { flushSave(); db.close(); db = null; }
+  if (db) { db.close(); db = null; }
 }
 
-export { getDb, close, q, qOne, run, runMany, runRaw, save, configGet, configSet, project, chat, dm, ds, task, reminder, todo, llmProfile, migrateLlmProfiles };
+export { getDb, close, q, qOne, run, runMany, runRaw, save, project, chat, dm, ds, task, reminder, todo };

@@ -107,16 +107,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     models: () => ipcRenderer.invoke('pi:models'),
   },
 
-  // LLM Profiles (multi-model)
-  llmProfiles: {
-    list: () => ipcRenderer.invoke('llm:profiles:list'),
-    add: (data: unknown) => ipcRenderer.invoke('llm:profiles:add', data),
-    update: (id: number, data: unknown) => ipcRenderer.invoke('llm:profiles:update', { id, data }),
-    setDefault: (id: number) => ipcRenderer.invoke('llm:profiles:setDefault', { id }),
-    remove: (id: number) => ipcRenderer.invoke('llm:profiles:delete', { id }),
-    test: (data: unknown) => ipcRenderer.invoke('llm:profiles:test', data),
-  },
-
   // Service Management
   service: {
     status: () => ipcRenderer.invoke('service:status'),
