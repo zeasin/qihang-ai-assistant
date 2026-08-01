@@ -1135,19 +1135,20 @@ app.whenReady().then(async () => {
        const feishuWebhook = appConfig.getConfig('feishuWebhookUrl') || '';
        if (feishuWebhook) {
          const feishuText = convertMarkdownForFeishu(r.slice(0, 1800));
-         const cardContent = '📊 AI 综合日报 **' + today + '**\n\n' + feishuText;
-         try {
-           await fetch(feishuWebhook, {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({
-               msg_type: 'interactive',
-               card: {
-                 header: { title: { tag: 'plain_text', content: '📊 综合日报 ' + today } },
-                 elements: [{ tag: 'div', text: { tag: 'lark_md', content: cardContent } }]
-               }
-             })
-           });
+          const feishuCard = {
+            config: { wide_screen_mode: true },
+            elements: [{ tag: 'markdown', content: '📊 AI 综合日报 **' + today + '**\n\n' + feishuText }],
+            header: { template: 'blue', title: { tag: 'plain_text', content: '📊 综合日报 ' + today } },
+          };
+          try {
+            await fetch(feishuWebhook, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                msg_type: 'interactive',
+                card: feishuCard,
+              })
+            });
          } catch (e) {
            logger.warn('[Startup] Feishu notification failed: %s', e.message);
          }

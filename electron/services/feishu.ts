@@ -126,7 +126,7 @@ async function sendMessage(receiveId, receiveIdType, content, msgType = 'text') 
   }
   try {
     logger.info('[Feishu] Sending message to %s (type=%s): "%s"', receiveId, receiveIdType, (typeof content === 'string' ? content : JSON.stringify(content)).slice(0, 200));
-    await client.im.v1.message.create({
+    await client.im.message.create({
       params: { receive_id_type: receiveIdType },
       data: {
         receive_id: receiveId,
@@ -162,24 +162,23 @@ async function replyCard(msg, content, headerText?) {
     logger.error('[Feishu] replyCard: no valid target');
     return;
   }
-  const cardContent = JSON.stringify({
-    config: { wide_screen_mode: true },
-    header: headerText
-      ? { template: 'blue', title: { tag: 'plain_text', content: headerText } }
-      : { template: 'blue', title: { tag: 'plain_text', content: '启航AI' } },
-    elements: [{ tag: 'div', text: { tag: 'lark_md', content: content } }],
-  });
   if (!client) {
     logger.warn('[Feishu] replyCard: no client');
     return;
   }
   try {
-    await client.im.v1.message.create({
+    await client.im.message.create({
       params: { receive_id_type: targetType },
       data: {
         receive_id: target,
         msg_type: 'interactive',
-        content: cardContent,
+        content: JSON.stringify({
+          config: { wide_screen_mode: true },
+          elements: [{ tag: 'markdown', content: content }],
+          header: headerText
+            ? { template: 'blue', title: { tag: 'plain_text', content: headerText } }
+            : { template: 'blue', title: { tag: 'plain_text', content: '启航AI' } },
+        }),
       },
     });
     logger.info('[Feishu] Card sent successfully');

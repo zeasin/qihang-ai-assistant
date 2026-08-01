@@ -466,27 +466,27 @@ function buildReportCard(data) {
   if (hour >= 12 && hour < 14) greeting = '🌤️ 中午好';
   else if (hour >= 14 && hour < 18) greeting = '🌇 下午好';
   else if (hour >= 18) greeting = '🌙 晚上好';
-  elements.push({ tag: 'div', text: { tag: 'lark_md', content: `${greeting}，这是今天的综合日报` } });
-  elements.push({ tag: 'div', text: { tag: 'lark_md', content: `📅 **${today}**` } });
+  elements.push({ tag: 'markdown', content: `${greeting}，这是今天的综合日报` });
+  elements.push({ tag: 'markdown', content: `📅 **${today}**` });
   elements.push({ tag: 'hr' });
 
   // stats bar
   let statsLine = `✅ 完成 ${doneToday.length} 项 · 📋 待办 ${pendingTodos.length} 项 · 🗂️ 新增 ${recCount} 条 · 📝 ${docCount} 篇`;
-  elements.push({ tag: 'div', text: { tag: 'lark_md', content: `**今日概览**\n${statsLine}` } });
+  elements.push({ tag: 'markdown', content: `**今日概览**\n${statsLine}` });
   elements.push({ tag: 'hr' });
 
   // ✅ 今日完成
   if (doneToday.length) {
     let md = `**✅ 今日完成（${doneToday.length} 项）**\n`;
     doneToday.forEach(t => { md += `✅ ${t.title}\n`; });
-    elements.push({ tag: 'div', text: { tag: 'lark_md', content: md } });
+    elements.push({ tag: 'markdown', content: md });
   }
 
   // ⚠️ 逾期待办
   if (overdueTodos.length) {
     let md = `**⚠️ 逾期待办（${overdueTodos.length} 项）**\n`;
     overdueTodos.forEach(t => { md += `🔴 ${t.title}（截止 ${t.due_date}）\n`; });
-    elements.push({ tag: 'div', text: { tag: 'lark_md', content: md } });
+    elements.push({ tag: 'markdown', content: md });
   }
 
   // 📋 待办
@@ -498,7 +498,7 @@ function buildReportCard(data) {
       md += `${icon} ${t.title} ${due}\n`;
       if (md.length > 1500) { md = md.slice(0, 1500) + '\n...'; return; }
     });
-    elements.push({ tag: 'div', text: { tag: 'lark_md', content: md } });
+    elements.push({ tag: 'markdown', content: md });
   }
 
   // ⏰ 今日提醒
@@ -512,7 +512,7 @@ function buildReportCard(data) {
     if (todayReminders.length) {
       let md = `**⏰ 今日提醒**\n`;
       todayReminders.forEach(r => { md += `🔔 ${r.name}（${r.time}）\n`; });
-      elements.push({ tag: 'div', text: { tag: 'lark_md', content: md } });
+      elements.push({ tag: 'markdown', content: md });
     }
   }
 
@@ -523,7 +523,7 @@ function buildReportCard(data) {
       const s = (c.snippet || '').replace(/\n/g, ' ').slice(0, 80);
       if (s) md += `💭 ${s}\n`;
     });
-    elements.push({ tag: 'div', text: { tag: 'lark_md', content: md } });
+    elements.push({ tag: 'markdown', content: md });
   }
 
   // 📝 工作日志
@@ -536,7 +536,7 @@ function buildReportCard(data) {
       const project = data.项目 || data.project || '';
       if (content) md += `📄 ${project ? `[${project}] ` : ''}${content.slice(0, 100)}\n`;
     });
-    elements.push({ tag: 'div', text: { tag: 'lark_md', content: md } });
+    elements.push({ tag: 'markdown', content: md });
   }
 
   // 🗂️ 数据中心
@@ -553,7 +553,7 @@ function buildReportCard(data) {
       }
     });
     if (recs.length > 8) md += `...及其他 ${recs.length - 8} 条\n`;
-    elements.push({ tag: 'div', text: { tag: 'lark_md', content: md } });
+    elements.push({ tag: 'markdown', content: md });
   }
 
   // 📝 笔记
@@ -570,7 +570,7 @@ function buildReportCard(data) {
         md += `📄 ${name}：${s}\n`;
       });
       if (docs.length > meaningfulDocs.length) md += `...及其他 ${docs.length - meaningfulDocs.length} 个文件\n`;
-      elements.push({ tag: 'div', text: { tag: 'lark_md', content: md } });
+      elements.push({ tag: 'markdown', content: md });
     }
   }
 
@@ -580,14 +580,14 @@ function buildReportCard(data) {
   let summary = `**📊 完成概览**\n`;
   summary += `✅ 今日完成：${doneToday.length} 项\n📋 剩余待办：${pendingTodos.length} 项`;
   if (overdueTodos.length) summary += `\n⚠️ **${overdueTodos.length} 项逾期**，建议优先处理`;
-  elements.push({ tag: 'div', text: { tag: 'lark_md', content: summary } });
+  elements.push({ tag: 'markdown', content: summary });
 
   return {
-    header: { title: { tag: 'plain_text', content: `☀️ 综合日报 ${today}` } },
+    header: { template: 'blue', title: { tag: 'plain_text', content: `☀️ 综合日报 ${today}` } },
     elements: [
       ...elements,
       { tag: 'hr' },
-      { tag: 'note', elements: [{ tag: 'plain_text', content: `启航AI工作台 · ${kbName} · ${today}` }] },
+      { tag: 'markdown', content: `启航AI工作台 · ${kbName} · ${today}` },
     ],
   };
 }
@@ -653,8 +653,8 @@ const executors = {
         const feishuText = convertMarkdownForFeishu(r.slice(0, 1800));
         const cardContent = '📊 AI 综合日报 **' + today + '**\n\n' + feishuText;
         await sendFeishu({
-          header: { title: { tag: 'plain_text', content: '📊 综合日报 ' + today } },
-          elements: [{ tag: 'div', text: { tag: 'lark_md', content: cardContent } }]
+          header: { template: 'blue', title: { tag: 'plain_text', content: '📊 综合日报 ' + today } },
+          elements: [{ tag: 'markdown', content: feishuText }]
         });
        }
     } catch (e) {
