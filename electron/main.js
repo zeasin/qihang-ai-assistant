@@ -747,7 +747,7 @@ ipcMain.handle('project:add', (_, { name, type, dir, description, defaultBranch 
   return result;
 });
 ipcMain.handle('project:update', (_, { id, data }) => db.project.update(id, data));
-ipcMain.handle('project:delete', (_, { id }) => db.project.delete(id));
+ipcMain.handle('project:delete', (_, { id }) => db.project.remove(id));
 
 // --- Agent Status ---
 ipcMain.handle('agent:status', async () => {

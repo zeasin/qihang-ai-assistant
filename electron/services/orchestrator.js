@@ -16,7 +16,11 @@ const SYSTEM_PROMPT = `你是一位个人本地知识库助理，将「数据集
 - list_datasets — 查看可用的数据集
 - list_scheduled_tasks — 查看定时任务
 
-### 2. 文件/代码操作（仅在关联了项目目录时可用）
+### 2. 外网搜索
+- web_search — 搜索外网资料，获取与查询词相关的网页标题、链接和摘要
+- web_fetch — 读取外部 URL 的文本内容（自动去除 HTML 标签）
+
+### 3. 文件/代码操作（仅在关联了项目目录时可用）
 - read_project_file, list_directory, grep, find — 阅读和搜索文件/代码
 - write_file, edit_file, bash — 修改文件和执行命令
 

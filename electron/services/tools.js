@@ -41,6 +41,96 @@ function walkDir(dir, out, opts = {}) {
   }
 }
 
+// ========== 外网工具 ==========
+
+async function webSearchTool({ query, maxResults }) {
+  const limit = Math.min(maxResults || 8, 15);
+  try {
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return `搜索请求失败 (HTTP ${res.status})`;
+    const html = await res.text();
+
+    const results = [];
+    const linkRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+    const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+    const links = [];
+    const snippets = [];
+    let m;
+    while ((m = linkRegex.exec(html)) !== null && links.length < limit) {
+      links.push({ url: m[1].replace(/^\/\/?/, 'https://'), title: m[2].replace(/<[^>]+>/g, '').trim() });
+    }
+    while ((m = snippetRegex.exec(html)) !== null && snippets.length < limit) {
+      snippets.push(m[1].replace(/<[^>]+>/g, '').trim());
+    }
+    for (let i = 0; i < Math.min(links.length, limit); i++) {
+      results.push(`[${i + 1}] ${links[i].title}\n    链接: ${links[i].url}\n    摘要: ${(snippets[i] || '(无摘要)').slice(0, 300)}`);
+    }
+    if (!results.length) {
+      const fallback = html.match(/<div[^>]*class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>/gi);
+      if (fallback) {
+        for (const block of fallback.slice(0, limit)) {
+          const titleMatch = block.match(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
+          const textMatch = block.replace(/<[^>]+>/g, '').trim().slice(0, 200);
+          if (titleMatch) {
+            results.push(`[${results.length + 1}] ${titleMatch[2].replace(/<[^>]+>/g, '').trim()}\n    链接: ${titleMatch[1].replace(/^\/\/?/, 'https://')}\n    摘要: ${textMatch.slice(0, 300)}`);
+          }
+        }
+      }
+    }
+    return results.length
+      ? results.join('\n\n')
+      : `未找到 "${query}" 的相关结果，可尝试更换关键词。`;
+  } catch (e) {
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') return '搜索超时，请稍后重试。';
+    return `搜索失败: ${e.message}`;
+  }
+}
+
+async function webFetchTool({ url, maxLength }) {
+  if (!url.startsWith('http://') && !url.startsWith('https://')) return '仅支持 http/https 协议';
+  const limit = Math.min(maxLength || 8000, 50000);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(20000),
+      redirect: 'follow',
+    });
+    const contentType = res.headers.get('content-type') || '';
+    const isText = contentType.startsWith('text/') || contentType.includes('json') || contentType.includes('xml') || contentType.includes('javascript');
+    if (!isText) return `不支持非文本内容: ${contentType}`;
+
+    let text = await res.text();
+    text = text
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (text.length > limit) text = text.slice(0, limit) + '\n\n...(内容已截断，全文过长)';
+    return text || '(页面内容为空)';
+  } catch (e) {
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') return '请求超时，请检查 URL 或稍后重试。';
+    return `获取失败: ${e.message}`;
+  }
+}
+
 // ========== 本地数据工具 ==========
 
 async function queryDatasetTool({ datasetName, conditions, limit }, projectDir) {
@@ -291,6 +381,8 @@ async function buildDataToolDefs(projectDir) {
     { name: 'list_datasets', description: '列出所有可用的数据集及其结构。', schema: z.object({}), func: () => listDatasetsTool() },
     { name: 'list_scheduled_tasks', description: '列出所有已配置的定时任务。', schema: z.object({}), func: () => listScheduledTasksTool() },
     { name: 'read_project_file', description: '读取项目目录下的文件内容。', schema: z.object({ filePath: z.string().describe('相对于项目根目录的文件路径，或绝对路径') }), func: bind(readProjectFileTool) },
+    { name: 'web_search', description: '搜索外网资料，通过搜索引擎获取与查询词相关的网页标题、链接和摘要。适合查询最新资讯、技术文档、百科知识等。', schema: z.object({ query: z.string().describe('搜索关键词，尽量精确'), maxResults: z.coerce.number().optional().nullable().describe('返回结果条数上限，默认8，最大15') }), func: (args) => webSearchTool(args) },
+    { name: 'web_fetch', description: '读取外部 URL 的文本内容，自动去除 HTML 标签和脚本，返回纯文本。适合阅读网页文章、API 文档、新闻等。', schema: z.object({ url: z.string().describe('要读取的完整 URL（须以 http:// 或 https:// 开头）'), maxLength: z.coerce.number().optional().nullable().describe('返回内容最大字符数，默认8000，最大50000') }), func: (args) => webFetchTool(args) },
   ];
 }
 
