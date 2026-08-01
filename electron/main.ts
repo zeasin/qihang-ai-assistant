@@ -34,9 +34,7 @@ try {
 } catch {} // worker_threads not available
 import * as db from './services/database';
 import * as appConfig from './services/app-config';
-import * as orchestrator from './services/orchestrator';
-import * as llm from './services/llm';
-import { runPi, listPiModels } from './services/pi-agent';
+import { runPi, listPiModels, generateDailyReport as piGenerateDailyReport } from './services/pi-agent';
 import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
 import * as indexer from './services/indexer';
@@ -52,6 +50,48 @@ function startupElapsed(label: string) {
 let mainWindow: Electron.BrowserWindow | null = null;
 let tray: Electron.Tray | null = null;
 let backgroundReady = false;
+
+function convertMarkdownForFeishu(md: string): string {
+  const lines = md.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith('|') && line.endsWith('|')) {
+      const headerCells = line.split('|').slice(1, -1).map(c => c.trim());
+      const isSeparator = headerCells.every(c => /^[-: ]+$/.test(c));
+      if (isSeparator) {
+        i++;
+        continue;
+      }
+      const dataRows: string[][] = [];
+      i++;
+      while (i < lines.length && lines[i].startsWith('|') && lines[i].endsWith('|')) {
+        const cells = lines[i].split('|').slice(1, -1).map(c => c.trim());
+        if (!cells.every(c => /^[-: ]+$/.test(c))) {
+          dataRows.push(cells);
+        }
+        i++;
+      }
+      if (dataRows.length > 0) {
+        const maxCols = Math.max(headerCells.length, ...dataRows.map(r => r.length));
+        for (const row of dataRows) {
+          const parts: string[] = [];
+          for (let c = 0; c < maxCols; c++) {
+            const label = headerCells[c] || `字段${c + 1}`;
+            const val = row[c] || '';
+            parts.push(`**${label}**: ${val}`);
+          }
+          out.push('- ' + parts.join(' | '));
+        }
+      }
+      continue;
+    }
+    out.push(line);
+    i++;
+  }
+  return out.join('\n');
+}
 
 // ========== System Tray ==========
 
@@ -350,8 +390,7 @@ const feishuMessageHandler = async (msg) => {
 
     const setMode = (mode) => { try { db.run("UPDATE prj_sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", mode, sessionId); } catch {} };
     const questionText = await buildKBInjectedPrompt();
-    const replyOrchestrator = async (cwd) => {
-      const session = await orchestrator.createSession(cwd, sessionId);
+    const replyWithPi = async (cwd) => {
       let reply = '';
       const sendReply = (text) => {
         if (text) {
@@ -359,32 +398,35 @@ const feishuMessageHandler = async (msg) => {
           feishu.replyMessage(msg, text);
         }
       };
-      await orchestrator.chat(session, questionText,
-        (d) => { reply += d; },
-        () => {},
-        () => {
-          logger.info('[Feishu] Sending reply: "%s"', reply.slice(0, 200));
-          if (reply) { sendReply(reply); }
+      await runPi({
+        prompt: questionText,
+        sessionId,
+        cwd: cwd || undefined,
+        onDelta: (d) => { reply += d; },
+        onDone: (text) => {
+          logger.info('[Feishu] Sending reply: "%s"', (text || reply).slice(0, 200));
+          const final = text || reply;
+          if (final) { sendReply(final); }
           else if (kbFallback.text) { sendReply(kbFallback.text); }
         },
-        (e) => {
+        onError: (e) => {
           logger.error('[Feishu] Chat error: %s', e);
           if (kbFallback.text) { sendReply(kbFallback.text); }
           else { sendReply(`处理出错: ${e}`); }
-        }
-      );
+        },
+      });
     };
 
     if (context.projectDir) {
       setMode('code');
-      await replyOrchestrator(context.projectDir);
+      await replyWithPi(context.projectDir);
     } else if (context.projectIds.length > 0) {
       setMode('kb');
       const projectCwd = db.project.get(context.projectIds[0])?.dir || '';
-      await replyOrchestrator(projectCwd);
+      await replyWithPi(projectCwd);
     } else {
       const feishuRouter = require('./services/feishu-router');
-      const deps = { db, project: db.project, feishu, orchestrator };
+      const deps = { db, project: db.project, feishu };
 
       const intent = feishuRouter.classify(context.cleanText);
       let reply = await feishuRouter.route({
@@ -396,7 +438,7 @@ const feishuMessageHandler = async (msg) => {
 
       if (reply === null) {
         setMode('general');
-        await replyOrchestrator('');
+        await replyWithPi('');
       } else {
         const modeMap = { QUERY_INFO: 'query', RECORD_LOG: 'record', CREATE_BUG: 'bug', UPDATE_BUG: 'bug', CODE_INVESTIGATE: 'code', DAILY_REPORT: 'report' };
         setMode(modeMap[intent] || 'general');
@@ -713,7 +755,7 @@ ipcMain.handle('coding:switchAgent', (_, { sessionId, agent }) => {
   db.chat.updateSessionAgent(sessionId, agent);
   return db.chat.getSession(sessionId);
 });
-ipcMain.handle('agents:list', () => Object.entries(orchestrator.AGENTS).map(([key, a]) => ({ key, label: a.label, icon: a.icon })));
+ipcMain.handle('agents:list', () => []);
 ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, agent, images, modelName }) => {
   const sid = sessionId || ('coding_' + Date.now());
   try {
@@ -790,8 +832,8 @@ ipcMain.handle('project:delete', (_, { id }) => db.project.remove(id));
 
 // --- Agent Status ---
 ipcMain.handle('agent:status', async () => {
-  const status = await orchestrator.checkStatus();
-  return { pi: status, langchain: status };
+  const models = await listPiModels();
+  return { pi: { configured: models.models && models.models.length > 0, models: models.models } };
 });
 
 // --- Service Management ---
@@ -868,6 +910,11 @@ ipcMain.handle('insights:stats', () => {
 ipcMain.handle('insights:reports', () => {
   return db.q("SELECT id, type, report_date, content, substr(content, 1, 100) as summary, created_at FROM ai_analysis WHERE type = 'daily_report' ORDER BY created_at DESC LIMIT 10");
 });
+ipcMain.handle('insights:reportGenerating', () => {
+  const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  const existing = db.qOne("SELECT id FROM ai_analysis WHERE type = 'daily_report' AND report_date = ?", today);
+  return { generating: !existing };
+});
 ipcMain.handle('insights:weeklyReports', () => {
   return db.q("SELECT id, type, report_date, content, substr(content, 1, 100) as summary, created_at FROM ai_analysis WHERE type = 'weekly_report' ORDER BY created_at DESC LIMIT 10");
 });
@@ -932,23 +979,7 @@ ipcMain.handle('insights:heatmap', () => {
   }
   return heatmap;
 });
-ipcMain.handle('insights:analyzeProject', async (_, { projectId, projectName }) => {
-  const rows = db.q("SELECT path, content FROM kb_documents WHERE path LIKE ?", `%${projectName}%`);
-  if (!rows.length) return { error: '该项目没有可分析的文件' };
-  try {
-    const text = await orchestrator.generateProjectAnalysis(projectName, projectId, rows);
-    db.run("INSERT INTO ai_analysis (project_id, type, content, dir_path, created_at, updated_at) VALUES (?, 'project_analysis', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
-      projectId, text, projectName);
-    return { text };
-  } catch (e) {
-    const fileList = rows.map((r, i) => `${i + 1}. ${r.path.split(/[\\/]/).pop()} (${(r.content || '').length} 字符)`).join('\n');
-    const totalSize = rows.reduce((s, r) => s + (r.content || '').length, 0);
-    const text = `## ${projectName} 分析报告\n\n由于 AI 服务不可用，以下为基于文件元数据的统计：\n\n- 文件数量: ${rows.length}\n- 总大小: ${(totalSize / 1024).toFixed(1)} KB\n\n### 文件列表\n\n${fileList}`;
-    db.run("INSERT INTO ai_analysis (project_id, type, content, dir_path, created_at, updated_at) VALUES (?, 'project_analysis', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
-      projectId, text, projectName);
-    return { text };
-  }
-});
+
 ipcMain.handle('service:startIndexer', () => {
   indexer.start();
   updateTrayMenu(getServicesStatus());
@@ -1094,16 +1125,6 @@ ipcMain.handle('config:set', (_, cfg) => {
   return true;
 });
 
-ipcMain.handle("llm:test", async (_, { provider, model, apiKey, baseUrl }) => {
-  try {
-    const llm = require('./services/llm');
-    const result = await llm.testConnection({ provider, model, apiKey, baseUrl });
-    return result;
-  } catch (e) {
-    return { ok: false, message: "❌ 测试异常: " + (e.message || e) };
-  }
-});
-
 ipcMain.handle("embedding:test", async (_, { model, host, apiKey }) => {
   try {
     const result = await rag.testConnection({ model, host, apiKey });
@@ -1152,6 +1173,56 @@ app.whenReady().then(async () => {
   updateTrayMenu(getServicesStatus());
 
   backgroundReady = true;
+
+  // 启动时检测今日日报是否已生成，未生成则异步生成
+  (async () => {
+    const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    const existing = db.qOne("SELECT id FROM ai_analysis WHERE type = 'daily_report' AND report_date = ?", today);
+    if (existing) return;
+    const notesDir = appConfig.getConfig('notesDir') || '';
+    if (!notesDir) {
+      logger.warn('[Startup] Skip daily report: notesDir not configured');
+      return;
+    }
+    const modelResult = await listPiModels();
+    if (!modelResult.models || modelResult.models.length === 0) {
+      logger.error('[Startup] Cannot generate daily report: pi agent model not configured, run `pi` command to configure');
+      return;
+    }
+    logger.info('[Startup] No daily report for today, generating via pi agent...');
+    try {
+       const userPart = appConfig.getConfig('daily_report_prompt') || '请按以下格式生成日报：\n\n## 日报格式要求\n使用简化的 Markdown 格式（适配飞书），**不要使用表格**（用 `- key: value` 列表代替）：**\n\n### 1️⃣ 今日概览\n- ✅ 完成任务：数量、📋 待办：数量、💬 对话：次数、📝 笔记：更新数、🗂️ 新增：数量\n\n### 2️⃣ 今日完成\n- 列出今日完成的任务，高优先级的用 ⭐ 标记\n\n### 3️⃣ 待办事项\n- 逾期的用 🔴 标记并注明逾期天数\n- 进行中的用 🔄 标记\n- 高优先级的用 🔴 标记\n\n### 4️⃣ 对话与沟通\n- 今日对话次数和简要摘要\n\n### 5️⃣ 笔记与记录\n- 更新的文档和新增的记录\n\n### 6️⃣ 今日提醒\n- 已启用的提醒（如有）\n\n### 7️⃣ 综合评估\n- 根据完成任务、待办处理、知识沉淀等维度给出今日效率评分（0-100分）\n- 给出具体的改进行动建议\n\n## 格式注意事项\n- **不使用表格**：用 `- 维度 | 说明` 这样的列表代替\n- 数据为空的部分可以略过，不要编造数据\n- 评分要合理，基于实际数据给出\n- 建议要具体、可执行\n- 语言简洁专业，使用中文\n- 只输出日报正文，不要包含任何说明性文字（如"数据来源"、"让我先"、"思考过程"等）';
+      const r = await piGenerateDailyReport('startup', userPart);
+      db.run("INSERT INTO ai_analysis (project_id, type, content, report_date, created_at, updated_at) VALUES (NULL, 'daily_report', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
+        r, today);
+      const retentionDays = parseInt(appConfig.getConfig('daily_report_retention_days') || '30', 10);
+      db.run("DELETE FROM ai_analysis WHERE type = 'daily_report' AND report_date < ?", (() => { const d = new Date(Date.now() + 8 * 3600 * 1000 - retentionDays * 86400 * 1000); return d.toISOString().slice(0, 10); })());
+      logger.info('[Startup] Daily report generated on startup');
+      if (mainWindow) mainWindow.webContents.send('report:generated');
+       const feishuWebhook = appConfig.getConfig('feishuWebhookUrl') || '';
+       if (feishuWebhook) {
+         const feishuText = convertMarkdownForFeishu(r.slice(0, 1800));
+         const cardContent = '📊 AI 综合日报 **' + today + '**\n\n' + feishuText;
+         try {
+           await fetch(feishuWebhook, {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({
+               msg_type: 'interactive',
+               card: {
+                 header: { title: { tag: 'plain_text', content: '📊 综合日报 ' + today } },
+                 elements: [{ tag: 'div', text: { tag: 'lark_md', content: cardContent } }]
+               }
+             })
+           });
+         } catch (e) {
+           logger.warn('[Startup] Feishu notification failed: %s', e.message);
+         }
+       }
+    } catch (e) {
+      logger.error('[Startup] Failed to generate daily report: ' + (e.message || e));
+    }
+  })();
 });
 
 app.on('before-quit', () => {

@@ -4,6 +4,48 @@ import * as appConfig from './app-config';
 import logger from './logger';
 import { Notification } from 'electron';
 
+function convertMarkdownForFeishu(md: string): string {
+  const lines = md.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith('|') && line.endsWith('|')) {
+      const headerCells = line.split('|').slice(1, -1).map(c => c.trim());
+      const isSeparator = headerCells.every(c => /^[-: ]+$/.test(c));
+      if (isSeparator) {
+        i++;
+        continue;
+      }
+      const dataRows: string[][] = [];
+      i++;
+      while (i < lines.length && lines[i].startsWith('|') && lines[i].endsWith('|')) {
+        const cells = lines[i].split('|').slice(1, -1).map(c => c.trim());
+        if (!cells.every(c => /^[-: ]+$/.test(c))) {
+          dataRows.push(cells);
+        }
+        i++;
+      }
+      if (dataRows.length > 0) {
+        const maxCols = Math.max(headerCells.length, ...dataRows.map(r => r.length));
+        for (const row of dataRows) {
+          const parts: string[] = [];
+          for (let c = 0; c < maxCols; c++) {
+            const label = headerCells[c] || `字段${c + 1}`;
+            const val = row[c] || '';
+            parts.push(`**${label}**: ${val}`);
+          }
+          out.push('- ' + parts.join(' | '));
+        }
+      }
+      continue;
+    }
+    out.push(line);
+    i++;
+  }
+  return out.join('\n');
+}
+
 let jobs = new Map();
 let running = false;
 
@@ -590,65 +632,33 @@ const executors = {
   },
 'daily_report': async (task) => {
     logger.info(`[Scheduler] daily report: ${task.name}`);
-    let today = getChinaDate();
+    const today = getChinaDate();
     try {
-      const firstProject = db.qOne("SELECT id, name FROM prj_projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
-      const mainProjectId = firstProject ? firstProject.id : null;
-      const kbName = firstProject ? firstProject.name : '笔记库';
-      if (!mainProjectId) { logger.warn('[Scheduler] daily_report: no note project available'); return; }
-
-      today = getChinaDate();
-
-      const DEFAULT_USER_PROMPT = '请按以下格式生成日报：\n\n## 日报格式要求\n使用 Markdown 格式，包含以下板块：\n\n### 1️⃣ 今日概览\n- ✅ 完成任务数量、📋 待办数量、💬 对话次数、📝 笔记更新数、🗂️ 新增记录数\n\n### 2️⃣ 今日完成\n- 列出今日完成的任务，高优先级的用 ⭐ 标记\n\n### 3️⃣ 待办事项\n- 逾期的用 🔴 标记并注明逾期天数\n- 进行中的用 🔄 标记\n- 高优先级的用 🔴 标记\n\n### 4️⃣ 对话与沟通\n- 今日对话次数和简要摘要\n\n### 5️⃣ 笔记与记录\n- 更新的文档和新增的记录\n\n### 6️⃣ 今日提醒\n- 已启用的提醒（如有）\n\n### 7️⃣ 综合评估\n- 根据完成任务、待办处理、知识沉淀等维度给出今日效率评分（0-100分）\n- 给出具体的改进行动建议\n\n## 注意事项\n- 数据为空的部分可以略过，不要编造数据\n- 评分要合理，基于实际数据给出\n- 建议要具体、可执行\n- 语言简洁专业，使用中文';
-
-      const userPart = appConfig.getConfig('daily_report_prompt') || DEFAULT_USER_PROMPT;
-      const fullPrompt = SYSTEM_PROMPT + '\n\n=== 用户格式要求 ===\n\n' + userPart;
-
-      logger.info('[Scheduler] Calling AI to generate daily report...');
-      const orchestrator = require('./orchestrator');
-      const r = await orchestrator.generateDailyReport(fullPrompt, mainProjectId);
+      const notesDir = appConfig.getConfig('notesDir') || '';
+      if (!notesDir) { logger.warn('[Scheduler] daily_report: notesDir not configured'); return; }
+       const userPart = appConfig.getConfig('daily_report_prompt') || '请按以下格式生成日报：\n\n## 日报格式要求\n使用简化的 Markdown 格式（适配飞书），**不要使用表格**（用 `- key: value` 列表代替）：**\n\n### 1️⃣ 今日概览\n- ✅ 完成任务：数量、📋 待办：数量、💬 对话：次数、📝 笔记：更新数、🗂️ 新增：数量\n\n### 2️⃣ 今日完成\n- 列出今日完成的任务，高优先级的用 ⭐ 标记\n\n### 3️⃣ 待办事项\n- 逾期的用 🔴 标记并注明逾期天数\n- 进行中的用 🔄 标记\n- 高优先级的用 🔴 标记\n\n### 4️⃣ 对话与沟通\n- 今日对话次数和简要摘要\n\n### 5️⃣ 笔记与记录\n- 更新的文档和新增的记录\n\n### 6️⃣ 今日提醒\n- 已启用的提醒（如有）\n\n### 7️⃣ 综合评估\n- 根据完成任务、待办处理、知识沉淀等维度给出今日效率评分（0-100分）\n- 给出具体的改进行动建议\n\n## 格式注意事项\n- **不使用表格**：用 `- 维度 | 说明` 这样的列表代替\n- 数据为空的部分可以略过，不要编造数据\n- 评分要合理，基于实际数据给出\n- 建议要具体、可执行\n- 语言简洁专业，使用中文\n- 只输出日报正文，不要包含任何说明性文字（如"数据来源"、"让我先"、"思考过程"等）';
+      const piAgent = require('./pi-agent');
+      logger.info('[Scheduler] Calling pi agent to generate daily report...');
+      const r = (await piAgent.generateDailyReport('scheduler', userPart)).trim();
       logger.info(`[Scheduler] AI report generated, length: ${r.length}`);
 
-      db.run("INSERT INTO ai_analysis (project_id, type, content, prompt, report_date, created_at, updated_at) VALUES (?, 'daily_report', ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
-        mainProjectId, r, fullPrompt, today);
-      logger.info(`[Scheduler] daily report saved for project ${mainProjectId}`);
+      db.run("INSERT INTO ai_analysis (project_id, type, content, report_date, created_at, updated_at) VALUES (NULL, 'daily_report', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
+        r, today);
 
       const retentionDays = parseInt(appConfig.getConfig('daily_report_retention_days') || '30', 10);
       db.run("DELETE FROM ai_analysis WHERE type = 'daily_report' AND report_date < ?", getChinaDate(-retentionDays));
 
       sendNotification('每日报告', '✅ AI 综合日报已生成 - ' + today);
-      if (task.notify_feishu) {
-        const cardContent = '📊 AI 综合日报 **' + today + '**\\n\\n' + r.slice(0, 1800);
+       if (task.notify_feishu) {
+        const feishuText = convertMarkdownForFeishu(r.slice(0, 1800));
+        const cardContent = '📊 AI 综合日报 **' + today + '**\n\n' + feishuText;
         await sendFeishu({
           header: { title: { tag: 'plain_text', content: '📊 综合日报 ' + today } },
           elements: [{ tag: 'div', text: { tag: 'lark_md', content: cardContent } }]
         });
-      }
+       }
     } catch (e) {
       logger.error(`[Scheduler] daily_report error: ${e.message}`);
-      try {
-        logger.info('[Scheduler] Falling back to template-based report...');
-        const firstProject = db.qOne("SELECT id, name FROM prj_projects WHERE type = 'note' ORDER BY id ASC LIMIT 1");
-        const mainProjectId = firstProject ? firstProject.id : null;
-        const kbName = firstProject ? firstProject.name : '笔记库';
-        const fallbackData = {
-          today: getChinaDate(), yesterday: getChinaDate(-1),
-          greeting: '🌅 早上好', kbName,
-          doneToday: db.q("SELECT title, priority FROM plan_todos WHERE status = 'done' AND updated_at >= ?", getChinaDate()),
-          pendingTodos: [],
-          overdueTodos: [],
-          reminders: [], chats: [], workLogs: [], recs: [], recCount: 0,
-          docs: [], docCountToday: 0, doneWeek: [],
-          chatCountToday: 0, chatCountWeek: 0, recCountWeek: 0,
-          todos: [], allDatasets: [], dsNameMap: {},
-        };
-        const { text: fallbackText } = renderReport(fallbackData);
-        db.run("INSERT INTO ai_analysis (project_id, type, content, report_date, created_at, updated_at) VALUES (?, 'daily_report', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
-          mainProjectId, fallbackText, getChinaDate());
-        logger.info('[Scheduler] Fallback report saved');
-      } catch (fallbackErr) {
-        logger.error(`[Scheduler] Fallback also failed: ${fallbackErr.message}`);
-      }
     }
   },
   'reminder': async (task) => {

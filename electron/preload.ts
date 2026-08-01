@@ -4,7 +4,7 @@ const VALID_CHANNELS = [
   'chat:delta', 'chat:status', 'chat:tool', 'chat:done', 'chat:error',
   'coding:delta', 'coding:status', 'coding:tool', 'coding:done', 'coding:error',
   'kb:scan-progress', 'service:status', 'service:toggle', 'feishu:message',
-  'indexer:progress',
+  'indexer:progress', 'report:generated',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -155,17 +155,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     indexerInfo: () => ipcRenderer.invoke('insights:indexerInfo'),
     libraryStats: () => ipcRenderer.invoke('insights:libraryStats'),
     clearIndex: () => ipcRenderer.invoke('insights:clearIndex'),
+    reportGenerating: () => ipcRenderer.invoke('insights:reportGenerating'),
   },
 
   // Config
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (cfg: unknown) => ipcRenderer.invoke('config:set', cfg),
-  },
-
-  // LLM (对话模型)
-  llm: {
-    test: (opts: unknown) => ipcRenderer.invoke("llm:test", opts),
   },
 
   // Embedding Model

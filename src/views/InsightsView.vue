@@ -176,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 
 const API = window.electronAPI;
 
@@ -536,6 +536,13 @@ onMounted(async () => {
     const dailyReport = tasks.find((t: any) => t.task_type === 'daily_report');
     if (dailyReport && dailyReport.cron_expression) reportCron.value = dailyReport.cron_expression;
   } catch {}
+  API.on('report:generated', () => {
+    loadDailyReports();
+  });
+});
+
+onBeforeUnmount(() => {
+  API.removeAllListeners('report:generated');
 });
 </script>
 

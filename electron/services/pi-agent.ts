@@ -370,6 +370,34 @@ export async function runPi(opts: RunPiOptions): Promise<void> {
   }
 }
 
+/**
+ * 使用 pi agent 生成日报（非流式，返回完整文本，过滤思考过程）
+ */
+export async function generateDailyReport(sessionId: string, prompt: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const timeout = setTimeout(() => {
+      if (!done) reject(new Error('日报生成超时'));
+    }, 300000);
+
+    runPi({
+      prompt,
+      sessionId: sessionId + '_report',
+      onDone: (finalText) => {
+        done = true;
+        clearTimeout(timeout);
+        const result = (finalText || '').trim().split('\n').filter(l => !l.trim().startsWith('数据来源')).join('\n').trim();
+        resolve(result);
+      },
+      onError: (err) => {
+        done = true;
+        clearTimeout(timeout);
+        reject(new Error(err));
+      },
+    });
+  });
+}
+
 /** 中止指定会话的当前运行 */
 export async function abortSession(sessionId: string): Promise<void> {
   const handle = sessions.get(sessionId);

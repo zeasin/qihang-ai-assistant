@@ -523,9 +523,13 @@ function switchToOverview() {
 
 onMounted(() => {
   loadNotesDir();
+  API.on('report:generated', () => {
+    if (activeTab.value === 'overview') loadOverviewData();
+  });
 });
 onUnmounted(() => {
   API.removeAllListeners('kb:scan-progress');
+  API.removeAllListeners('report:generated');
 });
 </script>
 
