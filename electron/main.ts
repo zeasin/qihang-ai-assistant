@@ -44,6 +44,11 @@ import logger from './services/logger';
 import { createTrayIcon } from './icon';
 import * as rag from './services/rag';
 
+const START_UPTIME = process.uptime();
+function startupElapsed(label: string) {
+  logger.info('[Startup] ' + label + ': +' + Math.round((process.uptime() - START_UPTIME) * 1000) + 'ms');
+}
+
 let mainWindow: Electron.BrowserWindow | null = null;
 let tray: Electron.Tray | null = null;
 let backgroundReady = false;
@@ -1203,6 +1208,7 @@ ipcMain.handle("embedding:test", async (_, { model, host, apiKey }) => {
 (app as any).isQuitting = false;
 
 app.whenReady().then(async () => {
+  startupElapsed('whenReady fired');
   if (process.platform !== 'darwin') {
     Menu.setApplicationMenu(null);
   }
@@ -1211,9 +1217,10 @@ app.whenReady().then(async () => {
   } catch (e) {
     logger.error('DB init error: %s', e);
   }
+  startupElapsed('db loaded');
   // 一次性迁移：将 sys_config 中已有的设置复制到 config.json（配置来源此后以 config.json 为准）
+  // 注意：llmProvider/llmModel/llmApiKey/llmBaseUrl 已被 llm_profiles 取代，不再迁移（见 database.ts obsoleteKeys）
   const MIGRATE_KEYS = [
-    'llmProvider', 'llmModel', 'llmApiKey', 'llmBaseUrl',
     'embeddingModel', 'embeddingProvider', 'embeddingBaseUrl', 'embeddingApiKey',
     'feishuWebhookUrl', 'feishuAppId', 'feishuAppSecret', 'feishuChatId',
     'daily_report_retention_days', 'daily_report_prompt', 'daily_report_template',
@@ -1238,6 +1245,7 @@ app.whenReady().then(async () => {
     apiKey: appConfig.getConfig("embeddingApiKey") || '',
   });
   createWindow();
+  startupElapsed('window created');
 
   const savedAppId = appConfig.getConfig('feishuAppId');
   const savedAppSecret = appConfig.getConfig('feishuAppSecret');
@@ -1247,7 +1255,7 @@ app.whenReady().then(async () => {
   }
 
   scheduler.start();
-  logger.info('[Scheduler] auto-started');
+  startupElapsed('services started');
 
   updateTrayMenu(getServicesStatus());
 

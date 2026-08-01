@@ -14,6 +14,18 @@ let cached: any | null = null;
 export function loadConfig(): any {
   if (cached) return cached;
   try {
+    if (!fs.existsSync(CONFIG_PATH)) {
+      // 首次启动：config.json 不存在时从模板复制（含日报提示词等默认值）
+      const templatePath = CONFIG_PATH + '.template';
+      if (fs.existsSync(templatePath)) {
+        try {
+          fs.copyFileSync(templatePath, CONFIG_PATH);
+          logger.info('[AppConfig] 首次启动，已从 %s 生成 config.json', path.basename(templatePath));
+        } catch (e: any) {
+          logger.warn('[AppConfig] 复制模板失败: %s', e && e.message ? e.message : e);
+        }
+      }
+    }
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
       cached = raw ? JSON.parse(raw) : {};

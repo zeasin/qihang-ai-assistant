@@ -31,6 +31,24 @@ function saveDb() {
   fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
 
+// 防抖合并写入：run() 不再每次全量落盘（80MB export + 写盘开销大），
+// 由 setImmediate 防抖汇总为一次；close() 时确保最终落盘。
+let saveTimer: any = null;
+function scheduleSave() {
+  if (saveTimer) return;
+  saveTimer = setImmediate(() => {
+    saveTimer = null;
+    saveDb();
+  });
+}
+function flushSave() {
+  if (saveTimer) {
+    clearImmediate(saveTimer);
+    saveTimer = null;
+  }
+  saveDb();
+}
+
 function initSchema() {
   db.run(`
     CREATE TABLE IF NOT EXISTS sys_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -208,11 +226,14 @@ function initSchema() {
 
   `);
 
-  const obsoleteKeys = ['projectDir', 'ollamaHost', 'labels', 'embedModel'];
+  const obsoleteKeys = ['projectDir', 'ollamaHost', 'labels', 'embedModel', 'llmProvider', 'llmModel', 'llmApiKey', 'llmBaseUrl'];
+  let deleted = 0;
   for (const key of obsoleteKeys) {
     run('DELETE FROM sys_config WHERE key = ?', key);
+    deleted += db.getRowsModified();
   }
-  saveDb();
+  if (deleted > 0) logger.info('[DB] 已清理 %d 个废弃配置键', deleted);
+  scheduleSave();
 }
 
 function initDefaultConfig() {
@@ -253,7 +274,7 @@ function qOne(sql, ...params) {
 function run(sql, ...params) {
   try {
     db.run(sql, params);
-    saveDb();
+    scheduleSave();
   } catch (e) {
     logger.error('[DB] SQL error: %s | SQL: %s', e.message, sql.slice(0, 200));
     throw e;
@@ -262,7 +283,7 @@ function run(sql, ...params) {
 
 function runMany(sqls) {
   for (const s of sqls) db.run(s.sql, s.params || []);
-  saveDb();
+  scheduleSave();
 }
 
 function runRaw(sql, params) {
@@ -604,7 +625,7 @@ function migrateLlmProfiles() {
 }
 
 function close() {
-  if (db) { saveDb(); db.close(); db = null; }
+  if (db) { flushSave(); db.close(); db = null; }
 }
 
 export { getDb, close, q, qOne, run, runMany, runRaw, save, configGet, configSet, project, chat, dm, ds, task, reminder, todo, llmProfile, migrateLlmProfiles };
