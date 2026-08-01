@@ -3,9 +3,8 @@
  *
  * 在 Electron main 进程内直接使用官方 SDK（@earendil-works/pi-coding-agent）：
  * - 不再 spawn pi CLI 子进程，消除每次约 4.5s 的启动开销
- * - createAgentSession + subscribe 事件流，取代 JSON 行解析
- * - SessionManager.open 精确控制会话续接（与 CLI --session <path> 同机制）
- * - 自定义工具（kb_search 等）通过 defineTool 原生注册，进程内直接访问项目服务
+  * - createAgentSession + subscribe 事件流，取代 JSON 行解析
+  * - SessionManager.open 精确控制会话续接（与 CLI --session <path> 同机制）
  */
 import * as path from 'path';
 import * as os from 'os';
@@ -99,7 +98,7 @@ async function getSession(opts: {
     model,
     sessionManager: sm,
     thinkingLevel: 'off',
-    customTools: [kbSearchTool()],
+    customTools: [],
     settingsManager: sdk.SettingsManager.create(cwd || process.cwd(), getAgentDir()),
   });
   if (modelFallbackMessage) logger.warn('[PiAgent] %s', modelFallbackMessage);
@@ -160,66 +159,6 @@ export async function listPiModels(): Promise<{ models: PiModelInfo[]; error?: s
     logger.warn('[PiAgent] listPiModels failed: %s', e && e.message ? e.message : e);
     return { models: [], error: (e && e.message) || String(e) };
   }
-}
-
-// ---- 自定义工具：笔记库搜索（进程内直接访问项目服务） ----
-import * as db from './database';
-import * as rag from './rag';
-
-function kbSearchTool(): any {
-  return {
-    name: 'kb_search',
-    label: '笔记库搜索',
-    description:
-      '在本地笔记库（知识库）中做语义+关键词混合检索，返回最相关的笔记片段。用于回答涉及用户笔记、文档内容的问题。',
-    promptSnippet: 'kb_search(query, kbName?, topK?) - 检索本地笔记库',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '搜索关键词或问题描述' },
-        kbName: { type: 'string', description: '指定的知识库名称（可选，留空则搜索全部）' },
-        topK: { type: 'number', description: '返回片段数（默认5，最大10）' },
-      },
-      required: ['query'],
-    },
-    async execute(
-      _toolCallId: unknown,
-      params: { query: string; kbName?: string; topK?: number },
-    ): Promise<{ content: { type: string; text: string }[]; details: Record<string, unknown> }> {
-      try {
-        await db.getDb();
-        const noteProjects = db.project.list('note');
-        let targetProjects = noteProjects;
-        if (params.kbName && params.kbName !== 'None' && params.kbName !== 'null') {
-          targetProjects = noteProjects.filter((p) => p.name === params.kbName || p.name.includes(params.kbName));
-        }
-        if (!targetProjects.length) {
-          const names = noteProjects.map((p) => p.name).join(', ');
-          return { content: [{ type: 'text', text: `知识库未找到。可用: ${names || '无'}` }], details: {} };
-        }
-        let results: any[] = [];
-        const topK = Math.min(params.topK || 5, 10);
-        for (const p of targetProjects) {
-          try {
-            const docs = await rag.hybridSearch(params.query, topK, db as any);
-            results.push(...docs.map((d) => ({ ...d, kbName: p.name })));
-          } catch (e: any) {
-            logger.warn('[PiAgent] KB search error for %s: %s', p.name, e.message);
-          }
-        }
-        results.sort((a, b) => b.score - a.score);
-        const top = results.slice(0, topK);
-        if (!top.length) return { content: [{ type: 'text', text: '知识库中未找到相关内容' }], details: {} };
-        const text = top.map((d) => `【${d.kbName || '知识库'}】\n${d.text}`).join('\n\n---\n\n');
-        return {
-          content: [{ type: 'text', text }],
-          details: { hits: top.length, projects: targetProjects.map((p) => p.name) },
-        };
-      } catch (e: any) {
-        return { content: [{ type: 'text', text: `笔记库检索失败: ${e.message}` }], details: {} };
-      }
-    },
-  };
 }
 
 // ---- 事件回调类型 ----

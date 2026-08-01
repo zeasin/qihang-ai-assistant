@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import * as db from './database';
-import * as rag from './rag';
 import logger from './logger';
 
 let cachedZ: any = null;
@@ -275,31 +274,6 @@ async function queryDatasetTool({ datasetName, conditions, limit }, projectDir) 
   return JSON.stringify(limited, null, 2);
 }
 
-async function searchKbTool({ query, kbName }, projectDir) {
-  const noteProjects = db.project.list('note');
-  let targetProjects = noteProjects;
-  if (kbName && kbName !== 'None' && kbName !== 'null') {
-    targetProjects = noteProjects.filter(p => p.name === kbName || p.name.includes(kbName));
-  }
-  if (!targetProjects.length) {
-    const names = noteProjects.map(p => p.name).join(', ');
-    return `知识库未找到。可用: ${names || '无'}`;
-  }
-  let results: any[] = [];
-  for (const p of targetProjects) {
-    try {
-      const docs = await rag.hybridSearch(query, 5, db);
-      results.push(...docs.map(d => ({ ...d, kbName: p.name })));
-    } catch (e) {
-      logger.warn('[Tools] KB search error for %s: %s', p.name, e.message);
-    }
-  }
-  results.sort((a, b) => b.score - a.score);
-  const top = results.slice(0, 5);
-  if (!top.length) return '知识库中未找到相关内容';
-  return top.map(d => `【${d.kbName || '知识库'}】\n${d.text}`).join('\n\n---\n\n');
-}
-
 async function listDatasetsTool() {
   const all = db.ds.list();
   return all.length ? all.map(d => `- ${d.name} (${d.id}): ${d.schema_json}`).join('\n') : '暂无数据集';
@@ -516,7 +490,6 @@ async function buildDataToolDefs(projectDir) {
   const bind = (fn) => (args) => fn(args, projectDir);
   return [
     { name: 'query_dataset', description: '查询本地数据集中的记录。数据集用于存储结构化信息，如代办事项、客户信息、项目、Bug等。', schema: z.object({ datasetName: z.string().describe('数据集名称，如 todos, customers, projects, bugs'), conditions: z.string().optional().nullable().describe('查询条件关键字'), limit: z.coerce.number().optional().nullable().describe('返回条数上限，默认20') }), func: (args) => queryDatasetTool(args, projectDir) },
-    { name: 'search_knowledge_base', description: '在本地知识库中搜索相关笔记/文档。', schema: z.object({ query: z.string().describe('搜索关键词或问题'), kbName: z.string().optional().nullable().describe('知识库名称（可选）') }), func: (args) => searchKbTool(args, projectDir) },
     { name: 'list_datasets', description: '列出所有可用的数据集及其结构。', schema: z.object({}), func: () => listDatasetsTool() },
     { name: 'list_scheduled_tasks', description: '列出所有已配置的定时任务。', schema: z.object({}), func: () => listScheduledTasksTool() },
     { name: 'read_project_file', description: '读取项目目录下的文件内容。若文件不存在会返回相似文件名建议，可据此用 list_directory 确认准确路径。', schema: z.object({ filePath: z.string().describe('相对于项目根目录的文件路径，或绝对路径') }), func: bind(readProjectFileTool) },

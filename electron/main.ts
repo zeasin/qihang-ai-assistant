@@ -574,10 +574,50 @@ ipcMain.handle('kb:getDefault', () => {
 });
 ipcMain.handle('kb:search', async (_, { dir, query }) => {
   try {
-    if (!query || !dir) return [];
-    const rag = require('./services/rag');
-    const results = await rag.hybridSearch(query, 10, db);
-    return results;
+    if (!query || !dir || !fs.existsSync(dir)) return [];
+
+    const exts = new Set(['.md','.txt','.json','.csv','.js','.ts','.vue','.css','.py','.sh','.yml','.yaml','.toml']);
+    const results: any[] = [];
+    const maxResults = 10;
+
+    function walk(dirPath) {
+      if (results.length >= maxResults) return;
+      try {
+        for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+          if (results.length >= maxResults) return;
+          if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== '.git') {
+            walk(path.join(dirPath, entry.name));
+          } else if (entry.isFile() && exts.has(path.extname(entry.name).toLowerCase())) {
+            const fullPath = path.join(dirPath, entry.name);
+            const relPath = path.relative(dir, fullPath);
+            const content = fs.readFileSync(fullPath, 'utf-8');
+            const lower = content.toLowerCase();
+            const qLower = query.toLowerCase();
+            if (lower.includes(qLower)) {
+              const lines = content.split('\n');
+              const matchLines: string[] = [];
+              for (const line of lines) {
+                if (matchLines.length >= 3) break;
+                if (line.toLowerCase().includes(qLower)) {
+                  matchLines.push(line);
+                }
+              }
+              if (matchLines.length > 0) {
+                results.push({
+                  source: fullPath,
+                  title: entry.name,
+                  score: 1,
+                  text: matchLines.join('\n'),
+                  fullText: content,
+                });
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+    walk(dir);
+    return results.slice(0, maxResults);
   } catch {
     return [];
   }
