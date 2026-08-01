@@ -241,7 +241,7 @@ const project = {
     if (id) run('UPDATE prj_projects SET is_default = 1 WHERE id = ?', id);
   },
   add: (name, type, dir, description, defaultBranch) => {
-    const t = type || 'note';
+    const t = type || 'code';
     run('INSERT INTO prj_projects (name, type, dir, description, default_branch) VALUES (?, ?, ?, ?, ?)',
       name, t, dir || '', description || '', defaultBranch || '');
     const r = qOne('SELECT id FROM prj_projects WHERE name = ? AND type = ?', name, t);

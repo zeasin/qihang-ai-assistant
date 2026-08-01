@@ -3,7 +3,7 @@
     <!-- ========== 左栏：项目树 + 对话列表 ========== -->
     <div class="workbench-sidebar">
       <div class="sidebar-header">
-        <h3 class="sidebar-title">工作台</h3>
+        <h3 class="sidebar-title">编程</h3>
         <button class="btn btn-sm btn-secondary" @click="openAddProject">+ 项目</button>
       </div>
 
@@ -58,7 +58,7 @@
       <!-- 无对话时 -->
       <div v-if="!currentSessionId" class="workbench-empty">
         <div class="empty-icon">💻</div>
-        <div class="empty-title">工作台</div>
+        <div class="empty-title">编程</div>
         <div class="empty-desc">
           从左侧选择一个项目下的对话，或新建一个对话开始<br>
           数据集查询 · 笔记库检索 · 项目文件操作，一个助理全部搞定
@@ -260,7 +260,7 @@ const currentProject = computed(() => {
 // ========== 加载数据 ==========
 async function loadProjects() {
   try {
-    projects.value = await API.project.list();
+    projects.value = await API.project.list('code');
   } catch { projects.value = []; }
 }
 
@@ -484,10 +484,11 @@ async function sendMessage() {
       openAddProject();
       return;
     }
-    const firstNote = projects.value.find(p => p.type === 'note') || projects.value[0];
-    selectedProject.value = firstNote;
-    await loadSessions(firstNote.id);
-    await newSession(firstNote.id);
+    const firstProject = projects.value[0];
+    if (!firstProject) return;
+    selectedProject.value = firstProject;
+    await loadSessions(firstProject.id);
+    await newSession(firstProject.id);
     // 等 session 创建完成后再发送
     nextTick(() => {
       inputText.value = text;
@@ -694,9 +695,11 @@ async function saveProject() {
     await loadProjects();
     // 选中新项目
     if (projects.value.length > 0 && !editingProject.value) {
-      const firstNote = projects.value.find(p => p.type === 'note') || projects.value[0];
-      selectedProject.value = firstNote;
-      loadSessions(firstNote.id);
+      const firstProject = projects.value[0];
+      if (firstProject) {
+        selectedProject.value = firstProject;
+        loadSessions(firstProject.id);
+      }
     }
   } catch (e: any) {
     alert('保存失败: ' + (e.message || ''));
@@ -729,10 +732,11 @@ onMounted(async () => {
   await loadProjects();
   await loadPiModels();
   if (projects.value.length > 0) {
-    const firstNote = projects.value.find(p => p.type === 'note') || projects.value[0];
-    expandedProjects.add(firstNote.id);
-    await loadSessions(firstNote.id);
-    const sessions = projectSessions[firstNote.id];
+    const firstProject = projects.value[0];
+    if (!firstProject) return;
+    expandedProjects.add(firstProject.id);
+    await loadSessions(firstProject.id);
+    const sessions = projectSessions[firstProject.id];
     if (sessions && sessions.length > 0) {
       await selectSession(sessions[0]);
     }

@@ -419,27 +419,12 @@ function startFeishu(configData) {
 // ========== IPC Handlers ==========
 
 // --- Projects (Knowledge Base) ---
-// 笔记库配置保存在 config.json（notesDir），数据库中的 note 项目仅作索引锚点。
-function syncNoteAnchor(dir: string) {
-  let p = db.project.getDefault();
-  if (!p || p.type !== 'note') {
-    const notes = db.project.list('note');
-    p = notes[0] || null;
-  }
-  if (!p) {
-    p = db.project.add('笔记库', 'note', dir, '', '');
-  } else if (p.dir !== dir) {
-    db.project.update(p.id, { dir });
-  }
-  db.project.setDefault(p.id);
-  return db.project.get(p.id);
-}
-
 ipcMain.handle('kb:list', () => {
   const dir = appConfig.getNotesDir();
   if (!dir) return [];
-  const p = syncNoteAnchor(dir);
-  if (!p) return [];
+  const notes = db.project.list('note');
+  if (notes.length === 0) return [];
+  const p = notes[0];
   return [{ id: p.id, name: p.name || '笔记库', dir, totalDocs: db.project.docCount(p.id) }];
 });
 ipcMain.handle('notes:tree', (_, { projectId }) => {
@@ -502,12 +487,26 @@ ipcMain.handle('code:search', (_, { projectId, query }) => {
 ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
   if (!dirPath) return null;
   appConfig.setNotesDir(dirPath);
-  return syncNoteAnchor(dirPath);
+  const notes = db.project.list('note');
+  let p = notes[0] || null;
+  if (!p) {
+    p = db.project.add('笔记库', 'note', dirPath, '', '');
+  } else if (p.dir !== dirPath) {
+    db.project.update(p.id, { dir: dirPath });
+  }
+  return db.project.get(p.id);
 });
 ipcMain.handle('kb:setDir', (_, { dir }) => {
   if (!dir) return null;
   appConfig.setNotesDir(dir);
-  return syncNoteAnchor(dir);
+  const notes = db.project.list('note');
+  let p = notes[0] || null;
+  if (!p) {
+    p = db.project.add('笔记库', 'note', dir, '', '');
+  } else if (p.dir !== dir) {
+    db.project.update(p.id, { dir });
+  }
+  return db.project.get(p.id);
 });
 ipcMain.handle('kb:remove', () => {
   appConfig.setNotesDir('');
@@ -601,7 +600,9 @@ ipcMain.handle('kb:setDefault', () => ({ ok: true }));
 ipcMain.handle('kb:getDefault', () => {
   const dir = appConfig.getNotesDir();
   if (!dir) return null;
-  return syncNoteAnchor(dir);
+  const notes = db.project.list('note');
+  if (notes.length === 0) return null;
+  return notes[0];
 });
 ipcMain.handle('kb:search', async (_, { id, query }) => {
   try {

@@ -30,7 +30,7 @@ npm run electron:build</pre>
         <table class="help-table">
           <tr><th>菜单</th><th>说明</th></tr>
           <tr><td>📊 概览</td><td>全局看板：数据统计、语义搜索、笔记库索引管理</td></tr>
-          <tr><td>💻 工作台</td><td>AI 编程工作台，辅助代码开发</td></tr>
+          <tr><td>💻 编程</td><td>AI 编程助手，辅助代码开发</td></tr>
           <tr><td>📁 知识库</td><td>Markdown 笔记管理，目录树浏览、编辑器、Zen 模式</td></tr>
           <tr><td>🗃️ 数据</td><td>多数据集管理，Excel/JSON 批量导入，AI 智能填充</td></tr>
           <tr><td>🔔 任务</td><td>待办 + 定时提醒统一管理</td></tr>
