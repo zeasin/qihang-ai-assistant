@@ -41,7 +41,7 @@ interface ElectronAPI {
     remove: () => Promise<void>;
     scan: (dir: string) => Promise<any>;
     search: (dir: string, query: string) => Promise<any[]>;
-    status: (dir: string) => Promise<any>;
+    status: () => Promise<any>;
   };
   ds: {
     list: () => Promise<any[]>;

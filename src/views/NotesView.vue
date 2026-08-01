@@ -287,9 +287,8 @@ async function selectFile(item: TreeNode) {
 }
 
 async function loadIndexedState() {
-  if (!notesDir.value) return;
   try {
-    const status = await API.kb.status(notesDir.value);
+    const status = await API.kb.status();
     indexedState.value[notesDir.value] = status?.indexed ?? false;
   } catch {
     indexedState.value[notesDir.value] = false;

@@ -42,7 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     remove: () => ipcRenderer.invoke('kb:remove'),
     scan: (dir: string) => ipcRenderer.invoke('kb:scan', { dir }),
     search: (dir: string, query: string) => ipcRenderer.invoke('kb:search', { dir, query }),
-    status: (dir: string) => ipcRenderer.invoke('kb:status', { dir }),
+    status: () => ipcRenderer.invoke('kb:status'),
     setDefault: () => ipcRenderer.invoke('kb:setDefault'),
     getDefault: () => ipcRenderer.invoke('kb:getDefault'),
   },
