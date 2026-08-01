@@ -39,8 +39,7 @@ function scheduleSave() {
 }
 
 function initSchema() {
-  db.run(`DROP TABLE IF EXISTS sys_config;
-    DROP TABLE IF EXISTS llm_profiles;
+  db.run(`
 
     CREATE TABLE IF NOT EXISTS prj_sessions (
       id TEXT PRIMARY KEY,
@@ -150,23 +149,6 @@ function initSchema() {
       prompt TEXT,
       dir_path TEXT,
       report_date TEXT,
-      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
-      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
-    );
-
-    CREATE TABLE IF NOT EXISTS sys_tasks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id TEXT,
-      name TEXT,
-      task_type TEXT,
-      prompt_key TEXT,
-      url TEXT,
-      cron_expression TEXT,
-      enabled INTEGER DEFAULT 1,
-      notify_feishu INTEGER DEFAULT 1,
-      dataset_id TEXT,
-      params_json TEXT,
-      project_id INTEGER DEFAULT NULL,
       created_at TEXT DEFAULT (datetime('now', '+8 hours')),
       updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
@@ -429,36 +411,6 @@ const ds = {
   deleteRecord: (id) => run('DELETE FROM data_center_records WHERE id = ?', id),
 };
 
-// ========== Collector Tasks ==========
-const task = {
-  list: () => q('SELECT * FROM sys_tasks ORDER BY created_at DESC'),
-  get: (id) => qOne('SELECT * FROM sys_tasks WHERE id = ?', id),
-  add: (name, cronExpr, taskType, params) => {
-    const taskId = 't_' + Date.now();
-    run('INSERT INTO sys_tasks (task_id, name, cron_expression, task_type, params_json, dataset_id, prompt_key, url, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      taskId, name, cronExpr, taskType, JSON.stringify(params || {}), (params && params.dataset_id) || '', (params && params.prompt_key) || '', (params && params.url) || '', (params && params.project_id) || null);
-    const r = qOne('SELECT id FROM sys_tasks WHERE task_id = ?', taskId);
-    return { id: r.id, task_id: taskId };
-  },
-  update: (id, data) => {
-    const fields: any[] = []; const params: any[] = [];
-    if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
-    if (data.cron_expression !== undefined) { fields.push('cron_expression = ?'); params.push(data.cron_expression); }
-    if (data.task_type !== undefined) { fields.push('task_type = ?'); params.push(data.task_type); }
-    if (data.enabled !== undefined) { fields.push('enabled = ?'); params.push(data.enabled ? 1 : 0); }
-    if (data.notify_feishu !== undefined) { fields.push('notify_feishu = ?'); params.push(data.notify_feishu ? 1 : 0); }
-    if (data.params_json !== undefined) { fields.push('params_json = ?'); params.push(typeof data.params_json === 'string' ? data.params_json : JSON.stringify(data.params_json)); }
-    if (data.dataset_id !== undefined) { fields.push('dataset_id = ?'); params.push(data.dataset_id); }
-    if (data.prompt_key !== undefined) { fields.push('prompt_key = ?'); params.push(data.prompt_key); }
-    if (data.url !== undefined) { fields.push('url = ?'); params.push(data.url); }
-    if (data.project_id !== undefined) { fields.push('project_id = ?'); params.push(data.project_id); }
-    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE sys_tasks SET ${fields.join(', ')} WHERE id = ?`, ...params); }
-  },
-  remove: (id) => run('DELETE FROM sys_tasks WHERE id = ?', id),
-  setEnabled: (id, enabled) => run('UPDATE sys_tasks SET enabled = ?, updated_at = datetime(\'now\') WHERE id = ?', enabled ? 1 : 0, id),
-  getActive: () => q("SELECT * FROM sys_tasks WHERE enabled = 1"),
-};
-
 // ========== Reminders ==========
 const reminder = {
   list: () => q('SELECT * FROM plan_reminders ORDER BY created_at DESC'),
@@ -514,4 +466,4 @@ function close() {
   if (db) { db.close(); db = null; }
 }
 
-export { getDb, close, q, qOne, run, runMany, runRaw, save, project, chat, dm, ds, task, reminder, todo };
+export { getDb, close, q, qOne, run, runMany, runRaw, save, project, chat, dm, ds, reminder, todo };

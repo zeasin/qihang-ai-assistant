@@ -678,7 +678,6 @@ const executors = {
       const msg = task.name + (task.message ? '\n' + task.message : '');
       sendNotification('⏰ 提醒', msg);
       if (task.notify_feishu) await sendFeishu(`⏰ ${msg}`);
-      db.run("UPDATE sys_tasks SET updated_at = datetime('now', '+8 hours') WHERE id = ?", task.id);
     } catch (e) {
       logger.error(`[Scheduler] reminder error: ${e.message}`);
     }
@@ -689,79 +688,20 @@ function start() {
   if (running) return;
   running = true;
 
-  const tasks = db.task.getActive();
-  for (const task of tasks) {
-    scheduleTask(task);
-  }
-
   const reminders = db.reminder.getActive();
   for (const r of reminders) {
     scheduleReminder(r);
   }
 
-  logger.info(`[Scheduler] started with ${tasks.length} tasks + ${reminders.length} reminders`);
-
-  // Ensure every note project has a daily_report task
-  setImmediate(() => ensureDailyReportTasks());
-
-  // Check if today's daily report was already generated; if not, regenerate now
-  setImmediate(() => checkAndRegenerateDailyReport());
+  logger.info(`[Scheduler] started with 0 tasks + ${reminders.length} reminders`);
 }
 
-function ensureDailyReportTasks() {
-  try {
-    const noteProjects = db.project.list('note');
-    const existingTasks = db.q("SELECT project_id FROM sys_tasks WHERE task_type = 'daily_report' AND project_id IS NOT NULL");
-    const existingIds = new Set(existingTasks.map(t => t.project_id));
-    for (const p of noteProjects) {
-      if (!existingIds.has(p.id)) {
-        logger.info(`[Scheduler] auto-creating daily_report task for project: ${p.name}`);
-        const r = db.task.add(`${p.name} 综合日报`, '0 7 * * *', 'daily_report', { project_id: p.id, enabled: 1, notify_feishu: 1 });
-        const task = db.task.get(r.id);
-        if (task && task.enabled) scheduleTask(task);
-      }
-    }
-  } catch (e) {
-    logger.error('[Scheduler] ensureDailyReportTasks error:', e.message);
-  }
-}
-
-async function checkAndRegenerateDailyReport() {
-  try {
-    const today = getChinaDate();
-    const existing = db.qOne("SELECT id FROM ai_analysis WHERE type = 'daily_report' AND report_date = ?", today);
-    if (existing) {
-      logger.info(`[Scheduler] today's report (${today}) already exists, skipping auto-regeneration`);
-      return;
-    }
-    const task = db.qOne("SELECT * FROM sys_tasks WHERE task_type = 'daily_report' AND enabled = 1 LIMIT 1");
-    if (!task) {
-      logger.warn('[Scheduler] no daily_report task found for auto-regeneration');
-      return;
-    }
-    logger.info(`[Scheduler] today's report (${today}) missing, auto-regenerating...`);
-    const executor = executors['daily_report'];
-    if (executor) {
-      await executor(task);
-      logger.info(`[Scheduler] auto-regeneration complete for ${today}`);
-    }
-  } catch (e) {
-    logger.error(`[Scheduler] auto-regeneration error: ${e.message}`);
-  }
-}
-
-function scheduleTask(task) {
-  if (!task.cron_expression || !cron.validate(task.cron_expression)) return;
-  const job = cron.schedule(task.cron_expression, async () => {
-    try {
-      const executor = executors[task.task_type];
-      if (executor) await executor(task);
-    } catch (e) {
-      logger.error(`[Scheduler] task ${task.name} error:`, e.message);
-    }
-  });
-  jobs.set('task_' + task.id, job);
-}
+// 任务系统已移除（sys_tables 删表），保留空桩兼容导出
+function scheduleTask() {}
+function addTask() {}
+function removeTask() {}
+function ensureDailyReportTasks() {}
+async function checkAndRegenerateDailyReport() {}
 
 function scheduleReminder(r) {
   const cronExpr = getCronFromReminder(r);
@@ -778,15 +718,6 @@ function scheduleReminder(r) {
     }
   });
   jobs.set('reminder_' + r.id, job);
-}
-
-function addTask(task) {
-  scheduleTask(task);
-}
-
-function removeTask(id) {
-  const key = 'task_' + id;
-  if (jobs.has(key)) { jobs.get(key).stop(); jobs.delete(key); }
 }
 
 function addReminder(r) {

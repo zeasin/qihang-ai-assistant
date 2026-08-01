@@ -306,10 +306,7 @@ async function listDatasetsTool() {
 }
 
 async function listScheduledTasksTool() {
-  const tasks = db.task.list();
-  return tasks.length
-    ? tasks.map(t => `- ${t.name} (${t.task_type}) ${t.enabled ? '✓启用' : '✗停用'} cron: ${t.cron_expr || '无'}`).join('\n')
-    : '暂无定时任务';
+  return '暂无定时任务（任务系统已移除）';
 }
 
 async function readProjectFileTool({ filePath }, projectDir) {
