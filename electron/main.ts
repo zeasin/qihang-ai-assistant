@@ -33,6 +33,7 @@ try {
   }
 } catch {} // worker_threads not available
 import * as db from './services/database';
+import * as appConfig from './services/app-config';
 import * as orchestrator from './services/orchestrator';
 import * as llm from './services/llm';
 import { runPi, listPiModels } from './services/pi-agent';
@@ -414,9 +415,28 @@ function startFeishu(configData) {
 // ========== IPC Handlers ==========
 
 // --- Projects (Knowledge Base) ---
+// 笔记库配置保存在 config.json（notesDir），数据库中的 note 项目仅作索引锚点。
+function syncNoteAnchor(dir: string) {
+  let p = db.project.getDefault();
+  if (!p || p.type !== 'note') {
+    const notes = db.project.list('note');
+    p = notes[0] || null;
+  }
+  if (!p) {
+    p = db.project.add('笔记库', 'note', dir, '', '');
+  } else if (p.dir !== dir) {
+    db.project.update(p.id, { dir });
+  }
+  db.project.setDefault(p.id);
+  return db.project.get(p.id);
+}
+
 ipcMain.handle('kb:list', () => {
-  const projects = db.project.list('note');
-  return projects.map(p => ({ ...p, totalDocs: db.project.docCount(p.id) }));
+  const dir = appConfig.getNotesDir();
+  if (!dir) return [];
+  const p = syncNoteAnchor(dir);
+  if (!p) return [];
+  return [{ id: p.id, name: p.name || '笔记库', dir, totalDocs: db.project.docCount(p.id) }];
 });
 ipcMain.handle('notes:tree', (_, { projectId }) => {
   const project = db.project.get(projectId);
@@ -476,20 +496,19 @@ ipcMain.handle('code:search', (_, { projectId, query }) => {
 });
 
 ipcMain.handle('kb:add', (_, { name, path: dirPath }) => {
-  return db.project.add(name, 'note', dirPath, '', '');
+  if (!dirPath) return null;
+  appConfig.setNotesDir(dirPath);
+  return syncNoteAnchor(dirPath);
 });
 ipcMain.handle('kb:setDir', (_, { dir }) => {
-  const notes = db.project.list('note');
-  let p = notes[0];
-  if (!p) {
-    p = db.project.add('笔记库', 'note', dir, '', '');
-  } else if (p.dir !== dir) {
-    db.project.update(p.id, { dir });
-  }
-  db.project.setDefault(p.id);
-  return db.project.get(p.id);
+  if (!dir) return null;
+  appConfig.setNotesDir(dir);
+  return syncNoteAnchor(dir);
 });
-ipcMain.handle('kb:remove', (_, { id }) => db.project.remove(id));
+ipcMain.handle('kb:remove', () => {
+  appConfig.setNotesDir('');
+  return { ok: true };
+});
 let _indexingLock = false;
 
 let _docBatchCount = 0;
@@ -574,8 +593,12 @@ ipcMain.handle('kb:scan', async (_, { id }) => {
     return { error: e.message };
   }
 });
-ipcMain.handle('kb:setDefault', (_, { id }) => db.project.setDefault(id));
-ipcMain.handle('kb:getDefault', () => db.project.getDefault());
+ipcMain.handle('kb:setDefault', () => ({ ok: true }));
+ipcMain.handle('kb:getDefault', () => {
+  const dir = appConfig.getNotesDir();
+  if (!dir) return null;
+  return syncNoteAnchor(dir);
+});
 ipcMain.handle('kb:search', async (_, { id, query }) => {
   try {
     if (!query) return [];
@@ -643,14 +666,10 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
     // ===== pi agent 引擎（与工作台一致） =====
     sendToRenderer('chat:status', { sessionId: sid, text: 'AI 正在分析问题...' });
 
-    const augmentedQuestion = kbIds?.length
-      ? `[笔记库: ${(await Promise.all(kbIds.map(id => db.project.get(id)))).filter(Boolean).map(k => k.name).join(', ')}]\n${question}`
-      : question;
-
     let reply = '';
     const modelPattern = piModelPattern(modelName);
     await runPi({
-      prompt: augmentedQuestion,
+      prompt: question,
       sessionId: sid,
       cwd: projectDir || undefined,
       modelPattern,

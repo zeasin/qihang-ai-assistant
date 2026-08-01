@@ -162,6 +162,7 @@ const isStreaming = ref(false);
 const composing = ref(false);
 const thinkingText = ref('');
 const defaultKbId = ref<number | null>(null);
+const kbDir = ref('');
 const kbLoaded = ref(false);
 const inputRef = ref<HTMLTextAreaElement>();
 const messagesContainer = ref<HTMLElement>();
@@ -179,7 +180,8 @@ async function loadKbLibraries() {
   try {
     const list = await API.kb.list();
     defaultKbId.value = list.length ? list[0].id : null;
-  } catch { defaultKbId.value = null; }
+    kbDir.value = list.length ? list[0].dir || '' : '';
+  } catch { defaultKbId.value = null; kbDir.value = ''; }
   kbLoaded.value = true;
 }
 
@@ -436,7 +438,7 @@ async function doSend(text: string) {
   API.on('chat:error', onError);
 
   try {
-    await API.chat.send(text, sid, '', kbIds, images.length ? images : undefined, 'general', selectedModel.value || undefined);
+    await API.chat.send(text, sid, kbDir.value, kbIds, images.length ? images : undefined, 'general', selectedModel.value || undefined);
     if (selectedModel.value) localStorage.setItem(CHAT_MODEL_KEY, selectedModel.value);
     else localStorage.removeItem(CHAT_MODEL_KEY);
   } catch (err: any) {
