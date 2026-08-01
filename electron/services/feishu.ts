@@ -154,6 +154,40 @@ function replyMessage(msg, content, msgType?) {
   logger.error('[Feishu] replyMessage: no valid target (sender=%s chatId=%s)', msg.sender, msg.chatId);
 }
 
+async function replyCard(msg, content, headerText?) {
+  logger.info('[Feishu] replyCard: chatId=%s chatType=%s sender=%s', msg.chatId, msg.chatType, msg.sender);
+  const target = msg.chatType === 'group' ? msg.chatId : msg.sender;
+  const targetType = msg.chatType === 'group' ? 'chat_id' : 'open_id';
+  if (!target) {
+    logger.error('[Feishu] replyCard: no valid target');
+    return;
+  }
+  const cardContent = JSON.stringify({
+    config: { wide_screen_mode: true },
+    header: headerText
+      ? { template: 'blue', title: { tag: 'plain_text', content: headerText } }
+      : { template: 'blue', title: { tag: 'plain_text', content: '启航AI' } },
+    elements: [{ tag: 'div', text: { tag: 'lark_md', content: content } }],
+  });
+  if (!client) {
+    logger.warn('[Feishu] replyCard: no client');
+    return;
+  }
+  try {
+    await client.im.v1.message.create({
+      params: { receive_id_type: targetType },
+      data: {
+        receive_id: target,
+        msg_type: 'interactive',
+        content: cardContent,
+      },
+    });
+    logger.info('[Feishu] Card sent successfully');
+  } catch (e) {
+    logger.error('[Feishu] replyCard error: %s', e.message);
+  }
+}
+
 function stop() {
   logger.info('[Feishu] Stopping...');
   running = false;
@@ -169,4 +203,4 @@ function isRunning() {
   return running;
 }
 
-export { sendViaWebhook, setWebhook, getWebhook, start, stop, isRunning, sendMessage, replyMessage };
+export { sendViaWebhook, setWebhook, getWebhook, start, stop, isRunning, sendMessage, replyMessage, replyCard };

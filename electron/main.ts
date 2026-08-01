@@ -312,25 +312,6 @@ const feishuMessageHandler = async (msg) => {
   try {
     const context = parseFeishuContext(msg.text, db);
 
-    if (!context.explicit) {
-      const allProjects = db.project.list();
-      if (allProjects.length === 0) {
-        feishu.replyMessage(msg, '⚠️ 当前没有可用的项目。请先在系统中添加项目后再使用。');
-        return;
-      }
-      let helpMsg = '📋 **请指定要使用的项目**\n\n';
-      helpMsg += '在消息中包含项目名称或项目ID即可：\n\n';
-      for (const p of allProjects) {
-        const typeLabel = p.type === 'code' ? '代码' : '笔记';
-        helpMsg += `  **${p.id}**: ${p.name} (${typeLabel}) — ${p.description || p.dir || ''}\n`;
-      }
-      helpMsg += '\n**示例：**\n';
-      helpMsg += `  \`${allProjects[0].name} 帮我看看这个代码\`\n`;
-      helpMsg += `  \`${allProjects[0].id} 查一下相关知识\`\n`;
-      feishu.replyMessage(msg, helpMsg);
-      return;
-    }
-
     let feishuProjectId: any = null;
     if (context.projectIds.length > 0) {
       feishuProjectId = context.projectIds[0];
@@ -340,15 +321,30 @@ const feishuMessageHandler = async (msg) => {
       if (byDir) feishuProjectId = byDir.id;
     }
     if (!feishuProjectId) {
-      const def = db.project.getDefault();
-      if (def) feishuProjectId = def.id;
+      const notesDir = appConfig.getConfig('notesDir') || '';
+      if (notesDir) {
+        const noteProjects = db.project.list('note');
+        const byDir = noteProjects.find(p => p.dir === notesDir);
+        if (byDir) {
+          feishuProjectId = byDir.id;
+          context.projectIds = [byDir.id];
+          context.projectDir = byDir.dir;
+        } else {
+          feishuProjectId = 'notesdir';
+          context.projectDir = notesDir;
+        }
+      } else {
+        const noteProjects = db.project.list('note');
+        if (noteProjects.length > 0) {
+          feishuProjectId = noteProjects[0].id;
+          context.projectIds = [feishuProjectId];
+          context.projectDir = noteProjects[0].dir;
+        }
+      }
     }
+
     if (!feishuProjectId) {
-      const first = db.project.list();
-      if (first.length > 0) feishuProjectId = first[0].id;
-    }
-    if (!feishuProjectId) {
-      feishu.replyMessage(msg, '⚠️ 无法确定项目，请先添加项目后再使用。');
+      feishu.replyCard(msg, '⚠️ 请先在「设置」中配置笔记库目录，或添加笔记类型项目后再使用。', '⚠️ 配置缺失');
       return;
     }
 
@@ -360,95 +356,32 @@ const feishuMessageHandler = async (msg) => {
     db.chat.createSession(sessionId, feishuProjectId, msg.text.slice(0, 30), 'feishu', 'pi', 'feishu');
     db.chat.addMessage(sessionId, 'user', msg.text, 'general');
 
-    const kbFallback = { hasResults: false, text: '' };
-    const buildKBInjectedPrompt = async () => {
-      if (context.projectIds.length === 0) return context.cleanText;
-      const projectNames = context.projectIds.map(id => db.project.get(id)?.name).filter(Boolean).join(', ');
-      try {
-        const rag = require('./services/rag');
-        let allResults: any[] = [];
-        for (const projectId of context.projectIds) {
-          const docs = await rag.hybridSearch(context.cleanText, 5, db);
-          allResults.push(...docs);
-        }
-        allResults.sort((a, b) => b.score - a.score);
-        const top = allResults.slice(0, 6);
-        if (top.length === 0) {
-          const projectDirs = context.projectIds.map(id => db.project.get(id)?.dir).filter(Boolean).join(', ');
-          kbFallback.text = `📚 笔记库「${projectNames}」中未找到相关内容。请在笔记库目录中搜索：${projectDirs}`;
-          return `笔记库「${projectNames}」的 RAG 索引未命中。请在以下目录中用 grep/find 搜索文件：${projectDirs}\n\n用户问题：${context.cleanText}`;
-        }
-        const contextText = top.map((d, i) => `【结果${i + 1}】${d.text}`).join('\n\n');
-        kbFallback.hasResults = true;
-        kbFallback.text = top.map((d, i) => `📄 **相关文档 ${i + 1}**\n${d.text}`).join('\n\n---\n\n');
-        return `以下是知识库「${projectNames}」中与问题相关的内容：\n\n${contextText}\n\n请基于以上知识库内容回答用户问题，如果知识库内容不足以回答，请说明。\n\n用户问题：${context.cleanText}`;
-      } catch (e) {
-        logger.error('[Feishu] KB search error: %s', e.message);
-        return context.cleanText;
-      }
-    };
+    const setMode = (mode) => { try { db.run("UPDATE prj_sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", mode,sessionId); } catch {} };
 
-    const setMode = (mode) => { try { db.run("UPDATE prj_sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", mode, sessionId); } catch {} };
-    const questionText = await buildKBInjectedPrompt();
-    const replyWithPi = async (cwd) => {
-      let reply = '';
-      const sendReply = (text) => {
+    const notesDir = appConfig.getConfig('notesDir') || context.projectDir || '';
+    const prompt = notesDir
+      ? `以下是笔记库目录，请用 grep/find 等工具自行搜索相关文件后回答：\n笔记库路径：${notesDir}\n\n用户问题：${context.cleanText}`
+      : context.cleanText;
+    setMode('kb');
+    await runPi({
+      prompt,
+      sessionId,
+      cwd: notesDir || undefined,
+      onDone: (text) => {
+        logger.info('[Feishu] Sending card reply: "%s"', (text || '').slice(0, 200));
         if (text) {
           db.chat.addMessage(sessionId, 'assistant', text, 'general');
-          feishu.replyMessage(msg, text);
+          feishu.replyCard(msg, text, '🤖 启航AI');
         }
-      };
-      await runPi({
-        prompt: questionText,
-        sessionId,
-        cwd: cwd || undefined,
-        onDelta: (d) => { reply += d; },
-        onDone: (text) => {
-          logger.info('[Feishu] Sending reply: "%s"', (text || reply).slice(0, 200));
-          const final = text || reply;
-          if (final) { sendReply(final); }
-          else if (kbFallback.text) { sendReply(kbFallback.text); }
-        },
-        onError: (e) => {
-          logger.error('[Feishu] Chat error: %s', e);
-          if (kbFallback.text) { sendReply(kbFallback.text); }
-          else { sendReply(`处理出错: ${e}`); }
-        },
-      });
-    };
-
-    if (context.projectDir) {
-      setMode('code');
-      await replyWithPi(context.projectDir);
-    } else if (context.projectIds.length > 0) {
-      setMode('kb');
-      const projectCwd = db.project.get(context.projectIds[0])?.dir || '';
-      await replyWithPi(projectCwd);
-    } else {
-      const feishuRouter = require('./services/feishu-router');
-      const deps = { db, project: db.project, feishu };
-
-      const intent = feishuRouter.classify(context.cleanText);
-      let reply = await feishuRouter.route({
-        sender: msg.sender,
-        text: context.cleanText,
-        chatId: msg.chatId,
-        messageId: msg.messageId,
-      }, deps);
-
-      if (reply === null) {
-        setMode('general');
-        await replyWithPi('');
-      } else {
-        const modeMap = { QUERY_INFO: 'query', RECORD_LOG: 'record', CREATE_BUG: 'bug', UPDATE_BUG: 'bug', CODE_INVESTIGATE: 'code', DAILY_REPORT: 'report' };
-        setMode(modeMap[intent] || 'general');
-        db.chat.addMessage(sessionId, 'assistant', reply, 'general', 'feishu');
-        feishu.replyMessage(msg, reply);
-      }
-    }
+      },
+      onError: (e) => {
+        logger.error('[Feishu] Chat error: %s', e);
+        feishu.replyCard(msg, `处理出错: ${e}`, '❌ 错误');
+      },
+    });
   } catch (e) {
     logger.error('[Feishu] Handler exception: %s', e.message);
-    feishu.replyMessage(msg, `处理出错: ${e.message}`);
+    feishu.replyCard(msg, `处理出错: ${e.message}`, '❌ 错误');
   }
 };
 
