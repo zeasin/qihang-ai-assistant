@@ -1,5 +1,5 @@
-const path = require('path');
-const fs = require('fs');
+import * as path from 'path';
+import * as fs from 'fs';
 
 const LOG_DIR = path.join(require('os').homedir(), '.qihang-work-ai', 'logs');
 
@@ -9,7 +9,7 @@ const LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 const LEVEL_NAMES = ['DEBUG', 'INFO', 'WARN', 'ERROR'];
 
 let currentLogLevel = 'DEBUG';
-let currentFile = null;
+let currentFile: any = null;
 let currentSize = 0;
 
 // 防止 stdout/stderr pipe 断裂时触发未捕获异常
@@ -21,6 +21,7 @@ function setupPipeErrorHandler() {
       });
     }
   }
+
 }
 setupPipeErrorHandler();
 
@@ -132,7 +133,7 @@ const logger = {
     return LOG_DIR;
   },
 
-  readLines(options = {}) {
+  readLines(options: any = {}) {
     ensureDir();
     const logPath = getLogPath();
     if (!fs.existsSync(logPath)) return [];
@@ -159,7 +160,7 @@ const logger = {
     });
   },
 
-  readFile(fileName, options = {}) {
+  readFile(fileName, options: any = {}) {
     ensureDir();
     const filePath = path.join(LOG_DIR, fileName);
     if (!fs.existsSync(filePath)) return [];
@@ -170,4 +171,4 @@ const logger = {
   },
 };
 
-module.exports = logger;
+export default logger;

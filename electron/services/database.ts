@@ -1,12 +1,12 @@
-const path = require('path');
-const fs = require('fs');
-const logger = require('./logger');
+import * as path from 'path';
+import * as fs from 'fs';
+import logger from './logger';
 
 const DB_DIR = path.join(require('os').homedir(), '.qihang-work-ai');
 const DB_PATH = path.join(DB_DIR, 'qihang-work-ai.db');
 
-let SQL = null;
-let db = null;
+let SQL: any = null;
+let db: any = null;
 
 async function getDb() {
   if (db) return db;
@@ -239,7 +239,7 @@ function initDefaultConfig() {
 function q(sql, ...params) {
   const stmt = db.prepare(sql);
   if (params && params.length) stmt.bind(params);
-  const rows = [];
+  const rows: any[] = [];
   while (stmt.step()) rows.push(stmt.getAsObject());
   stmt.free();
   return rows;
@@ -284,7 +284,7 @@ function configSet(key, value) {
 
 // ========== Projects (unified: note + code) ==========
 const project = {
-  list: (type) => {
+  list: (type?) => {
     if (type) return q('SELECT * FROM prj_projects WHERE type = ? ORDER BY sort_order ASC, created_at DESC', type);
     return q("SELECT * FROM prj_projects ORDER BY CASE WHEN type = 'note' THEN 0 ELSE 1 END, sort_order ASC, created_at DESC");
   },
@@ -302,7 +302,7 @@ const project = {
     return { id: r.id, name, type: t };
   },
   update: (id, data) => {
-    const fields = []; const params = [];
+    const fields: any[] = []; const params: any[] = [];
     if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
     if (data.type !== undefined) { fields.push('type = ?'); params.push(data.type); }
     if (data.dir !== undefined) { fields.push('dir = ?'); params.push(data.dir); }
@@ -325,7 +325,7 @@ const project = {
     run('DELETE FROM kb_chunks WHERE doc_id IN (SELECT id FROM kb_documents WHERE project_id = ?)', id);
     run('DELETE FROM kb_documents WHERE project_id = ?', id);
     run('DELETE FROM ai_analysis WHERE project_id = ?', id);
-    let sessions = [];
+    let sessions: any[] = [];
     try { sessions = q('SELECT id FROM prj_sessions WHERE project_id = ?', id); } catch {}
     for (const s of sessions) {
       run('DELETE FROM prj_messages WHERE session_id = ?', s.id);
@@ -390,7 +390,7 @@ const chat = {
     const rows = q("SELECT * FROM prj_messages WHERE session_id = ? ORDER BY id", sessionId);
     return rows.map(r => ({ ...r, images: r.images ? JSON.parse(r.images) : null }));
   },
-  addMessage: (sessionId, role, content, mode, images) => {
+  addMessage: (sessionId, role, content, mode?, images?) => {
     const imagesJson = images?.length ? JSON.stringify(images) : null;
     run("INSERT INTO prj_messages (session_id, role, content, mode, images) VALUES (?, ?, ?, ?, ?)", sessionId, role, content, mode || 'general', imagesJson);
     run("UPDATE prj_sessions SET updated_at = datetime('now', '+8 hours') WHERE id = ?", sessionId);
@@ -407,7 +407,7 @@ const dm = {
     return { id };
   },
   update: (id, data) => {
-    const fields = []; const params = [];
+    const fields: any[] = []; const params: any[] = [];
     if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
     if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
     if (data.icon !== undefined) { fields.push('icon = ?'); params.push(data.icon); }
@@ -439,7 +439,7 @@ const ds = {
     return { id };
   },
   updateMeta: (id, data) => {
-    const fields = []; const params = [];
+    const fields: any[] = []; const params: any[] = [];
     if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
     if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
     if (data.type !== undefined) { fields.push('type = ?'); params.push(data.type); }
@@ -477,7 +477,7 @@ const task = {
     return { id: r.id, task_id: taskId };
   },
   update: (id, data) => {
-    const fields = []; const params = [];
+    const fields: any[] = []; const params: any[] = [];
     if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
     if (data.cron_expression !== undefined) { fields.push('cron_expression = ?'); params.push(data.cron_expression); }
     if (data.task_type !== undefined) { fields.push('task_type = ?'); params.push(data.task_type); }
@@ -510,7 +510,7 @@ const reminder = {
     return { id };
   },
   update: (id, data) => {
-    const fields = []; const params = [];
+    const fields: any[] = []; const params: any[] = [];
     if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
     if (data.message !== undefined) { fields.push('message = ?'); params.push(data.message); }
     if (data.type !== undefined) { fields.push('type = ?'); params.push(data.type); }
@@ -536,7 +536,7 @@ const llmProfile = {
     return r;
   },
   update: (id, data) => {
-    const fields = []; const params = [];
+    const fields: any[] = []; const params: any[] = [];
     if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
     if (data.provider !== undefined) { fields.push('provider = ?'); params.push(data.provider); }
     if (data.api_key !== undefined || data.apiKey !== undefined) { fields.push('api_key = ?'); params.push(data.api_key !== undefined ? data.api_key : data.apiKey); }
@@ -573,7 +573,7 @@ const todo = {
     return { id: r.id };
   },
   update: (id, data) => {
-    const fields = []; const params = [];
+    const fields: any[] = []; const params: any[] = [];
     if (data.title !== undefined) { fields.push('title = ?'); params.push(data.title); }
     if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
     if (data.priority !== undefined) { fields.push('priority = ?'); params.push(data.priority); }
@@ -607,4 +607,4 @@ function close() {
   if (db) { saveDb(); db.close(); db = null; }
 }
 
-module.exports = { getDb, close, q, qOne, run, runMany, runRaw, save, configGet, configSet, project, chat, dm, ds, task, reminder, todo, llmProfile, migrateLlmProfiles };
+export { getDb, close, q, qOne, run, runMany, runRaw, save, configGet, configSet, project, chat, dm, ds, task, reminder, todo, llmProfile, migrateLlmProfiles };

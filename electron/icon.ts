@@ -1,13 +1,15 @@
-const fs = require('fs');
-const path = require('path');
-const zlib = require('zlib');
+﻿import * as fs from 'fs';
+import * as path from 'path';
+import * as zlib from 'zlib';
+import * as os from 'os';
+import { nativeImage } from 'electron';
 
-let cachedIcon = null;
+let cachedIcon: Electron.NativeImage | null = null;
 
-function createPngBuffer(width, height, pixels) {
+function createPngBuffer(width: number, height: number, pixels: Uint8Array): Buffer {
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
-  function chunk(type, data) {
+  function chunk(type: string, data: Buffer): Buffer {
     const len = Buffer.alloc(4);
     len.writeUInt32BE(data.length);
     const typeB = Buffer.from(type, 'ascii');
@@ -37,7 +39,7 @@ function createPngBuffer(width, height, pixels) {
   return Buffer.concat([signature, chunk('IHDR', ihdr), chunk('IDAT', compressed), chunk('IEND', Buffer.alloc(0))]);
 }
 
-function crc32(buf) {
+function crc32(buf: Buffer): number {
   let crc = 0xFFFFFFFF;
   for (let i = 0; i < buf.length; i++) {
     crc ^= buf[i];
@@ -46,9 +48,8 @@ function crc32(buf) {
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
-function createTrayIcon() {
+function createTrayIcon(): Electron.NativeImage {
   if (cachedIcon) return cachedIcon;
-  const { nativeImage } = require('electron');
   const s = 16;
   const pixels = new Uint8Array(s * s * 4);
   for (let y = 0; y < s; y++) {
@@ -60,7 +61,7 @@ function createTrayIcon() {
     }
   }
   const pngBuf = createPngBuffer(s, s, pixels);
-  const iconPath = path.join(require('os').homedir(), '.qihang-work-ai', 'tray-icon.png');
+  const iconPath = path.join(os.homedir(), '.qihang-work-ai', 'tray-icon.png');
   try {
     if (!fs.existsSync(path.dirname(iconPath))) fs.mkdirSync(path.dirname(iconPath), { recursive: true });
     fs.writeFileSync(iconPath, pngBuf);
@@ -69,4 +70,4 @@ function createTrayIcon() {
   return cachedIcon;
 }
 
-module.exports = { createTrayIcon };
+export { createTrayIcon };

@@ -1,10 +1,10 @@
-const path = require('path');
-const fs = require('fs');
+import * as path from 'path';
+import * as fs from 'fs';
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '__pycache__', '.cache']);
-let _pendingProjects = [];
+let _pendingProjects: any[] = [];
 
-function walkDir(dir, files, ignoreDirs = [], ignoreFiles = []) {
+function walkDir(dir, files, ignoreDirs: any[] = [], ignoreFiles: any[] = []) {
   if (!fs.existsSync(dir)) return;
   const skipDirs = new Set([...IGNORED_DIRS, ...ignoreDirs.map(d => d.trim()).filter(Boolean)]);
   const skipFilePatterns = ignoreFiles.map(f => f.trim()).filter(Boolean).map(f => new RegExp(f.replace(/\*/g, '.*').replace(/\?/g, '.')));
@@ -21,7 +21,7 @@ function walkDir(dir, files, ignoreDirs = [], ignoreFiles = []) {
 
 function chunkText(text, maxLen = 512) {
   const paragraphs = text.split(/\n\s*\n/);
-  const chunks = [];
+  const chunks: any[] = [];
   let current = '';
   for (const p of paragraphs) {
     const trimmed = p.trim();
@@ -48,7 +48,7 @@ async function embed(text, config) {
       body: JSON.stringify({ model: config.model, input: text }),
     });
     if (!res.ok) throw new Error(`嵌入 API 错误: ${res.status}`);
-    const data = await res.json();
+    const data: any = await res.json();
     if (data.data && data.data.length > 0) return data.data[0].embedding;
     if (data.embeddings && data.embeddings.length > 0) return data.embeddings[0];
     throw new Error('嵌入 API 返回格式异常');
@@ -66,11 +66,11 @@ async function scanProject(project) {
   const ignoreDirs = ignore_dirs ? ignore_dirs.split(',').map(s => s.trim()) : [];
   const ignoreFiles = ignore_files ? ignore_files.split(',').map(s => s.trim()) : [];
 
-  const files = [];
+  const files: any[] = [];
   walkDir(dir, files, ignoreDirs, ignoreFiles);
   console.log(`[IndexWorker] 扫描到 ${files.length} 个 .md 文件`);
 
-  process.send({ type: 'deleteOld', projectId: id });
+  (process as any).send({ type: 'deleteOld', projectId: id });
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -79,19 +79,19 @@ async function scanProject(project) {
     const title = path.basename(file, '.md');
     const chunks = chunkText(content);
 
-    process.send({
+    (process as any).send({
       type: 'doc', projectId: id, path: file, content,
       fileMtime: stat.mtimeMs, title,
       chunks: chunks.map(c => ({ content: c })),
     });
 
     if (i === 0 || i === files.length - 1 || i % 5 === 0) {
-      process.send({ type: 'progress', phase: 'scan', current: i + 1, total: files.length, file: path.basename(file) });
+      (process as any).send({ type: 'progress', phase: 'scan', current: i + 1, total: files.length, file: path.basename(file) });
     }
     console.log(`[IndexWorker]   [${i + 1}/${files.length}] ${path.basename(file)} → ${chunks.length} chunks`);
   }
 
-  process.send({ type: 'scanDone', projectId: id, fileCount: files.length });
+  (process as any).send({ type: 'scanDone', projectId: id, fileCount: files.length });
 }
 
 async function embedChunks(msg) {
@@ -103,10 +103,10 @@ async function embedChunks(msg) {
   for (const chunk of chunks) {
     try {
       const vector = await embed(chunk.content, config);
-      process.send({ type: 'embedding', projectId, chunkId: chunk.id, vector });
+      (process as any).send({ type: 'embedding', projectId, chunkId: chunk.id, vector });
       embedded++;
       if (embedded === total || embedded % 10 === 0) {
-        process.send({ type: 'progress', phase: 'embed', current: embedded, total, file: '' });
+        (process as any).send({ type: 'progress', phase: 'embed', current: embedded, total, file: '' });
       }
       if (embedded % 20 === 0) console.log(`[IndexWorker]   嵌入进度: ${embedded}/${total}`);
     } catch (e) {
@@ -115,19 +115,19 @@ async function embedChunks(msg) {
   }
 
   console.log(`[IndexWorker] 嵌入完成: ${embedded}/${total}`);
-  process.send({ type: 'embedDone', projectId, embedded });
+  (process as any).send({ type: 'embedDone', projectId, embedded });
 }
 
 function startNextProject() {
   if (_pendingProjects.length === 0) {
-    process.send({ type: 'done' });
+    (process as any).send({ type: 'done' });
     return;
   }
   const project = _pendingProjects.shift();
-  scanProject(project).catch(e => process.send({ type: 'error', message: e.message }));
+  scanProject(project).catch(e => (process as any).send({ type: 'error', message: e.message }));
 }
 
-process.on('message', async (msg) => {
+process.on('message', async (msg: any) => {
   if (msg.type === 'start') {
     _pendingProjects = msg.projects.slice();
     startNextProject();

@@ -1,11 +1,11 @@
-const lark = require('@larksuiteoapi/node-sdk');
-const logger = require('./logger');
+import * as lark from '@larksuiteoapi/node-sdk';
+import logger from './logger';
 
-let webhookUrl = null;
-let wsClient = null;
-let client = null;
+let webhookUrl: any = null;
+let wsClient: any = null;
+let client: any = null;
 let running = false;
-let messageHandler = null;
+let messageHandler: any = null;
 
 // ========== Webhook (simple send-only, no SDK needed) ==========
 
@@ -20,7 +20,7 @@ async function sendViaWebhook(url, message) {
         content: JSON.stringify({ text: message }),
       }),
     });
-    const data = await res.json();
+    const data: any = await res.json();
     return { ok: data.code === 0 || data.StatusCode === 0 || res.ok, data };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -69,7 +69,7 @@ async function start(configData, onMessage) {
           logger.info('[Feishu] WS event received: im.message.receive_v1');
           try {
             logger.info('[Feishu] Raw event data: %s', JSON.stringify(data).slice(0, 1000));
-            const event = data.event || data;
+            const event = (data as any).event || data;
             const message = event.message || data.message;
             const sender = event.sender || data.sender;
             logger.info('[Feishu] Parsed - message: %s, sender: %s', JSON.stringify(message).slice(0, 300), JSON.stringify(sender).slice(0, 300));
@@ -143,7 +143,7 @@ async function sendMessage(receiveId, receiveIdType, content, msgType = 'text') 
   }
 }
 
-function replyMessage(msg, content, msgType) {
+function replyMessage(msg, content, msgType?) {
   logger.info('[Feishu] replyMessage: chatId=%s chatType=%s sender=%s msgType=%s', msg.chatId, msg.chatType, msg.sender, msgType);
   if (msg.chatType === 'group' && msg.chatId) {
     return sendMessage(msg.chatId, 'chat_id', content, msgType);
@@ -169,4 +169,4 @@ function isRunning() {
   return running;
 }
 
-module.exports = { sendViaWebhook, setWebhook, getWebhook, start, stop, isRunning, sendMessage, replyMessage };
+export { sendViaWebhook, setWebhook, getWebhook, start, stop, isRunning, sendMessage, replyMessage };

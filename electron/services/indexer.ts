@@ -1,13 +1,13 @@
-const fs = require('fs');
-const path = require('path');
-const db = require('./database');
-const rag = require('./rag');
-const logger = require('./logger');
+import * as fs from 'fs';
+import * as path from 'path';
+import * as db from './database';
+import * as rag from './rag';
+import logger from './logger';
 
 let watchers = new Map();
 let running = false;
 
-async function indexSingle(projectId, onProgress) {
+async function indexSingle(projectId, onProgress?) {
   const project = db.project.get(projectId);
   if (!project) throw new Error(`项目 ${projectId} 不存在`);
   if (project.type !== 'note') throw new Error(`项目 ${project.name} 不是笔记库类型`);
@@ -21,7 +21,7 @@ async function indexSingle(projectId, onProgress) {
   db.project.deleteDocs(projectId);
 
   // 扫描文件，写入 kb_documents 和 kb_chunks（纯文本）
-  const files = [];
+  const files: any[] = [];
   walkDir(project.dir, files, ignoreDirs, ignoreFiles);
   const total = files.length;
   for (let i = 0; i < total; i++) {
@@ -33,7 +33,7 @@ async function indexSingle(projectId, onProgress) {
     const docId = db.project.insertDoc(projectId, file, content, stat.mtimeMs, title);
     const chunks = rag.chunkText(content);
     for (const chunk of chunks) {
-      db.project.insertChunk(docId, chunk);
+      db.project.insertChunk(docId, chunk, null);
     }
   }
   logger.info(`[Indexer] indexed ${total} files, generating embeddings...`);
@@ -45,7 +45,7 @@ async function indexSingle(projectId, onProgress) {
   return { totalChunks: embedded, files: total };
 }
 
-async function indexAll(onProgress) {
+async function indexAll(onProgress?) {
   const noteProjects = db.project.list('note');
   for (const p of noteProjects) {
     try {
@@ -113,7 +113,7 @@ function isRunning() { return running; }
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '__pycache__', '.cache']);
 
-function walkDir(dir, files, ignoreDirs = [], ignoreFiles = []) {
+function walkDir(dir, files, ignoreDirs: any[] = [], ignoreFiles: any[] = []) {
   if (!fs.existsSync(dir)) return;
   const skipDirs = new Set([...IGNORED_DIRS, ...ignoreDirs.map(d => d.trim()).filter(Boolean)]);
   const skipFilePatterns = ignoreFiles.map(f => f.trim()).filter(Boolean).map(f => new RegExp(f.replace(/\*/g, '.*').replace(/\?/g, '.')));
@@ -128,4 +128,4 @@ function walkDir(dir, files, ignoreDirs = [], ignoreFiles = []) {
   }
 }
 
-module.exports = { start, stop, isRunning, indexSingle, indexAll, watchAll };
+export { start, stop, isRunning, indexSingle, indexAll, watchAll };

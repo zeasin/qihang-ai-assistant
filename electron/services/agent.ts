@@ -1,9 +1,9 @@
-const { getChatModel } = require('./llm');
-const logger = require('./logger');
+import { getChatModel } from './llm';
+import logger from './logger';
 
-let cachedMessages = null;
-let cachedTool = null;
-let Zod = null;
+let cachedMessages: any = null;
+let cachedTool: any = null;
+let Zod: any = null;
 
 async function ensureDeps() {
   if (cachedMessages && cachedTool && Zod) return;
@@ -48,7 +48,7 @@ function buildUserContent(text, images) {
 async function historyToMessages(history) {
   await ensureDeps();
   const { HumanMessage, AIMessage, SystemMessage } = cachedMessages;
-  const msgs = [];
+  const msgs: any[] = [];
   for (const m of history || []) {
     if (!m || !m.content) continue;
     if (m.role === 'user') {
@@ -74,10 +74,10 @@ async function historyToMessages(history) {
  * @param {number|string} [opts.modelName] - 模型档案 id 或名称（多模型）
  * @returns {Promise<{text:string, usedTools:boolean}>}
  */
-async function runAgent({ messages, toolDefs = [], onDelta, onTool, onError, maxIterations = 12, modelName }) {
+async function runAgent({ messages, toolDefs = [], onDelta, onTool, onError, maxIterations = 12, modelName }: any) {
   await ensureDeps();
   const model = await getChatModel({ profileName: modelName });
-  const tools = [];
+  const tools: any[] = [];
   const toolMap = new Map();
   if (toolDefs.length) {
     for (const def of toolDefs) {
@@ -86,13 +86,13 @@ async function runAgent({ messages, toolDefs = [], onDelta, onTool, onError, max
       toolMap.set(def.name, t);
     }
   }
-  const bound = tools.length ? model.bindTools(tools) : model;
+  const bound: any = tools.length ? model.bindTools(tools) : model;
 
   let current = messages;
   let usedTools = false;
 
   for (let iter = 0; iter < maxIterations; iter++) {
-    const chunks = [];
+    const chunks: any[] = [];
     let streamedText = '';
     try {
       const stream = bound.streamEvents(current, { version: 'v2' });
@@ -125,7 +125,7 @@ async function runAgent({ messages, toolDefs = [], onDelta, onTool, onError, max
       throw e;
     }
 
-    let full = null;
+    let full: any = null;
     try {
       const aggregated = chunks.reduce((a, b) => a.concat(b));
       // 工具调用跨多个流式帧（name/id 在第一帧，arguments 分片在后续帧），按 index 聚合并拼接。
@@ -154,7 +154,7 @@ async function runAgent({ messages, toolDefs = [], onDelta, onTool, onError, max
           collectTcc(c.additional_kwargs && c.additional_kwargs.tool_calls);
         }
       }
-      const toolCalls = [];
+      const toolCalls: any[] = [];
       for (const acc of accByIndex.values()) {
         if (!acc.name) continue;
         let args = {};
@@ -172,7 +172,7 @@ async function runAgent({ messages, toolDefs = [], onDelta, onTool, onError, max
     }
 
     // 执行工具调用
-    const toolMessages = [];
+    const toolMessages: any[] = [];
     for (const call of toolCalls) {
       usedTools = true;
       logger.info('[Agent] tool_start: %s args=%s', call.name, JSON.stringify(call.args || {}).substring(0, 200));
@@ -206,4 +206,4 @@ async function runAgent({ messages, toolDefs = [], onDelta, onTool, onError, max
   throw new Error(err);
 }
 
-module.exports = { runAgent, historyToMessages, buildUserContent, textFromContent, ensureDeps };
+export { runAgent, historyToMessages, buildUserContent, textFromContent, ensureDeps };

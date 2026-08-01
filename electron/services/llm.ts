@@ -1,5 +1,5 @@
-const db = require('./database');
-const logger = require('./logger');
+import * as db from './database';
+import logger from './logger';
 
 // 运行时补丁：部分 OpenAI 兼容端点（如 SenseNova）的流式帧不携带 role 字段，
 // LangChain 会因 role 缺失把帧转成 ChatMessageChunk 而丢弃 tool_calls。
@@ -15,8 +15,8 @@ async function patchChatOpenAIStreamRole() {
       logger.warn('[LLM] ChatOpenAI patch skipped: completionWithRetry not found');
       return;
     }
-    const orig = ChatOpenAI.prototype.completionWithRetry;
-    ChatOpenAI.prototype.completionWithRetry = async function (...args) {
+    const orig: any = ChatOpenAI.prototype.completionWithRetry;
+    (ChatOpenAI.prototype as any).completionWithRetry = async function (...args: any[]) {
       const result = await orig.apply(this, args);
       if (result && typeof result[Symbol.asyncIterator] === 'function') {
         const self = this;
@@ -67,7 +67,7 @@ function getLlmConfig() {
  * @returns {Object|null} { id, name, provider, apiKey, baseUrl, model, timeout, modelType }
  */
 function resolveProfile(ref) {
-  let profile = null;
+  let profile: any = null;
   if (ref !== undefined && ref !== null && ref !== '') {
     if (typeof ref === 'number' || /^\d+$/.test(String(ref))) {
       profile = db.llmProfile.get(Number(ref));
@@ -92,11 +92,11 @@ function resolveProfile(ref) {
 /**
  * 合并出最终使用的模型配置。profileRef 优先，否则退回 sys_config（兼容旧配置）。
  */
-function resolveConfig(opts = {}) {
+function resolveConfig(opts: any = {}) {
   const cfg = getLlmConfig();
   const merged = { ...cfg, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined && v !== null && v !== '')) };
 
-  let profile = null;
+  let profile: any = null;
   if (opts.profileRef !== undefined) profile = resolveProfile(opts.profileRef);
   else if (opts.profileName !== undefined) profile = resolveProfile(opts.profileName);
   else profile = resolveProfile(null);
@@ -105,7 +105,7 @@ function resolveConfig(opts = {}) {
     merged.model = profile.model || merged.model;
     merged.apiKey = profile.apiKey || merged.apiKey;
     merged.baseUrl = profile.baseUrl || merged.baseUrl;
-    merged.profileName = profile.name;
+    (merged as any).profileName = profile.name;
   }
 
   if (merged.provider === 'ollama') {
@@ -163,4 +163,4 @@ async function testConnection(opts = {}) {
   }
 }
 
-module.exports = { getLlmConfig, resolveConfig, resolveProfile, getChatModel, testConnection, DEFAULTS };
+export { getLlmConfig, resolveConfig, resolveProfile, getChatModel, testConnection, DEFAULTS };

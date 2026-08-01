@@ -1,9 +1,9 @@
-const http = require('http');
-const path = require('path');
-const fs = require('fs');
+import * as http from 'http';
+import * as path from 'path';
+import * as fs from 'fs';
 
-let server = null;
-let dbRef = null;
+let server: any = null;
+let dbRef: any = null;
 let running = false;
 let serverPort = 15173;
 
@@ -29,7 +29,7 @@ function getKbPath(projectId) {
 
 function listDir(dirPath) {
   if (!fs.existsSync(dirPath)) return [];
-  const items = [];
+  const items: any[] = [];
   for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
     const full = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
@@ -48,7 +48,7 @@ function listDir(dirPath) {
 function parseUrl(reqUrl) {
   const idx = reqUrl.indexOf('?');
   const pathname = idx === -1 ? reqUrl : reqUrl.slice(0, idx);
-  const params = {};
+  const params: any = {};
   if (idx !== -1) {
     for (const part of reqUrl.slice(idx + 1).split('&')) {
       const [k, v] = part.split('=').map(decodeURIComponent);
@@ -602,7 +602,7 @@ function editRec(id,recStr){
 function closeRecModal(){document.getElementById('recModal').classList.remove('show')}
 async function saveRecord(){
   if(!state.currentDs)return
-  const record={};state.recFields.forEach(f=>{record[f]=document.getElementById('rf_'+f).value})
+  const record: any = {};state.recFields.forEach(f=>{record[f]=document.getElementById('rf_'+f).value})
   record.status=document.getElementById('rf_status').value
   const rfType=document.getElementById('rf_type');if(rfType) record.type=rfType.value
   if(state.currentRecId){await fetch('/api/records/'+state.currentRecId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(record)})}
@@ -817,7 +817,7 @@ function statusPage() {
 // ─── Helpers ───
 
 function decodeBody(req) {
-  return new Promise((resolve) => {
+  return new Promise<string>((resolve) => {
     let data = '';
     req.on('data', chunk => data += chunk);
     req.on('end', () => resolve(data));
@@ -1004,4 +1004,4 @@ function stop() {
 
 function isRunning() { return running; }
 
-module.exports = { start, stop, isRunning };
+export { start, stop, isRunning };

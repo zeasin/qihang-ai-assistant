@@ -2,15 +2,17 @@
   "name": "qihang-work-ai",
   "version": "0.1.0",
   "description": "启航AI工作台",
-  "main": "electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "electron:dev": "concurrently \"vite\" \"electron . --dev\"",
-    "electron:build": "vite build && npx electron-builder"
+    "compile:electron": "tsc -p tsconfig.electron.json",
+    "electron:dev": "npm run compile:electron && concurrently \"vite\" \"electron . --dev\"",
+    "electron:build": "vite build && npm run compile:electron && npx electron-builder"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.3",
     "@electron/rebuild": "^4.2.0",
     "@langchain/core": "^0.3.0",
     "@langchain/ollama": "^0.1.0",

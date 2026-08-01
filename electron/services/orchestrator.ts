@@ -1,10 +1,12 @@
-const db = require('./database');
-const logger = require('./logger');
-const { runAgent, historyToMessages, buildUserContent } = require('./agent');
-const llm = require('./llm');
-const { buildCodingToolDefs, buildReportToolDefs } = require('./tools');
+import * as db from './database';
+import logger from './logger';
+import { runAgent, historyToMessages, buildUserContent } from './agent';
+import * as llm from './llm';
+import { buildCodingToolDefs, buildReportToolDefs, buildNoteToolDefs, buildDataToolDefs } from './tools';
 
-const SYSTEM_PROMPT = `你是一位个人本地知识库助理，将「数据集（数据中心）」与「本地笔记库」融为一体，帮助用户查询、分析和整理信息。
+// ========== Agent 定义（单对话多模式，类似 opencode 的 plan/build） ==========
+
+const GENERAL_PROMPT = `你是一位个人本地知识库助理，将「数据集（数据中心）」与「本地笔记库」融为一体，帮助用户查询、分析和整理信息。
 
 ## 你的能力
 
@@ -20,21 +22,98 @@ const SYSTEM_PROMPT = `你是一位个人本地知识库助理，将「数据集
 - web_search — 搜索外网资料，获取与查询词相关的网页标题、链接和摘要
 - web_fetch — 读取外部 URL 的文本内容（自动去除 HTML 标签）
 
-### 3. 文件/代码操作（仅在关联了项目目录时可用）
+### 3. 文件/代码操作（仅在关联了代码项目目录时可用）
 - read_project_file, list_directory, grep, find — 阅读和搜索文件/代码
-- write_file, edit_file, bash — 修改文件和执行命令
+- write_file, edit_file, bash — 修改文件和执行命令（仅代码项目；笔记库项目为只读）
 
 ## 工作流程
 
 1. **理解意图**：判断问题涉及结构化数据、笔记文档、还是文件操作
 2. **查询数据集**：涉及待办、客户、项目等结构化数据时，先用 query_dataset 查询
 3. **搜索知识库**：涉及笔记、文档等非结构化信息时，用 search_knowledge_base 搜索（即使数据集查询无结果，也必须继续搜索知识库）
-4. **综合分析**：可将两类数据交叉比对（例如：查某项目的待办 + 查相关笔记），给出完整答案
-5. **如需操作文件**：使用文件/代码工具
+4. **读取文件前先浏览**：不确定文件是否存在时，先调用 list_directory 或 search_knowledge_base 确认准确的目录结构和文件名，**禁止凭记忆猜测文件路径**；若读取返回"文件不存在 + 相似文件名"，按建议的准确路径重试
+5. **综合分析**：可将两类数据交叉比对（例如：查某项目的待办 + 查相关笔记），给出完整答案
+6. **如需操作文件**：使用文件/代码工具
 
 回答保持简洁、准确；数据来源不确定时说明推测而非编造。
 
 **重要：面对用户的问题，你必须调用工具获取数据后再回答，不得仅凭已知知识回复。如果数据集查询为空，继续搜索知识库**。`;
+
+const NOTE_PROMPT = `你是一位笔记库创作与整理助手，负责在用户的本地笔记库中创作、整理和维护 Markdown 笔记。
+
+## 你的能力
+
+- list_notes — 查看笔记库目录结构
+- read_note — 读取笔记内容
+- write_note — 创建/覆盖笔记（支持自动建子目录）
+- edit_note — 精准编辑已有笔记（oldString → newString）
+- delete_note — 删除笔记
+- search_knowledge_base — 检索知识库已有内容（写作前先查重/参考）
+- web_search / web_fetch — 搜集外网资料作为创作素材
+
+## 工作流程
+
+1. **先检索**：动笔前先 search_knowledge_base，确认主题是否已有笔记，避免重复或冲突
+2. **先浏览再读写**：读写笔记前先 list_notes 确认目录结构和准确文件名，禁止凭记忆猜测路径；若 read_note 返回"文件不存在 + 相似文件名"，按建议路径重试
+3. **规划结构**：明确笔记标题、章节结构（用 Markdown 标题层级），内容详实、条理清晰
+3. **创作/修改**：用 write_note 新建、edit_note 修改已有内容
+4. **尊重现有内容**：修改前先 read_note 了解全文；用户要求重写时才整体覆盖
+5. **路径规范**：文件路径用相对笔记库根目录的路径，建议以 .md 结尾；可按主题放入子目录
+
+创作风格：结构清晰、语言精炼、重点突出。如用户有特定格式要求，按用户要求执行。`;
+
+const DATA_PROMPT = `你是一位业务数据查询与分析助手，专注处理「数据中心」中的结构化业务数据。
+
+## 你的能力
+
+- query_dataset — 查询本地数据集（结构化数据，如：待办事项、客户、项目、Bug 等），支持条件过滤
+- list_datasets — 查看所有可用的数据集及其字段结构
+- list_scheduled_tasks — 查看定时任务
+- search_knowledge_base — 检索知识库（如需结合背景知识）
+- web_search / web_fetch — 查询外网资料辅助分析
+- get_today_info — 获取当前日期
+
+## 工作流程
+
+1. **先看结构**：不确定数据集时先 list_datasets 了解有哪些数据集和字段
+2. **查询数据**：用 query_dataset 查询，可用条件关键字过滤、限制返回条数
+3. **分析总结**：对查询结果做统计、对比、归纳，给出有业务价值的结论
+4. **数据为空**：如实说明，不要编造数据
+
+回答保持简洁、准确，用数字说话；不确定时说明推测而非编造。`;
+
+// ========== 模式级工具约束 ==========
+// 会写入磁盘的修改类工具（白名单，供模式约束使用）
+const WRITE_TOOLS = ['write_file', 'edit_file', 'bash'];
+
+const AGENTS = {
+  general: {
+    label: '通用对话',
+    icon: '💬',
+    systemPrompt: GENERAL_PROMPT,
+    buildTools: async (ctx) => buildCodingToolDefs(ctx.projectDir),
+    // 模式约束：通用模式在笔记库（note 类型项目）下禁止写文件，笔记写入只归 note 模式
+    readOnlyOnNoteProject: true,
+  },
+  note: {
+    label: '笔记创作',
+    icon: '📝',
+    systemPrompt: NOTE_PROMPT,
+    buildTools: async (ctx) => {
+      const noteTools = await buildNoteToolDefs(ctx.projectId);
+      const base = await buildDataToolDefs(ctx.projectDir);
+      return [...noteTools, ...base];
+    },
+  },
+  data: {
+    label: '业务数据',
+    icon: '📊',
+    systemPrompt: DATA_PROMPT,
+    buildTools: async (ctx) => buildDataToolDefs(ctx.projectDir),
+  },
+};
+
+const SYSTEM_PROMPT = GENERAL_PROMPT; // 兼容旧引用
 
 /**
  * 创建一个对话会话。
@@ -42,7 +121,7 @@ const SYSTEM_PROMPT = `你是一位个人本地知识库助理，将「数据集
  * @param {string} [sessionId] - 数据库会话 ID，用于加载历史消息（多轮记忆）
  */
 function createSession(projectDir, sessionId) {
-  let history = [];
+  let history: any[] = [];
   if (sessionId) {
     try {
       history = db.chat.messages(sessionId);
@@ -65,7 +144,7 @@ function createSession(projectDir, sessionId) {
  * @param {Array} [images] - [{ data, mimeType }]
  * @param {number|string} [modelName] - 模型档案 id 或名称（多模型选择）
  */
-async function chat(session, text, onDelta, onTool, onDone, onError, images, modelName) {
+async function chat(session, text, onDelta, onTool, onDone, onError?, images?, modelName?) {
   logger.info('[Orchestrator] chat() text length=%d, projectDir=%s, model=%s', text.length, session.projectDir || '(none)', modelName || 'default');
 
   let history = session.messages || [];
@@ -82,12 +161,37 @@ async function chat(session, text, onDelta, onTool, onDone, onError, images, mod
     msgs.push(new HumanMessage({ content: buildUserContent(text, images) }));
   }
 
-  const toolDefs = await buildCodingToolDefs(session.projectDir);
+  // 按会话的 active_agent 分发到对应 Agent（单对话多模式）
+  let agentName = 'general';
+  let projectId: any = null;
+  try {
+    const sess = session.sessionId ? db.chat.getSession(session.sessionId) : null;
+    if (sess) {
+      agentName = sess.active_agent || 'general';
+      projectId = sess.project_id || null;
+    }
+  } catch (e) {
+    logger.warn('[Orchestrator] failed to read active_agent: %s', e.message);
+  }
+  const agentCfg = AGENTS[agentName] || AGENTS.general;
+  let toolDefs = await agentCfg.buildTools({ projectDir: session.projectDir, projectId });
+  // 模式级约束：笔记库项目 + 声明 readOnlyOnNoteProject 的模式 → 移除写文件类工具
+  let projectType: any = null;
+  try {
+    const p = projectId ? db.project.get(projectId) : null;
+    if (p) projectType = p.type;
+  } catch (e) { logger.warn('[Orchestrator] failed to read project type: %s', e.message); }
+  if (agentCfg.readOnlyOnNoteProject && projectType === 'note') {
+    toolDefs = toolDefs.filter(t => !WRITE_TOOLS.includes(t.name));
+    logger.info('[Orchestrator] agent=%s read-only on note project, write tools removed', agentName);
+  }
+  const systemPrompt = agentCfg.systemPrompt;
+  logger.info('[Orchestrator] agent=%s (%s), tools=%d', agentName, agentCfg.label, toolDefs.length);
 
   let reply = '';
   try {
     const { text: result, usedTools } = await runAgent({
-      messages: [new SystemMessage(SYSTEM_PROMPT), ...msgs],
+      messages: [new SystemMessage(systemPrompt), ...msgs],
       toolDefs,
       onDelta,
       onTool,
@@ -218,4 +322,4 @@ ${fileList}
   return text;
 }
 
-module.exports = { createSession, chat, checkStatus, createTools, generateDailyReport, generateProjectAnalysis };
+export { createSession, chat, checkStatus, createTools, generateDailyReport, generateProjectAnalysis, AGENTS };

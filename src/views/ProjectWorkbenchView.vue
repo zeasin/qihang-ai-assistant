@@ -73,8 +73,8 @@
             <h3 class="chat-title">{{ currentSession?.title || '对话' }}</h3>
             <span class="chat-project-badge" v-if="currentProject">📁 {{ currentProject.name }}</span>
           </div>
-          <div class="chat-header-right" v-if="llmProfiles.length">
-            <div class="model-switcher">
+          <div class="chat-header-right">
+            <div class="model-switcher" v-if="llmProfiles.length">
               <span class="model-label">模型:</span>
               <select v-model="selectedModelId" class="model-select" title="选择对话使用的大模型">
                 <option v-for="p in llmProfiles" :key="p.id" :value="p.id">
@@ -91,12 +91,13 @@
             <div class="message-avatar">
               <span v-if="msg.role === 'user'">👤</span>
               <span v-else-if="msg.role === 'tool'">🔧</span>
+              <span v-else-if="msg.role === 'system'">⚡</span>
               <span v-else>🤖</span>
             </div>
             <div class="message-content-wrapper">
               <div class="message-header">
                 <span class="message-author">
-                  {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : 'AI 助理' }}
+                  {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : msg.role === 'system' ? '系统' : 'AI 助理' }}
                 </span>
                 <span class="message-status" v-if="msg.status">{{ msg.status }}</span>
               </div>
@@ -145,7 +146,7 @@
                     </svg>
                   </button>
                   <input ref="fileInputRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
-                <span class="input-hint">Enter 发送 · Shift+Enter 换行</span>
+                <span class="input-hint">Enter 发送 · Shift+Enter 换行 · pi agent 驱动</span>
               </div>
               <div class="input-right">
                 <button
@@ -354,7 +355,7 @@ async function newSession(projectId: number) {
   if (isStreaming.value) return;
   const id = 'coding_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   try {
-    const session = await API.coding.createSession(id, String(projectId), '新对话');
+    const session = await API.coding.createSession(id, String(projectId), '新对话', 'general');
     currentSessionId.value = id;
     currentSession.value = session;
     messages.value = [];
@@ -480,6 +481,11 @@ function removeImage(index: number) {
 
 
 // ========== 发送消息 ==========
+function pushSystemMessage(content: string) {
+  messages.value.push({ role: 'system', content, status: '' });
+  scrollToBottom();
+}
+
 async function sendMessage() {
   const text = inputText.value.trim();
   if ((!text && !pendingImages.value.length) || isStreaming.value) return;

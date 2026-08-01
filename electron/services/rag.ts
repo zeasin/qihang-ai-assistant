@@ -1,5 +1,5 @@
-const ollama = require('ollama');
-const logger = require('./logger');
+import * as ollama from 'ollama';
+import logger from './logger';
 
 // 嵌入模型配置（可通过 configure() 修改）
 let embedConfig = {
@@ -15,7 +15,7 @@ let embedConfig = {
  * @param {string} [opts.host] - 服务地址，如 'http://127.0.0.1:11434'
  * @param {string} [opts.apiKey] - API Key（用于非 Ollama 的兼容服务）
  */
-function configure(opts = {}) {
+function configure(opts: any = {}) {
   if (opts.model) embedConfig.model = opts.model;
   if (opts.host) embedConfig.host = opts.host;
   if (opts.apiKey !== undefined) embedConfig.apiKey = opts.apiKey;
@@ -24,7 +24,7 @@ function configure(opts = {}) {
 
 function chunkText(text, maxLen = 512) {
   const paragraphs = text.split(/\n\s*\n/);
-  const chunks = [];
+  const chunks: any[] = [];
   let current = '';
   for (const p of paragraphs) {
     const trimmed = p.trim();
@@ -57,7 +57,7 @@ async function embed(text) {
       const errText = await res.text().catch(() => '');
       throw new Error(`嵌入 API 错误: ${res.status} ${errText}`);
     }
-    const data = await res.json();
+    const data: any = await res.json();
     if (data.data && data.data.length > 0) return data.data[0].embedding;
     if (data.embeddings && data.embeddings.length > 0) return data.embeddings[0];
     throw new Error('嵌入 API 返回格式异常: 未找到 embedding 数据');
@@ -109,9 +109,9 @@ const CACHED_SEGMENTER = (() => {
 })();
 
 function tokenize(text) {
-  const segmenterWords = [];
-  const ngramWords = [];
-  const wordPositions = {}; // word -> first position in query
+  const segmenterWords: any[] = [];
+  const ngramWords: any[] = [];
+  const wordPositions: any = {}; // word -> first position in query
 
   // 1. 标准分词（基于句意），生成有语义的词
   if (CACHED_SEGMENTER) {
@@ -271,7 +271,7 @@ function keywordSearch(projectId, query, topK = 10, db) {
     const avgDocLen = docLenList.reduce((a, b) => a + b, 0) / docLenList.length;
     const totalDocs = docs.length;
 
-    const termDocFreq = {};
+    const termDocFreq: any = {};
     for (const term of words) {
       termDocFreq[term] = rows.filter(r => r.content.toLowerCase().includes(term)).length;
     }
@@ -310,7 +310,7 @@ function keywordSearch(projectId, query, topK = 10, db) {
   }
 
   // 3. 综合评分：覆盖度 × 基础分 + 首词加分
-  const results = [];
+  const results: any[] = [];
   const segWordArray = [...segmenterWords]; // 有序的分词词列表
   for (const [docId, fs] of docData) {
     const structCoverage = fs.matchedChars.size / queryCharCount;
@@ -426,7 +426,7 @@ function keywordSearch(projectId, query, topK = 10, db) {
 }
 
 async function hybridSearch(projectId, query, topK = 10, db) {
-  let vectorResults = [];
+  let vectorResults: any[] = [];
   try {
     const queryEmb = await embed(query);
     let rows;
@@ -489,7 +489,7 @@ async function hybridSearch(projectId, query, topK = 10, db) {
 
   // 去重：每文件最多 2 条，避免单一文件垄断 topK
   const fileCount = new Map();
-  const deduped = [];
+  const deduped: any[] = [];
   for (const r of combined) {
     const cnt = fileCount.get(r.source) || 0;
     if (cnt >= 2) continue;
@@ -547,7 +547,7 @@ function extractTitle(content) {
 }
 
 /** 测试嵌入模型连接是否正常 */
-async function testConnection(opts = {}) {
+async function testConnection(opts: any = {}) {
   const model = opts.model || embedConfig.model;
   const host = opts.host || embedConfig.host;
   const apiKey = opts.apiKey !== undefined ? opts.apiKey : embedConfig.apiKey;
@@ -567,7 +567,7 @@ async function testConnection(opts = {}) {
         const errText = await res.text().catch(() => '');
         return { ok: false, message: `HTTP ${res.status}: ${errText.slice(0, 200)}` };
       }
-      const data = await res.json();
+      const data: any = await res.json();
       let emb;
       if (data.data && data.data.length > 0) emb = data.data[0].embedding;
       else if (data.embeddings && data.embeddings.length > 0) emb = data.embeddings[0];
@@ -586,4 +586,4 @@ async function testConnection(opts = {}) {
   }
 }
 
-module.exports = { configure, chunkText, embed, cosineSimilarity, indexProjectChunks, searchByVector, hybridSearch, keywordSearch, tokenize, extractTitle, testConnection };
+export { configure, chunkText, embed, cosineSimilarity, indexProjectChunks, searchByVector, hybridSearch, keywordSearch, tokenize, extractTitle, testConnection };

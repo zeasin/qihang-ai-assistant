@@ -109,6 +109,7 @@ interface ElectronAPI {
     deleteSession: (sessionId: string) => Promise<void>;
     updateTitle: (sessionId: string, title: string) => Promise<void>;
     switchAgent: (sessionId: string, agent: string) => Promise<any>;
+    agents: () => Promise<{ key: string; label: string; icon: string }[]>;
     send: (question: string, sessionId: string, projectDir: string, agent?: string, images?: any[], modelName?: string) => Promise<void>;
   };
 }

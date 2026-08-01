@@ -1,5 +1,5 @@
-const logger = require('./logger');
-const rag = require('./rag');
+import logger from './logger';
+import * as rag from './rag';
 
 /** 意图枚举 */
 const Intent = {
@@ -159,4 +159,4 @@ function extractProjectName(text, deps) {
   return '';
 }
 
-module.exports = { route, Intent, classify };
+export { route, Intent, classify };

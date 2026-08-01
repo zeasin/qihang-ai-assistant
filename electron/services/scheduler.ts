@@ -1,7 +1,7 @@
-const cron = require('node-cron');
-const db = require('./database');
-const logger = require('./logger');
-const { Notification } = require('electron');
+import * as cron from 'node-cron';
+import * as db from './database';
+import logger from './logger';
+import { Notification } from 'electron';
 
 let jobs = new Map();
 let running = false;
@@ -19,7 +19,7 @@ function getChinaMidnight() {
   return new Date(chinaDate + 'T00:00:00+08:00').getTime();
 }
 
-let feishu = null;
+let feishu: any = null;
 function getFeishu() {
   if (!feishu) feishu = require('./feishu');
   return feishu;
@@ -124,13 +124,13 @@ function buildReportSections(data) {
     recordSection += '  今日新增 ' + recCount + ' 条记录';
     if (recCountWeek > 0) recordSection += '，本周累计 ' + recCountWeek + ' 条';
     recordSection += '\n';
-    const groups = {};
+    const groups: any = {};
     recs.forEach(rec => {
       const id = rec.dataset_id;
       if (!groups[id]) groups[id] = [];
       groups[id].push(rec);
     });
-    for (const [dsId, grp] of Object.entries(groups)) {
+    for (const [dsId, grp] of Object.entries(groups) as any[]) {
       const dsName = dsNameMap[dsId] || '未分类';
       recordSection += '  📦 ' + dsName + '（' + grp.length + ' 条）\n';
       grp.forEach(rec => {
@@ -186,7 +186,7 @@ function buildReportSections(data) {
       highPriPending.forEach(t => analysisSection += '    🔴 ' + t.title + (t.due_date ? '（截止 ' + t.due_date + '）' : '') + '\n');
     }
     if (overdueTodos.length) {
-      const overdueDays = overdueTodos.map(t => Math.ceil((new Date(today) - new Date(t.due_date)) / 86400000));
+      const overdueDays = overdueTodos.map(t => Math.ceil((new Date(today).getTime() - new Date(t.due_date).getTime()) / 86400000));
       const maxOverdue = Math.max(...overdueDays, 0);
       analysisSection += '  ⚠️ 有 ' + overdueTodos.length + ' 项逾期，最长逾期 ' + maxOverdue + ' 天，建议尽快处理\n';
     }
@@ -208,7 +208,7 @@ function buildReportSections(data) {
     }
     analysisSection += '\n';
     const stopWords = ['的','了','是','在','有','和','就','不','人','都','一','一个','上','也','很','到','说','要','去','你','会','着','没有','看','好','自己','这','这个','我','他','她','它','们','那','那个','什么','怎么','如何','为什么','可以','能','吗','吧','啊','呢','哦','嗯','哈','呀'];
-    const keywords = [];
+    const keywords: any[] = [];
     chats.forEach(c => {
       const snip = (c.snippet || '').trim();
       if (snip) {
@@ -219,14 +219,14 @@ function buildReportSections(data) {
     });
     if (keywords.length > 0) analysisSection += '  对话关键词：' + keywords.slice(0, 8).join('、') + '\n';
     const topicCats = { 开发: ['开发','代码','bug','修复','部署','功能','项目','前端','后端','接口','数据库','服务器','git','分支','合并','测试','上线'], 学习: ['学习','教程','课程','文档','阅读','笔记','知识','了解','研究'], 管理: ['任务','计划','安排','进度','汇报','会议','讨论','沟通','协调'], 内容: ['文章','写作','发布','内容','编辑','文案','排版'], 数据分析: ['数据','分析','统计','报表','图表','指标'] };
-    const topicCounts = {};
+    const topicCounts: any = {};
     chats.forEach(c => {
       const snip = (c.snippet || '').toLowerCase();
       for (const [topic, words] of Object.entries(topicCats)) {
         for (const w of words) { if (snip.includes(w)) { topicCounts[topic] = (topicCounts[topic] || 0) + 1; break; } }
       }
     });
-    const activeTopics = Object.entries(topicCounts).filter(([_, c]) => c >= 1).sort((a, b) => b[1] - a[1]);
+    const activeTopics = (Object.entries(topicCounts) as any[]).filter(([_, c]) => c >= 1).sort((a, b) => b[1] - a[1]);
     if (activeTopics.length > 0) analysisSection += '  对话主题：' + activeTopics.map(([t, c]) => t + '（' + c + '次）').join('、') + '\n';
     analysisSection += '\n';
   }
@@ -243,13 +243,13 @@ function buildReportSections(data) {
       analysisSection += '，总字数约 ' + totalChars + ' 字';
     }
     analysisSection += '\n';
-    const dirGroups = {};
+    const dirGroups: any = {};
     docs.forEach(d => {
       const dir = d.path ? d.path.split(/[\\/]/).slice(-2, -1)[0] || '根目录' : '根目录';
       if (!dirGroups[dir]) dirGroups[dir] = [];
       dirGroups[dir].push(d);
     });
-    const dirEntries = Object.entries(dirGroups).sort((a, b) => b[1].length - a[1].length);
+    const dirEntries = (Object.entries(dirGroups) as any[]).sort((a, b) => b[1].length - a[1].length);
     if (dirEntries.length > 1) analysisSection += '  笔记分布：' + dirEntries.slice(0, 5).map(([dir, files]) => dir + '（' + files.length + '篇）').join('、') + '\n';
     const ctypes = { 技术: 0, 随笔: 0, 计划: 0, 总结: 0 };
     meaningful.forEach(d => {
@@ -299,7 +299,7 @@ function buildReportSections(data) {
 
   analysisSection += '  🎯 【综合评估与建议】\n';
   analysisSection += '  今日效率评分：' + scoreBar + ' ' + score + '/100\n';
-  const suggestions = [];
+  const suggestions: any[] = [];
   if (overdueTodos.length > 0) suggestions.push('优先处理 ' + overdueTodos.length + ' 项逾期待办');
   if (inProgress > 3) suggestions.push('进行中任务较多，建议集中精力完成一项再开始下一项');
   if (chatCountToday > 10) suggestions.push('今日对话较多，注意时间管理');
@@ -416,7 +416,7 @@ async function sendFeishu(message) {
 
 function buildReportCard(data) {
   const { today, doneToday, overdueTodos, pendingTodos, reminders, chats, workLogs, recs, recCount, docs, docCount, kbName, hour } = data;
-  const elements = [];
+  const elements: any[] = [];
 
   // greeting
   let greeting = '☀️ 早上好';
@@ -577,10 +577,10 @@ const executors = {
   },
   'auto_index': async (task) => {
     logger.info(`[Scheduler] auto-index triggered: ${task.name}`);
-    const projectIds = [task.project_id].filter(Boolean);
+    const projectIds: any[] = [task.project_id].filter(Boolean);
     if (!projectIds.length) {
       const config = JSON.parse(task.params_json || '{}');
-      projectIds = config.project_ids || (config.kb_id ? [config.kb_id] : []);
+      projectIds.push(...(config.project_ids || (config.kb_id ? [config.kb_id] : [])));
     }
     if (projectIds.length) {
       for (const projectId of projectIds) {
@@ -595,7 +595,7 @@ const executors = {
   },
 'daily_report': async (task) => {
     logger.info(`[Scheduler] daily report: ${task.name}`);
-    let mainProjectId = null;
+    let mainProjectId: any = null;
     let today = getChinaDate();
     try {
       let projectIds = [task.project_id].filter(Boolean);
@@ -813,4 +813,4 @@ function reload() {
 
 function isRunning() { return running; }
 
-module.exports = { start, stop, reload, isRunning, addTask, removeTask, addReminder, removeReminder, DEFAULT_REPORT_TEMPLATE };
+export { start, stop, reload, isRunning, addTask, removeTask, addReminder, removeReminder, DEFAULT_REPORT_TEMPLATE };
