@@ -1,5 +1,6 @@
 import * as cron from 'node-cron';
 import * as db from './database';
+import * as appConfig from './app-config';
 import logger from './logger';
 import { Notification } from 'electron';
 
@@ -26,7 +27,7 @@ function getFeishu() {
 }
 
 function getWebhookUrl() {
-  return db.configGet('feishuWebhookUrl') || '';
+  return appConfig.getConfig('feishuWebhookUrl') || '';
 }
 
 // ===== Report Template System =====
@@ -371,7 +372,7 @@ const DEFAULT_REPORT_TEMPLATE = '{{greetingLine}}\n' +
 
 function renderReport(data) {
   const { sections, vars, score } = buildReportSections(data);
-  const templateStr = db.configGet('daily_report_template') || DEFAULT_REPORT_TEMPLATE;
+  const templateStr = appConfig.getConfig('daily_report_template') || DEFAULT_REPORT_TEMPLATE;
   try {
     let text = templateStr;
     for (const [key, val] of Object.entries(sections)) {
@@ -619,8 +620,8 @@ const executors = {
       // ========== Default User Prompt (editable in config page) ==========
       const DEFAULT_USER_PROMPT = '请按以下格式生成日报：\n\n## 日报格式要求\n使用 Markdown 格式，包含以下板块：\n\n### 1️⃣ 今日概览\n- ✅ 完成任务数量、📋 待办数量、💬 对话次数、📝 笔记更新数、🗂️ 新增记录数\n\n### 2️⃣ 今日完成\n- 列出今日完成的任务，高优先级的用 ⭐ 标记\n\n### 3️⃣ 待办事项\n- 逾期的用 🔴 标记并注明逾期天数\n- 进行中的用 🔄 标记\n- 高优先级的用 🔴 标记\n\n### 4️⃣ 对话与沟通\n- 今日对话次数和简要摘要\n\n### 5️⃣ 笔记与记录\n- 更新的文档和新增的记录\n\n### 6️⃣ 今日提醒\n- 已启用的提醒（如有）\n\n### 7️⃣ 综合评估\n- 根据完成任务、待办处理、知识沉淀等维度给出今日效率评分（0-100分）\n- 给出具体的改进行动建议\n\n## 注意事项\n- 数据为空的部分可以略过，不要编造数据\n- 评分要合理，基于实际数据给出\n- 建议要具体、可执行\n- 语言简洁专业，使用中文';
 
-      // User-editable part (from DB or default)
-      const userPart = db.configGet('daily_report_prompt') || DEFAULT_USER_PROMPT;
+      // User-editable part (from config.json or default)
+      const userPart = appConfig.getConfig('daily_report_prompt') || DEFAULT_USER_PROMPT;
 
       // Combine: system (hardcoded) + user (editable)
       const fullPrompt = SYSTEM_PROMPT + '\n\n=== 用户格式要求 ===\n\n' + userPart;
@@ -635,7 +636,7 @@ const executors = {
       logger.info(`[Scheduler] daily report saved for project ${mainProjectId}`);
 
       // Cleanup: keep only last N days of reports
-      const retentionDays = parseInt(db.configGet('daily_report_retention_days') || '30', 10);
+      const retentionDays = parseInt(appConfig.getConfig('daily_report_retention_days') || '30', 10);
       db.run("DELETE FROM ai_analysis WHERE type = 'daily_report' AND report_date < ?", getChinaDate(-retentionDays));
 
       sendNotification('每日报告', '✅ AI 综合日报已生成 - ' + today);

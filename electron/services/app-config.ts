@@ -44,3 +44,14 @@ export function getNotesDir(): string {
 export function setNotesDir(dir: string): void {
   saveConfig({ notesDir: dir || null });
 }
+
+/** 读取任意配置键（不存在时返回空串） */
+export function getConfig(key: string): string {
+  const v = loadConfig()[key];
+  return v === undefined || v === null ? '' : String(v);
+}
+
+/** 配置键是否已在 config.json 中显式存在 */
+export function hasConfigKey(key: string): boolean {
+  return loadConfig()[key] !== undefined;
+}

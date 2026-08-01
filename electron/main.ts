@@ -406,8 +406,7 @@ const feishuMessageHandler = async (msg) => {
 };
 
 function startFeishu(configData) {
-  db.configSet('feishuAppId', configData.app_id || '');
-  db.configSet('feishuAppSecret', configData.app_secret || '');
+  appConfig.saveConfig({ feishuAppId: configData.app_id || '', feishuAppSecret: configData.app_secret || '' });
   feishu.start(configData, feishuMessageHandler);
   updateTrayMenu(getServicesStatus());
 }
@@ -536,9 +535,9 @@ function handleWorkerMessages(worker, sendProgress, resolve, track) {
       } else if (msg.type === 'scanDone') {
         db.save();
         const embedConfig = {
-          model: db.configGet('embedModel') || 'bge-m3',
-          host: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
-          apiKey: db.configGet('embeddingApiKey') || '',
+          model: appConfig.getConfig('embeddingModel') || 'bge-m3',
+          host: appConfig.getConfig('embeddingBaseUrl') || 'http://127.0.0.1:11434',
+          apiKey: appConfig.getConfig('embeddingApiKey') || '',
         };
         const rows = db.q(`SELECT c.id, c.content FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id WHERE d.project_id = ? AND c.embedding IS NULL`, msg.projectId);
         worker.send({ type: 'embed', projectId: msg.projectId, chunks: rows, config: embedConfig });
@@ -1072,8 +1071,8 @@ ipcMain.handle('insights:clearIndex', () => {
 ipcMain.handle('insights:indexerInfo', () => {
   return {
     running: indexer.isRunning(),
-    model: db.configGet('embedModel') || 'bge-m3',
-    host: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
+    model: appConfig.getConfig('embeddingModel') || 'bge-m3',
+    host: appConfig.getConfig('embeddingBaseUrl') || 'http://127.0.0.1:11434',
     docCount: (db.qOne("SELECT COUNT(*) as c FROM kb_documents") || {}).c || 0,
     chunkCount: (db.qOne("SELECT COUNT(*) as c FROM kb_chunks") || {}).c || 0,
     embeddedCount: (db.qOne("SELECT COUNT(*) as c FROM kb_chunks WHERE embedding IS NOT NULL") || {}).c || 0,
@@ -1118,7 +1117,7 @@ ipcMain.handle('feishu:testBot', async (_, { app_id, app_secret }) => {
 });
 ipcMain.handle('feishu:webhook:set', (_, { url }) => {
   feishu.setWebhook(url);
-  db.configSet('feishuWebhookUrl', url);
+  appConfig.saveConfig({ feishuWebhookUrl: url || '' });
   logger.info('[Feishu] Webhook saved: %s', url);
   return { ok: true };
 });
@@ -1127,13 +1126,12 @@ ipcMain.handle('feishu:webhook:test', async (_, { url }) => {
   return result;
 });
 ipcMain.handle('feishu:bot:save', (_, { app_id, app_secret }) => {
-  db.configSet('feishuAppId', app_id || '');
-  db.configSet('feishuAppSecret', app_secret || '');
+  appConfig.saveConfig({ feishuAppId: app_id || '', feishuAppSecret: app_secret || '' });
   logger.info('[Feishu] Bot credentials saved');
   return { ok: true };
 });
 ipcMain.handle('feishu:send', async (_, { message }) => {
-  const url = db.configGet('feishuWebhookUrl');
+  const url = appConfig.getConfig('feishuWebhookUrl');
   if (!url) return { ok: false, error: 'Webhook URL 未配置' };
   return await feishu.sendViaWebhook(url, message);
 });
@@ -1157,25 +1155,27 @@ ipcMain.handle('log:dir', () => {
 });
 
 // --- Config ---
+// 配置统一保存在 config.json（config:get 读取，config:set 写入）。
 ipcMain.handle('config:get', () => {
   return {
-    llmProvider: db.configGet('llmProvider') || 'deepseek',
-    llmModel: db.configGet('llmModel') || '',
-    llmApiKey: db.configGet('llmApiKey') || '',
-    llmBaseUrl: db.configGet('llmBaseUrl') || '',
-    embedModel: db.configGet('embedModel') || 'bge-m3',
-    embeddingBaseUrl: db.configGet('embeddingBaseUrl') || 'http://127.0.0.1:11434',
-    embeddingApiKey: db.configGet('embeddingApiKey') || '',
-    feishuWebhookUrl: db.configGet('feishuWebhookUrl') || '',
-    feishuAppId: db.configGet('feishuAppId') || '',
-    feishuAppSecret: db.configGet('feishuAppSecret') || '',
-    dailyReportRetentionDays: db.configGet('daily_report_retention_days') || '30',
-    dailyReportPrompt: db.configGet('daily_report_prompt') || '',
-    dailyReportTemplate: db.configGet('daily_report_template') || scheduler.DEFAULT_REPORT_TEMPLATE || '',
+    llmProvider: appConfig.getConfig('llmProvider') || 'deepseek',
+    llmModel: appConfig.getConfig('llmModel') || '',
+    llmApiKey: appConfig.getConfig('llmApiKey') || '',
+    llmBaseUrl: appConfig.getConfig('llmBaseUrl') || '',
+    embeddingModel: appConfig.getConfig('embeddingModel') || 'bge-m3',
+    embeddingProvider: appConfig.getConfig('embeddingProvider') || 'Ollama',
+    embeddingBaseUrl: appConfig.getConfig('embeddingBaseUrl') || 'http://127.0.0.1:11434',
+    embeddingApiKey: appConfig.getConfig('embeddingApiKey') || '',
+    feishuWebhookUrl: appConfig.getConfig('feishuWebhookUrl') || '',
+    feishuAppId: appConfig.getConfig('feishuAppId') || '',
+    feishuAppSecret: appConfig.getConfig('feishuAppSecret') || '',
+    dailyReportRetentionDays: appConfig.getConfig('daily_report_retention_days') || '30',
+    dailyReportPrompt: appConfig.getConfig('daily_report_prompt') || '',
+    dailyReportTemplate: appConfig.getConfig('daily_report_template') || scheduler.DEFAULT_REPORT_TEMPLATE || '',
   };
 });
 ipcMain.handle('config:set', (_, cfg) => {
-  Object.entries(cfg).forEach(([k, v]) => db.configSet(k, String(v)));
+  appConfig.saveConfig(cfg || {});
   return true;
 });
 
@@ -1211,18 +1211,36 @@ app.whenReady().then(async () => {
   } catch (e) {
     logger.error('DB init error: %s', e);
   }
+  // 一次性迁移：将 sys_config 中已有的设置复制到 config.json（配置来源此后以 config.json 为准）
+  const MIGRATE_KEYS = [
+    'llmProvider', 'llmModel', 'llmApiKey', 'llmBaseUrl',
+    'embeddingModel', 'embeddingProvider', 'embeddingBaseUrl', 'embeddingApiKey',
+    'feishuWebhookUrl', 'feishuAppId', 'feishuAppSecret', 'feishuChatId',
+    'daily_report_retention_days', 'daily_report_prompt', 'daily_report_template',
+  ];
+  const migratePatch: any = {};
+  for (const key of MIGRATE_KEYS) {
+    if (!appConfig.hasConfigKey(key)) {
+      const v = db.configGet(key);
+      if (v) migratePatch[key] = v;
+    }
+  }
+  if (Object.keys(migratePatch).length) {
+    appConfig.saveConfig(migratePatch);
+    logger.info('[AppConfig] 已从数据库迁移 %d 项设置到 config.json', Object.keys(migratePatch).length);
+  }
   createTray();
 
-  // 配置嵌入模型（从数据库读取）
+  // 配置嵌入模型（从 config.json 读取）
   rag.configure({
-    model: db.configGet("embedModel") || "bge-m3",
-    host: db.configGet("embeddingBaseUrl") || "http://127.0.0.1:11434",
-    apiKey: db.configGet("embeddingApiKey") || '',
+    model: appConfig.getConfig("embeddingModel") || "bge-m3",
+    host: appConfig.getConfig("embeddingBaseUrl") || "http://127.0.0.1:11434",
+    apiKey: appConfig.getConfig("embeddingApiKey") || '',
   });
   createWindow();
 
-  const savedAppId = db.configGet('feishuAppId');
-  const savedAppSecret = db.configGet('feishuAppSecret');
+  const savedAppId = appConfig.getConfig('feishuAppId');
+  const savedAppSecret = appConfig.getConfig('feishuAppSecret');
   if (savedAppId && savedAppSecret) {
     logger.info('Auto-starting Feishu bot from saved config...');
     startFeishu({ app_id: savedAppId, app_secret: savedAppSecret });

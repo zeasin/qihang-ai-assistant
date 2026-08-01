@@ -53,9 +53,13 @@
         <h2>🧠 嵌入模型配置</h2>
         <div class="text-muted mb-2">配置笔记库索引使用的嵌入模型（Embedding Model），用于语义搜索。支持 Ollama 和 OpenAI 兼容接口（如 vLLM、LM Studio 等）。填写 API Key 则使用 OpenAI 兼容接口，否则使用 Ollama。</div>
         <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
+          <div class="form-group" style="flex:1;min-width:130px;">
+            <label style="font-size:12px;">提供商名称</label>
+            <input v-model="embeddingProvider" type="text" class="form-control" placeholder="Ollama">
+          </div>
           <div class="form-group" style="flex:1;min-width:160px;">
             <label style="font-size:12px;">模型名称</label>
-            <input v-model="embedModel" type="text" class="form-control" placeholder="bge-m3 / ...">
+            <input v-model="embeddingModel" type="text" class="form-control" placeholder="bge-m3 / ...">
           </div>
           <div class="form-group" style="flex:1;min-width:200px;">
             <label style="font-size:12px;">服务地址</label>
@@ -215,7 +219,8 @@ const reportSettingsStatus = ref('');
 const showTemplateHelp = ref(false);
 const templateStatus = ref('');
 // Embedding model
-const embedModel = ref('');
+const embeddingModel = ref('');
+const embeddingProvider = ref('');
 const embeddingBaseUrl = ref('');
 const embeddingApiKey = ref('');
 const embeddingStatus = ref('');
@@ -361,7 +366,8 @@ async function loadConfig() {
     feishuAppSecret.value = cfg.feishuAppSecret || '';
     reportRetentionDays.value = cfg.dailyReportRetentionDays || '30';
     reportPrompt.value = cfg.dailyReportPrompt || '';
-    embedModel.value = cfg.embedModel || 'bge-m3';
+    embeddingModel.value = cfg.embeddingModel || 'bge-m3';
+    embeddingProvider.value = cfg.embeddingProvider || 'Ollama';
     embeddingBaseUrl.value = cfg.embeddingBaseUrl || 'http://127.0.0.1:11434';
     embeddingApiKey.value = cfg.embeddingApiKey || '';
   } catch { console.warn('加载配置失败'); }
@@ -394,10 +400,11 @@ async function resetReportTemplate() {
   await saveReportTemplate();
 }
 async function saveEmbeddingConfig() {
-  if (!embedModel.value.trim()) { embeddingStatus.value = '❌ 请输入模型名称'; return; }
+  if (!embeddingModel.value.trim()) { embeddingStatus.value = '❌ 请输入模型名称'; return; }
   try {
     await API.config.set({
-      embedModel: embedModel.value.trim(),
+      embeddingModel: embeddingModel.value.trim(),
+      embeddingProvider: embeddingProvider.value.trim() || 'Ollama',
       embeddingBaseUrl: embeddingBaseUrl.value.trim() || 'http://127.0.0.1:11434',
       embeddingApiKey: embeddingApiKey.value.trim() || '',
     });
@@ -409,11 +416,11 @@ async function saveEmbeddingConfig() {
 }
 
 async function testEmbedding() {
-  if (!embedModel.value.trim()) { embeddingStatus.value = '❌ 请输入模型名称'; return; }
+  if (!embeddingModel.value.trim()) { embeddingStatus.value = '❌ 请输入模型名称'; return; }
   embeddingStatus.value = '⏳ 正在测试连接...';
   try {
     const result = await API.embedding.test(
-      embedModel.value.trim(),
+      embeddingModel.value.trim(),
       embeddingBaseUrl.value.trim() || 'http://127.0.0.1:11434',
       embeddingApiKey.value.trim() || ''
     );

@@ -208,7 +208,7 @@ function initSchema() {
 
   `);
 
-  const obsoleteKeys = ['projectDir', 'ollamaHost', 'labels'];
+  const obsoleteKeys = ['projectDir', 'ollamaHost', 'labels', 'embedModel'];
   for (const key of obsoleteKeys) {
     run('DELETE FROM sys_config WHERE key = ?', key);
   }
@@ -217,7 +217,8 @@ function initSchema() {
 
 function initDefaultConfig() {
   const defaultConfig = {
-    embedModel: 'bge-m3',
+    embeddingModel: 'bge-m3',
+    embeddingProvider: 'Ollama',
     embeddingBaseUrl: 'http://127.0.0.1:11434',
     embeddingApiKey: '',
     feishuWebhookUrl: '',

@@ -1,4 +1,5 @@
 import * as db from './database';
+import * as appConfig from './app-config';
 import logger from './logger';
 
 // 运行时补丁：部分 OpenAI 兼容端点（如 SenseNova）的流式帧不携带 role 字段，
@@ -51,11 +52,11 @@ const DEFAULTS = {
 
 function getLlmConfig() {
   return {
-    provider: db.configGet('llmProvider') || DEFAULTS.provider,
-    model: db.configGet('llmModel') || '',
-    apiKey: db.configGet('llmApiKey') || '',
-    baseUrl: db.configGet('llmBaseUrl') || '',
-    temperature: parseFloat(db.configGet('llmTemperature') || String(DEFAULTS.temperature)),
+    provider: appConfig.getConfig('llmProvider') || DEFAULTS.provider,
+    model: appConfig.getConfig('llmModel') || '',
+    apiKey: appConfig.getConfig('llmApiKey') || '',
+    baseUrl: appConfig.getConfig('llmBaseUrl') || '',
+    temperature: parseFloat(appConfig.getConfig('llmTemperature') || String(DEFAULTS.temperature)),
   };
 }
 
