@@ -3,7 +3,12 @@ import { createRouter, createWebHashHistory } from 'vue-router';
 const routes = [
   {
     path: '/',
-    redirect: '/insights'
+    redirect: '/chat'
+  },
+  {
+    path: '/chat',
+    name: 'Chat',
+    component: () => import('@/views/ChatView.vue')
   },
   {
     path: '/notes',

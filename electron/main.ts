@@ -130,6 +130,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
     },
     titleBarStyle: 'hiddenInset',
+    autoHideMenuBar: true,
     backgroundColor: '#f8fafc',
     show: false,
   });
@@ -1176,6 +1177,9 @@ ipcMain.handle("embedding:test", async (_, { model, host, apiKey }) => {
 (app as any).isQuitting = false;
 
 app.whenReady().then(async () => {
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
+  }
   try {
     await db.getDb();
   } catch (e) {
