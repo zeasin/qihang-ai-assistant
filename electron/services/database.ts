@@ -142,6 +142,7 @@ function initSchema() {
     CREATE TABLE IF NOT EXISTS ai_analysis (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       project_id INTEGER REFERENCES prj_projects(id),
+      module_id TEXT,
       type TEXT,
       content TEXT,
       prompt TEXT,
@@ -180,6 +181,8 @@ function initSchema() {
     );
 
   `);
+  // migration: add module_id to ai_analysis if not exists
+  try { db.run("ALTER TABLE ai_analysis ADD COLUMN module_id TEXT"); } catch (e) {}
 }
 
 // ========== Helpers ==========
@@ -407,6 +410,20 @@ const ds = {
   deleteRecord: (id) => run('DELETE FROM data_center_records WHERE id = ?', id),
 };
 
+// ========== AI Analysis ==========
+const aa = {
+  listByModule: (moduleId) => q("SELECT * FROM ai_analysis WHERE module_id = ? AND type = 'module_analysis' ORDER BY created_at DESC LIMIT 5", moduleId),
+  latestByModule: (moduleId) => qOne("SELECT * FROM ai_analysis WHERE module_id = ? AND type = 'module_analysis' ORDER BY created_at DESC LIMIT 1", moduleId),
+  save: (moduleId, type, content, prompt, reportDate) => {
+    run("INSERT INTO ai_analysis (module_id, type, content, prompt, report_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
+      moduleId, type, content, prompt || '', reportDate || '');
+    const r = qOne("SELECT id FROM ai_analysis WHERE module_id = ? AND type = ? ORDER BY id DESC LIMIT 1", moduleId, type);
+    return r ? r.id : null;
+  },
+  get: (id) => qOne('SELECT * FROM ai_analysis WHERE id = ?', id),
+  remove: (id) => run('DELETE FROM ai_analysis WHERE id = ?', id),
+};
+
 // ========== Reminders ==========
 const reminder = {
   list: () => q('SELECT * FROM plan_reminders ORDER BY created_at DESC'),
@@ -462,4 +479,4 @@ function close() {
   if (db) { db.close(); db = null; }
 }
 
-export { getDb, close, q, qOne, run, runMany, runRaw, save, project, chat, dm, ds, reminder, todo };
+export { getDb, close, q, qOne, run, runMany, runRaw, save, project, chat, dm, ds, aa, reminder, todo };

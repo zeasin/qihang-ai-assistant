@@ -870,7 +870,7 @@ ipcMain.handle('todo:remove', (_, id) => { db.todo.remove(id); return true; });
 
 // --- Archive ---
 
-// 生成模块级业务分析报告（基于模块下所有数据集的业务内容）
+// 生成模块级业务分析报告（基于模块下所有数据集的业务内容）— 保留旧接口兼容
 ipcMain.handle('archive:report', async (_, { moduleId }) => {
   const mod = db.dm.get(moduleId);
   if (!mod) return { ok: false, error: '模块不存在' };
@@ -902,6 +902,137 @@ ipcMain.handle('archive:report', async (_, { moduleId }) => {
   } catch (e: any) {
     return { ok: false, error: e.message || '生成失败' };
   }
+});
+
+// 生成模块级 AI 业务分析并保存到 ai_analysis（新版）
+ipcMain.handle('archive:moduleAnalysis', async (_, { moduleId, force }) => {
+  const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  const mod = db.dm.get(moduleId);
+  if (!mod) return { ok: false, error: '模块不存在' };
+
+  if (!force) {
+    const existing = db.qOne("SELECT * FROM ai_analysis WHERE module_id = ? AND type = 'module_analysis' AND report_date = ? ORDER BY created_at DESC LIMIT 1", moduleId, today);
+    if (existing) {
+      return { ok: true, content: existing.content, moduleId, date: today, fromCache: true, analysisId: existing.id };
+    }
+  }
+
+  const dsRows = db.q('SELECT dataset_id, name, description, schema_json FROM data_center_datasets WHERE module_id = ?', moduleId);
+  if (!dsRows.length) return { ok: false, error: '该模块下无数据集' };
+
+  let businessData = '';
+  let totalRecords = 0;
+  let dsSummary: any[] = [];
+
+  for (const dsRow of dsRows) {
+    const rows = db.ds.query(dsRow.dataset_id, null);
+    const count = (db.qOne("SELECT COUNT(*) as c FROM data_center_records WHERE dataset_id = ?", dsRow.dataset_id) || {}).c || 0;
+    totalRecords += count;
+    dsSummary.push({ name: dsRow.name, count, description: dsRow.description });
+
+    if (rows.length > 0) {
+      businessData += `\n### 数据集：${dsRow.name}（共${count}条记录）\n`;
+      for (const r of rows) {
+        const data = typeof r.data_json === 'string' ? JSON.parse(r.data_json) : r;
+        const fields = Object.entries(data)
+          .filter(([k, v]) => v !== null && v !== '' && typeof v === 'string')
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('；') || JSON.stringify(data);
+        businessData += `- ${fields}\n`;
+      }
+    } else {
+      businessData += `\n### 数据集：${dsRow.name}（暂无记录）\n`;
+    }
+  }
+
+  const dsNames = dsSummary.map(d => d.name).join('、');
+  const prompt = `你是一位深谙业务运营的资深分析师。请对以下业务模块进行深度分析，要求从业务规律、运营健康度、增长机会等角度出发，给出有洞察力的分析：
+
+模块名称：${mod.name}
+模块描述：${mod.description || '无'}
+分析日期：${today}
+包含数据集：${dsNames}
+数据总量：${totalRecords}条
+
+业务数据详情：
+${businessData}
+
+请生成一份业务分析报告，要求：
+1. **业务整体概况** — 当前业务状态、关键指标、数据量级
+2. **业务规律与趋势** — 从数据中发现业务规律，例如：更新频率如何、多久没有更新了、哪些类型的数据最多、数据分布有何特点
+3. **运营健康度评估** — 数据完整性、时效性、活跃度评估
+4. **关键发现** — 值得关注的业务动态、异常或潜在问题
+5. **业务建议** — 可落地的具体行动建议，例如：建议补充哪些数据、如何优化业务流程、下一步可以关注什么
+
+注意：语言要专业务实，用中文，避免空泛套话，基于实际数据说话。`;
+
+  try {
+    const content = await piGenerateDailyReport('module_' + Date.now(), prompt);
+    if (content) {
+      const analysisId = db.aa.save(moduleId, 'module_analysis', content, prompt, today);
+      return { ok: true, content, moduleId, date: today, fromCache: false, analysisId };
+    }
+    return { ok: false, error: '生成内容为空' };
+  } catch (e: any) {
+    return { ok: false, error: e.message || '生成失败' };
+  }
+});
+
+// 获取模块最新分析
+ipcMain.handle('archive:moduleAnalysisLatest', async (_, { moduleId }) => {
+  const analysis = db.aa.latestByModule(moduleId);
+  return { ok: true, analysis };
+});
+
+// 获取模块分析历史
+ipcMain.handle('archive:moduleAnalysisList', async (_, { moduleId }) => {
+  const list = db.aa.listByModule(moduleId);
+  return { ok: true, list };
+});
+
+// 将分析结果存档到笔记库
+ipcMain.handle('archive:saveAnalysisToNotes', async (_, { moduleId, analysisId }) => {
+  const analysis = db.aa.get(analysisId);
+  if (!analysis) return { ok: false, error: '分析记录不存在' };
+  const mod = db.dm.get(moduleId);
+  if (!mod) return { ok: false, error: '模块不存在' };
+
+  const notesDir = appConfig.getNotesDir();
+  if (!notesDir) return { ok: false, error: '笔记库未配置' };
+
+  const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  const fileName = `数据模块分析-${mod.name}-${today}.md`;
+  const filePath = path.join(notesDir, fileName);
+  const content = `# 数据模块业务分析报告\n\n**模块**: ${mod.name}\n**日期**: ${today}\n\n---\n\n${analysis.content}\n`;
+
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { ok: true, filePath };
+  } catch (e: any) {
+    return { ok: false, error: '保存失败: ' + e.message };
+  }
+});
+
+// 获取模块概览数据（含数据集、最近记录、分析摘要）
+ipcMain.handle('archive:moduleOverview', async (_, { moduleId }) => {
+  const mod = db.dm.get(moduleId);
+  if (!mod) return { ok: false, error: '模块不存在' };
+  const dsRows = db.q('SELECT dataset_id, name, description, schema_json, created_at FROM data_center_datasets WHERE module_id = ? ORDER BY created_at DESC', moduleId);
+  const datasets = dsRows.map(dsRow => {
+    const count = (db.qOne("SELECT COUNT(*) as c FROM data_center_records WHERE dataset_id = ?", dsRow.dataset_id) || {}).c || 0;
+    const recentRows = db.q("SELECT id, data_json, created_at FROM data_center_records WHERE dataset_id = ? ORDER BY created_at DESC LIMIT 5", dsRow.dataset_id);
+    const recentRecords = recentRows.map(r => ({ id: r.id, ...JSON.parse(r.data_json || '{}'), _created_at: r.created_at }));
+    return {
+      datasetId: dsRow.dataset_id,
+      name: dsRow.name,
+      description: dsRow.description,
+      schema: dsRow.schema_json ? JSON.parse(dsRow.schema_json) : null,
+      recordCount: count,
+      recentRecords,
+    };
+  });
+  const analysis = db.aa.latestByModule(moduleId);
+  return { ok: true, module: mod, datasets, analysis };
 });
 
 ipcMain.handle('insights:stats', () => {

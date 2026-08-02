@@ -161,6 +161,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Archive
   archive: {
     report: (moduleId: string) => ipcRenderer.invoke('archive:report', { moduleId }),
+    moduleAnalysis: (moduleId: string, force?: boolean) => ipcRenderer.invoke('archive:moduleAnalysis', { moduleId, force }),
+    moduleAnalysisLatest: (moduleId: string) => ipcRenderer.invoke('archive:moduleAnalysisLatest', { moduleId }),
+    moduleAnalysisList: (moduleId: string) => ipcRenderer.invoke('archive:moduleAnalysisList', { moduleId }),
+    saveAnalysisToNotes: (moduleId: string, analysisId: number) => ipcRenderer.invoke('archive:saveAnalysisToNotes', { moduleId, analysisId }),
+    moduleOverview: (moduleId: string) => ipcRenderer.invoke('archive:moduleOverview', { moduleId }),
   },
 
   // Config

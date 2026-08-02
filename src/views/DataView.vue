@@ -2,98 +2,156 @@
   <div class="data-view">
     <div class="content-header">
       <h1 class="content-title">数据</h1>
+      <div class="header-actions">
+        <button class="btn btn-sm btn-secondary" @click="showAddModule">+ 模块</button>
+        <button class="btn btn-sm btn-primary" @click="showAddDataset">+ 数据集</button>
+      </div>
     </div>
-    <div class="split-panel">
-      <div class="left-panel">
-        <div class="left-header">
-          <span>数据集</span>
-          <button class="btn btn-sm btn-primary" @click="showAddDataset">+ 数据集</button>
-        </div>
-        <div class="left-body">
-          <div
-            v-for="ds in allDatasets"
-            :key="ds.id"
-            class="ds-item"
-            :class="{ active: selectedDs && selectedDs.id === ds.id }"
-            @click="selectDataset(ds)"
-          >
-            <span class="ds-icon">📋</span>
-            <span class="ds-name">{{ ds.name }}</span>
-            <span class="ds-meta">{{ ds.moduleName || '未分组' }}</span>
-            <span class="ds-actions">
-              <button class="ds-btn" @click.stop="showEditDataset(ds)" title="编辑">✏️</button>
-              <button class="ds-btn ds-btn-danger" @click.stop="deleteDataset(ds)" title="删除">🗑️</button>
-            </span>
-            <span class="ds-count">{{ ds.recordCount || 0 }}</span>
+
+    <div class="content-body" v-if="modules.length > 0">
+      <div class="module-tabs">
+        <button
+          v-for="mod in modules"
+          :key="mod.id"
+          class="module-tab"
+          :class="{ active: activeModuleId === mod.id }"
+          @click="switchModule(mod)"
+        >
+          <span class="tab-icon">{{ mod.icon || '📁' }}</span>
+          <span class="tab-name">{{ mod.name }}</span>
+          <span class="tab-count">{{ mod.totalRecords }}</span>
+        </button>
+      </div>
+
+      <div v-if="activeModule" class="module-panel">
+        <div class="panel-header">
+          <div class="panel-title-area">
+            <span class="panel-icon">{{ activeModule.icon || '📁' }}</span>
+            <span class="panel-name">{{ activeModule.name }}</span>
+            <span class="panel-desc" v-if="activeModule.description">{{ activeModule.description }}</span>
           </div>
-          <div v-if="!allDatasets.length" class="empty-hint">暂无数据集</div>
+          <div class="panel-actions">
+            <span class="panel-meta">{{ activeModule.totalRecords }} 条记录 · {{ activeModule.datasets.length }} 个数据集</span>
+            <button class="panel-btn" @click="showEditModule(activeModule)" title="编辑模块">✏️</button>
+            <button class="panel-btn panel-btn-danger" @click="deleteModule(activeModule)" title="删除模块">🗑️</button>
+          </div>
+        </div>
+
+        <div class="panel-subtabs">
+          <button class="subtab" :class="{ active: moduleSubTab === 'ai' }" @click="moduleSubTab = 'ai'">🤖 AI 分析</button>
+          <button class="subtab" :class="{ active: moduleSubTab === 'data' }" @click="moduleSubTab = 'data'">📋 数据</button>
+        </div>
+
+        <div v-if="moduleSubTab === 'ai'" class="panel-ai-section">
+          <div class="ai-body">
+            <div v-if="activeModule.aiLoading" class="ai-loading">
+              <div class="spinner"></div>
+              <span>AI 正在分析业务数据...</span>
+            </div>
+            <div v-else-if="activeModule.aiAnalysis" class="ai-content">
+              <div class="ai-text" v-html="renderMarkdown(activeModule.aiAnalysis.content)"></div>
+              <div class="ai-actions">
+                <button class="btn btn-sm btn-secondary" @click="refreshAiAnalysis(activeModule, true)">🔄 刷新分析</button>
+                <button class="btn btn-sm btn-secondary" @click="archiveAnalysis(activeModule)" :disabled="activeModule.saving">📥 存档到笔记库</button>
+              </div>
+            </div>
+            <div v-else class="ai-empty">
+              <span>AI 正在分析...</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="moduleSubTab === 'data'" class="panel-datasets">
+          <div v-for="ds in activeModule.datasets" :key="ds.datasetId" class="dataset-section">
+            <div class="dataset-header">
+              <div class="dataset-title-area">
+                <span class="dataset-icon">📋</span>
+                <span class="dataset-name">{{ ds.name }}</span>
+                <span class="dataset-count">{{ ds.recordCount }} 条</span>
+              </div>
+              <div class="dataset-actions">
+                <button class="ds-btn" @click="showEditDatasetPortal(activeModule, ds)" title="编辑数据集">✏️</button>
+                <button class="ds-btn ds-btn-danger" @click="deleteDatasetPortal(activeModule, ds)" title="删除数据集">🗑️</button>
+                <button class="btn btn-sm btn-secondary" @click="openFullView(activeModule, ds)">查看全部 →</button>
+              </div>
+            </div>
+            <table class="preview-table" v-if="ds.recentRecords && ds.recentRecords.length > 0">
+              <thead>
+                <tr>
+                  <th v-for="col in getPreviewColumns(ds)" :key="col">{{ col }}</th>
+                  <th class="th-actions">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="rec in ds.recentRecords" :key="rec.id">
+                  <td v-for="col in getPreviewColumns(ds)" :key="col" :title="rec[col] || ''">{{ truncateText(rec[col], 20) }}</td>
+                  <td class="action-cell">
+                    <button class="action-btn" @click="viewRecordPortal(rec)">👁️</button>
+                    <button class="action-btn" @click="editRecordPortal(activeModule, ds, rec)">✏️</button>
+                    <button class="action-btn danger" @click="deleteRecordPortal(rec)">🗑️</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="dataset-empty">暂无记录</div>
+          </div>
         </div>
       </div>
-       <div class="right-panel">
-         <template v-if="selectedDs">
-           <div class="tab-bar">
-             <button class="tab-btn" :class="{ active: activeTab === 'ai' }" @click="switchTab('ai')">🤖 AI 分析概览</button>
-             <button class="tab-btn" :class="{ active: activeTab === 'data' }" @click="switchTab('data')">📋 数据记录</button>
-           </div>
-           <div class="tab-content">
-             <div v-if="activeTab === 'ai'" class="ai-tab">
-               <div class="ai-tab-header">
-                  <h3>📊 {{ selectedDs.moduleName }} — 业务分析概览</h3>
-                 <button class="btn btn-sm btn-secondary" :disabled="aiReportLoading" @click="refreshAiReport">🔄 重新生成</button>
-               </div>
-               <div v-if="aiReportLoading" class="ai-tab-loading">
-                 <div class="spinner"></div>
-                 <p>正在生成分析报告...</p>
-               </div>
-               <div v-else-if="aiReportContent" class="ai-tab-content" v-html="renderAiReportMarkdown(aiReportContent)"></div>
-               <div v-else class="ai-tab-empty">
-                 <div class="empty-icon">🤖</div>
-                 <div class="empty-title">点击「重新生成」获取 AI 分析报告</div>
-               </div>
-             </div>
-             <div v-if="activeTab === 'data'" class="data-tab">
-               <div class="right-toolbar">
-                 <div class="search-box">
-                   <input type="text" v-model="searchKeyword" placeholder="搜索记录..." @keyup.enter="loadRecords(0)">
-                 </div>
-                 <button class="btn btn-sm btn-secondary" @click="loadRecords(0)">搜索</button>
-                 <button class="btn btn-sm btn-primary" @click="showAddRecord">+ 记录</button>
-                 <button class="btn btn-sm btn-secondary" @click="showImportModal">📥 导入</button>
-               </div>
-               <table class="data-table" v-if="records.length > 0">
-                 <thead>
-                   <tr>
-                     <th>状态</th>
-                     <th v-for="col in recordColumns" :key="col">{{ col }}</th>
-                     <th>操作</th>
-                   </tr>
-                 </thead>
-                 <tbody>
-                   <tr v-for="rec in records" :key="rec._id || rec.id">
-                     <td><span class="badge badge-gray">{{ rec.status || '无' }}</span></td>
-                     <td v-for="col in recordColumns" :key="col">{{ rec[col] || '' }}</td>
-                     <td class="action-cell">
-                       <button class="action-btn" @click="viewRecord(rec)">👁️</button>
-                       <button class="action-btn" @click="editRecord(rec)">✏️</button>
-                       <button class="action-btn danger" @click="deleteRecord(rec)">🗑️</button>
-                     </td>
-                   </tr>
-                 </tbody>
-               </table>
-               <div v-else class="right-empty">
-                 <div class="empty-icon">📝</div>
-                 <div class="empty-title">暂无记录</div>
-                 <button class="btn btn-primary btn-sm" @click="showAddRecord">+ 新增记录</button>
-               </div>
-             </div>
-           </div>
-         </template>
-         <div v-else class="right-empty">
-           <div class="empty-icon">📋</div>
-           <div class="empty-title">从左侧选择一个数据集</div>
-         </div>
-       </div>
-     </div>
+    </div>
+
+    <div v-else class="content-empty">
+      <div class="empty-icon">📋</div>
+      <div class="empty-title">暂无数据模块</div>
+      <div class="empty-desc">点击上方「+ 模块」创建第一个数据模块，然后添加数据集</div>
+    </div>
+
+    <!-- 全量数据查看模态框 -->
+    <div v-if="fullViewVisible" class="modal-overlay" @click="closeFullView">
+      <div class="modal-box modal-box-wide" @click.stop>
+        <div class="modal-header">
+          <h3>📋 {{ fullViewDs?.name || '数据集' }}</h3>
+          <div class="modal-header-actions">
+            <span class="modal-badge">{{ fullViewDs?.recordCount || 0 }} 条记录</span>
+            <button class="btn btn-secondary" @click="closeFullView">✕</button>
+          </div>
+        </div>
+        <div class="modal-body">
+          <div class="fullview-toolbar">
+            <div class="search-box">
+              <input type="text" v-model="fullViewKeyword" placeholder="搜索记录..." @keyup.enter="loadFullViewRecords()">
+            </div>
+            <button class="btn btn-sm btn-secondary" @click="loadFullViewRecords()">搜索</button>
+            <button class="btn btn-sm btn-primary" @click="showAddRecord">+ 记录</button>
+            <button class="btn btn-sm btn-secondary" @click="showImportModal">📥 导入</button>
+          </div>
+          <table class="data-table" v-if="fullViewRecords.length > 0">
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th v-for="col in fullViewColumns" :key="col">{{ col }}</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="rec in fullViewRecords" :key="rec.id">
+                <td><span class="badge badge-gray">{{ rec.status || '无' }}</span></td>
+                <td v-for="col in fullViewColumns" :key="col">{{ rec[col] || '' }}</td>
+                <td class="action-cell">
+                  <button class="action-btn" @click="viewRecordPortal(rec)">👁️</button>
+                  <button class="action-btn" @click="editRecordPortal(fullViewMod, fullViewDs, rec)">✏️</button>
+                  <button class="action-btn danger" @click="deleteRecordPortal(rec)">🗑️</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="right-empty">
+            <div class="empty-icon">📝</div>
+            <div class="empty-title">暂无记录</div>
+            <button class="btn btn-primary btn-sm" @click="showAddRecord">+ 新增记录</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- 数据集模态框 -->
     <div v-if="showDsModal" class="modal-overlay">
@@ -108,18 +166,11 @@
             <input type="text" class="form-control" v-model="dsForm.name" placeholder="例如：客户信息、项目列表">
           </div>
           <div class="form-group">
-            <label>模块（可选）</label>
-            <div class="module-row">
-              <select v-if="!dsForm.showNewModule" v-model="dsForm.moduleName" class="form-control" @change="e => { if (e.target.value === '__new__') { dsForm.showNewModule = true; dsForm.moduleName = ''; } }">
-                <option value="">（无模块）</option>
-                <option v-for="mod in modules" :key="mod.id" :value="mod.name">{{ mod.name }}</option>
-                <option value="__new__">+ 新建模块...</option>
-              </select>
-              <div v-else class="module-row">
-                <input type="text" class="form-control" v-model="dsForm.moduleName" placeholder="输入新模块名称">
-                <button class="btn btn-sm btn-secondary" @click="dsForm.showNewModule = false; dsForm.moduleName = ''" style="flex-shrink:0;">取消</button>
-              </div>
-            </div>
+            <label>所属模块</label>
+            <select v-model="dsForm.moduleId" class="form-control">
+              <option value="">（无模块）</option>
+              <option v-for="mod in modules" :key="mod.id" :value="mod.id">{{ mod.name }}</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Schema 字段（每行一个字段名）</label>
@@ -145,6 +196,34 @@
       </div>
     </div>
 
+    <!-- 模块模态框 -->
+    <div v-if="showModuleModal" class="modal-overlay">
+      <div class="modal-box" @click.stop>
+        <div class="modal-header">
+          <h3>{{ editingModuleId ? '编辑模块' : '新建模块' }}</h3>
+          <button class="btn btn-secondary" @click="showModuleModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>名称 *</label>
+            <input type="text" class="form-control" v-model="moduleForm.name" placeholder="例如：客户管理、项目管理">
+          </div>
+          <div class="form-group">
+            <label>图标（可选）</label>
+            <input type="text" class="form-control" v-model="moduleForm.icon" placeholder="📁">
+          </div>
+          <div class="form-group">
+            <label>描述（可选）</label>
+            <textarea class="form-control" v-model="moduleForm.description" rows="3" placeholder="模块的简要说明"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showModuleModal = false">取消</button>
+          <button class="btn btn-primary" @click="saveModule">保存</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 记录模态框 -->
     <div v-if="showRecordModal" class="modal-overlay" @click="showRecordModal = false">
       <div class="modal-box" @click.stop>
@@ -156,13 +235,13 @@
           <div class="form-group">
             <label>状态</label>
             <select class="form-control" v-model="recordForm.status">
-              <option v-for="opt in statusOptions" :key="opt" :value="opt">{{ opt }}</option>
+              <option v-for="opt in recordStatusOptions" :key="opt" :value="opt">{{ opt }}</option>
             </select>
           </div>
-          <div class="form-group" v-if="typeOptions.length">
+          <div class="form-group" v-if="recordTypeOptions.length">
             <label>类型</label>
             <select class="form-control" v-model="recordForm.type">
-              <option v-for="opt in typeOptions" :key="opt" :value="opt">{{ opt }}</option>
+              <option v-for="opt in recordTypeOptions" :key="opt" :value="opt">{{ opt }}</option>
             </select>
           </div>
           <div v-for="field in recordFormFields" :key="field" class="form-group">
@@ -189,7 +268,7 @@
             <span class="label">状态</span>
             <span class="value"><span class="badge badge-gray">{{ viewingRecord.status || '无' }}</span></span>
           </div>
-          <div v-for="field in recordColumns" :key="field" class="detail-row">
+          <div v-for="field in viewingRecordFields" :key="field" class="detail-row">
             <span class="label">{{ field }}</span>
             <span class="value">{{ viewingRecord[field] || '' }}</span>
           </div>
@@ -241,99 +320,136 @@ import { marked } from 'marked';
 
 const API = (window as any).electronAPI;
 
-interface ModItem {
-  id: string; name: string; description: string; icon: string;
-  dsList: any[]; expanded: boolean;
+interface ModuleData {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  totalRecords: number;
+  aiLoading: boolean;
+  aiAnalysis: any;
+  saving: boolean;
+  datasets: DatasetData[];
 }
 
-const modules = ref<ModItem[]>([]);
+interface DatasetData {
+  datasetId: string;
+  name: string;
+  description: string;
+  schema: any;
+  recordCount: number;
+  recentRecords: any[];
+}
 
-const allDatasets = computed(() => {
-  const list: any[] = [];
-  for (const mod of modules.value) {
-    for (const ds of mod.dsList) {
-      list.push({ ...ds, moduleName: mod.name, moduleId: mod.id });
-    }
-  }
-  return list;
+const modules = ref<ModuleData[]>([]);
+const activeModuleId = ref<string | null>(null);
+const moduleSubTab = ref<'ai' | 'data'>('ai');
+
+const activeModule = computed(() => {
+  if (!activeModuleId.value) return null;
+  return modules.value.find(m => m.id === activeModuleId.value) || null;
 });
 
-async function loadModules() {
+// ========== 数据加载 ==========
+
+async function loadAll() {
   if (!API) return;
   try {
-    const list = await API.dm.list();
-    const dsList = await API.ds.list();
-    const modList = list.map((m: any) => {
-      const dsInModule = dsList.filter((d: any) => d.module_id === m.module_id);
-      return {
-        id: m.module_id || m.id, name: m.name, description: m.description || '',
-        icon: m.icon || '📁', dsList: dsInModule, expanded: true
-      };
-    });
-    const ungrouped = dsList.filter((d: any) => !d.module_id);
-    if (ungrouped.length) {
-      modList.unshift({ id: '__ungrouped__', name: '未分组', description: '', icon: '📁', dsList: ungrouped, expanded: true });
+    const modList = await API.dm.list();
+    const overviews = await Promise.all(
+      modList.map((m: any) => API.archive.moduleOverview(m.module_id || m.id).catch(() => null))
+    );
+    const result: ModuleData[] = [];
+    for (let i = 0; i < modList.length; i++) {
+      const m = modList[i];
+      const ov = overviews[i];
+      const mid = m.module_id || m.id;
+      result.push({
+        id: mid,
+        name: m.name,
+        description: m.description || '',
+        icon: m.icon || '📁',
+        totalRecords: ov?.datasets?.reduce((s: number, d: any) => s + (d.recordCount || 0), 0) || 0,
+        aiLoading: false,
+        aiAnalysis: ov?.analysis || null,
+        saving: false,
+        datasets: ov?.datasets || [],
+      });
     }
-    modules.value = modList;
-  } catch (e) { console.error('加载模块失败:', e); }
+    modules.value = result;
+    if (result.length > 0) {
+      activeModuleId.value = result[0].id;
+      ensureAiAnalysis(result[0]);
+    }
+  } catch (e) { console.error('加载模块数据失败:', e); }
 }
+
+// ========== 模块管理 ==========
+
+const showModuleModal = ref(false);
+const editingModuleId = ref('');
+const moduleForm = ref({ name: '', icon: '📁', description: '' });
+
+function showAddModule() {
+  editingModuleId.value = '';
+  moduleForm.value = { name: '', icon: '📁', description: '' };
+  showModuleModal.value = true;
+}
+
+function showEditModule(mod: ModuleData) {
+  editingModuleId.value = mod.id;
+  moduleForm.value = { name: mod.name, icon: mod.icon || '📁', description: mod.description };
+  showModuleModal.value = true;
+}
+
+async function saveModule() {
+  if (!moduleForm.value.name.trim()) { alert('请输入模块名称'); return; }
+  if (!API) return;
+  try {
+    if (editingModuleId.value) {
+      await API.dm.update(editingModuleId.value, {
+        name: moduleForm.value.name,
+        icon: moduleForm.value.icon,
+        description: moduleForm.value.description,
+      });
+    } else {
+      await API.dm.add(moduleForm.value.name, moduleForm.value.description, moduleForm.value.icon);
+    }
+    showModuleModal.value = false;
+    await loadAll();
+  } catch (e) { console.error('保存模块失败:', e); }
+}
+
+async function deleteModule(mod: ModuleData) {
+  if (!confirm(`确定删除模块「${mod.name}」及其下所有数据集？`)) return;
+  if (!API) return;
+  try {
+    await API.dm.remove(mod.id);
+    await loadAll();
+  } catch (e) { console.error('删除模块失败:', e); }
+}
+
+// ========== 数据集管理 ==========
 
 const showDsModal = ref(false);
 const editingDsId = ref('');
-const dsForm = ref({ name: '', moduleName: '', showNewModule: false, description: '', type: '', schema: '', typeOptions: '', statusOptions: '' });
+const dsForm = ref({ name: '', moduleId: '', description: '', schema: '', typeOptions: '', statusOptions: '' });
 
 function showAddDataset() {
   editingDsId.value = '';
-  dsForm.value = { name: '', moduleName: '', showNewModule: false, description: '', type: '', schema: '', typeOptions: '', statusOptions: '' };
+  dsForm.value = { name: '', moduleId: '', description: '', schema: '', typeOptions: '', statusOptions: '' };
   showDsModal.value = true;
 }
 
-// ========== 数据集选择 ==========
-
-const selectedDs = ref<any>(null);
-const records = ref<any[]>([]);
-const recordColumns = ref<string[]>([]);
-const searchKeyword = ref('');
-const currentPage = ref(0);
-const pageSize = 20;
-
-function selectDataset(ds: any) {
-  selectedDs.value = ds;
-  aiReportContent.value = '';
-  localStorage.setItem('lastDatasetId', ds.dataset_id || ds.id);
-  loadRecords(0);
-  if (activeTab.value === 'ai') {
-    refreshAiReport();
-  }
-}
-
-async function loadRecords(page: number) {
-  if (!selectedDs.value || !API) return;
-  currentPage.value = page;
-  try {
-    const rows = await API.ds.query(selectedDs.value.dataset_id, searchKeyword.value || null);
-    records.value = rows;
-    recordColumns.value = buildRecordColumns(rows);
-  } catch (e) { console.error('加载记录失败:', e); records.value = []; recordColumns.value = []; }
-}
-
-function buildRecordColumns(recs: any[]): string[] {
-  const cols = new Set<string>();
-  recs.forEach((r: any) => { Object.keys(r).forEach(k => { if (k !== 'id' && k !== '_created_at' && !k.startsWith('_')) cols.add(k); }); });
-  return Array.from(cols).slice(0, 8);
-}
-
-// ========== 数据集 CRUD ==========
-
-function showEditDataset(ds: any) {
-  if (!ds) return;
-  editingDsId.value = ds.id || '';
+function showEditDatasetPortal(mod: ModuleData, ds: DatasetData) {
+  editingDsId.value = ds.datasetId;
   dsForm.value = {
-    name: ds.name || '', description: ds.description || '', type: ds.type || '',
-    moduleName: ds.moduleName || '', showNewModule: false,
+    name: ds.name || '',
+    moduleId: mod.id,
+    description: ds.description || '',
     schema: (ds.schema && ds.schema.fields) ? ds.schema.fields.map((f: any) => f.name).join('\n') : '',
     typeOptions: (ds.schema && ds.schema.typeOptions) ? ds.schema.typeOptions.join('\n') : '',
-    statusOptions: (ds.schema && ds.schema.statusOptions) ? ds.schema.statusOptions.join('\n') : ''
+    statusOptions: (ds.schema && ds.schema.statusOptions) ? ds.schema.statusOptions.join('\n') : '',
   };
   showDsModal.value = true;
 }
@@ -345,109 +461,146 @@ async function saveDataset() {
   const schemaJson = JSON.stringify({
     fields,
     typeOptions: dsForm.value.typeOptions.split('\n').filter(s => s.trim()),
-    statusOptions: dsForm.value.statusOptions.split('\n').filter(s => s.trim())
+    statusOptions: dsForm.value.statusOptions.split('\n').filter(s => s.trim()),
   });
   try {
-    let moduleId = '';
-    const moduleName = dsForm.value.moduleName.trim();
-    if (moduleName) {
-      const existing = modules.value.find(m => m.name === moduleName);
-      if (existing) {
-        moduleId = existing.id;
-      } else {
-        const r = await API.dm.add(moduleName, '', '📁');
-        moduleId = r.module_id || r.id;
-      }
-    }
+    const moduleId = dsForm.value.moduleId;
     if (editingDsId.value) {
       await API.ds.updateMeta(editingDsId.value, {
         name: dsForm.value.name, description: dsForm.value.description,
-        type: dsForm.value.type, schema_json: schemaJson, module_id: moduleId,
+        schema_json: schemaJson, module_id: moduleId,
       });
     } else {
-      await API.ds.add({ name: dsForm.value.name, description: dsForm.value.description, type: dsForm.value.type, schemaJson, module_id: moduleId });
+      await API.ds.add({ name: dsForm.value.name, description: dsForm.value.description, schemaJson, module_id: moduleId });
     }
-    await loadModules();
     showDsModal.value = false;
+    await loadAll();
   } catch (e) { console.error('保存数据集失败:', e); }
 }
 
-async function deleteDataset(ds: any) {
-  if (!ds || !confirm(`确定删除数据集「${ds.name}」及所有数据？`)) return;
+async function deleteDatasetPortal(mod: ModuleData, ds: DatasetData) {
+  if (!confirm(`确定删除数据集「${ds.name}」及所有数据？`)) return;
+  if (!API) return;
   try {
-    await API.ds.remove(ds.dataset_id || ds.id);
-    if (selectedDs.value && (selectedDs.value.id === ds.id || selectedDs.value.dataset_id === ds.dataset_id)) {
-      selectedDs.value = null; records.value = [];
-    }
-    await loadModules();
+    await API.ds.remove(ds.datasetId);
+    await loadAll();
   } catch (e) { console.error('删除数据集失败:', e); }
 }
 
-// ========== Tab ==========
+// ========== AI 分析 ==========
 
-const activeTab = ref('ai');
-const aiReportLoading = ref(false);
-const aiReportContent = ref('');
+function isTodayAnalysis(analysis: any): boolean {
+  if (!analysis || !analysis.created_at) return false;
+  const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  try {
+    const d = new Date(analysis.created_at);
+    const dStr = new Date(d.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    return dStr === today;
+  } catch { return String(analysis.created_at).slice(0, 10) === today; }
+}
 
-function switchTab(tab: string) {
-  activeTab.value = tab;
-  if (tab === 'ai' && selectedDs.value && !aiReportContent.value) {
-    refreshAiReport();
+function ensureAiAnalysis(mod: ModuleData) {
+  if (!isTodayAnalysis(mod.aiAnalysis)) {
+    refreshAiAnalysis(mod);
   }
 }
 
-async function refreshAiReport() {
-  if (!selectedDs.value || !API) return;
-  const moduleId = selectedDs.value.moduleId;
-  if (!moduleId || moduleId === '__ungrouped__') return;
-  aiReportLoading.value = true;
-  aiReportContent.value = '';
+function switchModule(mod: ModuleData) {
+  activeModuleId.value = mod.id;
+  ensureAiAnalysis(mod);
+}
+
+async function refreshAiAnalysis(mod: ModuleData, force?: boolean) {
+  if (!API) return;
+  mod.aiLoading = true;
   try {
-    const res = await API.archive.report(moduleId);
+    const res = await API.archive.moduleAnalysis(mod.id, force);
     if (res.ok && res.content) {
-      aiReportContent.value = res.content;
+      mod.aiAnalysis = { id: res.analysisId, content: res.content, created_at: new Date().toISOString() };
+      if (res.fromCache) {
+        mod.aiAnalysis.created_at = res.date || mod.aiAnalysis.created_at;
+      }
     }
   } catch (e) {
-    console.error('AI 报告生成失败:', e);
+    console.error('AI 分析失败:', e);
   }
-  aiReportLoading.value = false;
+  mod.aiLoading = false;
 }
 
-function renderAiReportMarkdown(text: string): string {
-  if (!text) return '';
-  try { return marked(text); } catch { return text; }
+async function archiveAnalysis(mod: ModuleData) {
+  if (!API || !mod.aiAnalysis) return;
+  const analysisId = mod.aiAnalysis.id;
+  if (!analysisId) {
+    alert('请先保存分析结果');
+    return;
+  }
+  mod.saving = true;
+  try {
+    const res = await API.archive.saveAnalysisToNotes(mod.id, analysisId);
+    if (res.ok) {
+      alert('已存档到笔记库: ' + res.filePath);
+    } else {
+      alert('存档失败: ' + (res.error || '未知错误'));
+    }
+  } catch (e) {
+    alert('存档失败: ' + e);
+  }
+  mod.saving = false;
 }
 
-// ========== 记录 CRUD ==========
+// ========== 全量数据查看 ==========
+
+const fullViewVisible = ref(false);
+const fullViewMod = ref<ModuleData | null>(null);
+const fullViewDs = ref<DatasetData | null>(null);
+const fullViewRecords = ref<any[]>([]);
+const fullViewColumns = ref<string[]>([]);
+const fullViewKeyword = ref('');
+
+function openFullView(mod: ModuleData, ds: DatasetData) {
+  fullViewMod.value = mod;
+  fullViewDs.value = ds;
+  fullViewKeyword.value = '';
+  fullViewVisible.value = true;
+  loadFullViewRecords();
+}
+
+function closeFullView() {
+  fullViewVisible.value = false;
+  fullViewMod.value = null;
+  fullViewDs.value = null;
+  fullViewRecords.value = [];
+  fullViewColumns.value = [];
+}
+
+async function loadFullViewRecords() {
+  if (!fullViewDs.value || !API) return;
+  try {
+    const rows = await API.ds.query(fullViewDs.value.datasetId, fullViewKeyword.value || null);
+    fullViewRecords.value = rows;
+    fullViewColumns.value = buildRecordColumns(rows);
+  } catch (e) { console.error('加载记录失败:', e); fullViewRecords.value = []; fullViewColumns.value = []; }
+}
+
+// ========== 记录 CRUD（复用） ==========
 
 const showRecordModal = ref(false);
 const editingRecordId = ref('');
 const recordForm = ref<any>({ status: '进行中' });
 const recordFormFields = ref<string[]>([]);
+const recordStatusOptions = ref<string[]>(['待办', '进行中', '已完成']);
+const recordTypeOptions = ref<string[]>([]);
 
 const showDetailModal = ref(false);
 const viewingRecord = ref<any>(null);
+const viewingRecordFields = ref<string[]>([]);
 
 const showImportModalFlag = ref(false);
 const importType = ref('json');
 const importJsonData = ref('');
 const importUrl = ref('');
 
-const statusOptions = computed(() => {
-  const ds = selectedDs.value;
-  if (!ds) return ['待办', '进行中', '已完成'];
-  const schema = typeof ds.schema === 'string' ? JSON.parse(ds.schema) : ds.schema;
-  const opts = schema?.statusOptions;
-  return Array.isArray(opts) && opts.length ? opts : ['待办', '进行中', '已完成'];
-});
-
-const typeOptions = computed(() => {
-  const ds = selectedDs.value;
-  if (!ds) return [];
-  const schema = typeof ds.schema === 'string' ? JSON.parse(ds.schema) : ds.schema;
-  const opts = schema?.typeOptions;
-  return Array.isArray(opts) && opts.length ? opts : [];
-});
+let currentRecordDs: any = null;
 
 function getSchemaFields(ds: any) {
   if (!ds) return [];
@@ -455,23 +608,36 @@ function getSchemaFields(ds: any) {
   return (schema && schema.fields) || [];
 }
 
+function getSchemaOptions(ds: any, key: string) {
+  if (!ds) return [];
+  const schema = typeof ds.schema === 'string' ? JSON.parse(ds.schema) : ds.schema;
+  const opts = schema?.[key];
+  return Array.isArray(opts) && opts.length ? opts : [];
+}
+
 function showAddRecord() {
-  if (!selectedDs.value) return;
+  const ds = fullViewDs.value;
+  if (!ds) return;
+  currentRecordDs = ds;
   editingRecordId.value = '';
-  const schemaFields = getSchemaFields(selectedDs.value);
+  const schemaFields = getSchemaFields(ds);
   recordFormFields.value = schemaFields.map((f: any) => f.name || f.displayName).filter((f: string) => f !== 'status' && f !== 'id' && f !== 'type' && f !== '类型');
+  recordStatusOptions.value = [...getSchemaOptions(ds, 'statusOptions'), '待办', '进行中', '已完成'];
+  recordTypeOptions.value = getSchemaOptions(ds, 'typeOptions');
   const form: any = { status: '进行中' };
-  if (typeOptions.value.length) form.type = typeOptions.value[0];
+  if (recordTypeOptions.value.length) form.type = recordTypeOptions.value[0];
   recordFormFields.value.forEach((f: string) => { form[f] = ''; });
   recordForm.value = form;
   showRecordModal.value = true;
 }
 
-function editRecord(rec: any) {
-  if (!selectedDs.value) return;
+function editRecordPortal(mod: ModuleData, ds: DatasetData, rec: any) {
+  currentRecordDs = ds;
   editingRecordId.value = rec.id;
-  const schemaFields = getSchemaFields(selectedDs.value);
+  const schemaFields = getSchemaFields(ds);
   recordFormFields.value = schemaFields.map((f: any) => f.name || f.displayName).filter((f: string) => f !== 'status' && f !== 'id' && f !== 'type' && f !== '类型');
+  recordStatusOptions.value = [...getSchemaOptions(ds, 'statusOptions'), '待办', '进行中', '已完成'];
+  recordTypeOptions.value = getSchemaOptions(ds, 'typeOptions');
   const form: any = { status: rec.status || '', type: rec.type || '' };
   recordFormFields.value.forEach((f: string) => { form[f] = rec[f] || ''; });
   recordForm.value = form;
@@ -479,7 +645,8 @@ function editRecord(rec: any) {
 }
 
 async function saveRecord() {
-  if (!selectedDs.value || !API) return;
+  const ds = currentRecordDs || fullViewDs.value;
+  if (!ds || !API) return;
   const record: any = {};
   recordFormFields.value.forEach(f => { record[f] = recordForm.value[f] || ''; });
   if (recordForm.value.status) record.status = recordForm.value.status;
@@ -488,31 +655,45 @@ async function saveRecord() {
     if (editingRecordId.value) {
       await API.ds.updateRecord(editingRecordId.value, record);
     } else {
-      await API.ds.insert(selectedDs.value.dataset_id, record);
+      await API.ds.insert(ds.datasetId, record);
     }
     showRecordModal.value = false;
-    await loadRecords(currentPage.value);
-    await loadModules();
+    if (fullViewVisible.value) {
+      await loadFullViewRecords();
+    }
+    await loadAll();
   } catch (e) { console.error('保存记录失败:', e); }
 }
 
-async function deleteRecord(rec: any) {
-  if (!selectedDs.value || !confirm('确定删除这条记录？') || !API) return;
-  try { await API.ds.deleteRecord(rec.id); await loadRecords(currentPage.value); await loadModules(); }
-  catch (e) { console.error('删除记录失败:', e); }
+async function deleteRecordPortal(rec: any) {
+  if (!confirm('确定删除这条记录？') || !API) return;
+  try {
+    await API.ds.deleteRecord(rec.id);
+    if (fullViewVisible.value) {
+      await loadFullViewRecords();
+    }
+    await loadAll();
+  } catch (e) { console.error('删除记录失败:', e); }
 }
 
-function viewRecord(rec: any) {
+function viewRecordPortal(rec: any) {
   viewingRecord.value = rec;
+  viewingRecordFields.value = Object.keys(rec).filter(k => k !== 'id' && !k.startsWith('_'));
   showDetailModal.value = true;
 }
 
 function editFromDetail() {
-  if (viewingRecord.value) { showDetailModal.value = false; editRecord(viewingRecord.value); }
+  if (viewingRecord.value) {
+    const ds = fullViewDs.value;
+    if (ds) {
+      showDetailModal.value = false;
+      editRecordPortal(fullViewMod.value!, ds, viewingRecord.value);
+    }
+  }
 }
 
 function deleteFromDetail() {
-  if (viewingRecord.value) { showDetailModal.value = false; deleteRecord(viewingRecord.value); }
+  if (viewingRecord.value) { showDetailModal.value = false; deleteRecordPortal(viewingRecord.value); }
 }
 
 // ========== 导入 ==========
@@ -525,43 +706,62 @@ function showImportModal() {
 }
 
 async function doImport() {
-  if (!selectedDs.value || !API) { alert('请先选择数据集'); return; }
+  const ds = fullViewDs.value;
+  if (!ds || !API) { alert('请先选择数据集'); return; }
   try {
     if (importType.value === 'json') {
       if (!importJsonData.value.trim()) { alert('请输入JSON数据'); return; }
       let arr;
       try { arr = JSON.parse(importJsonData.value); if (!Array.isArray(arr)) throw 0; }
       catch (e) { alert('JSON格式错误，需要数组'); return; }
-      for (const item of arr) await API.ds.insert(selectedDs.value.dataset_id, item);
+      for (const item of arr) await API.ds.insert(ds.datasetId, item);
     } else {
       if (!importUrl.value.trim()) { alert('请输入URL'); return; }
       const r = await fetch(importUrl.value.trim());
       const data = await r.json();
       const arr = Array.isArray(data) ? data : [data];
-      for (const item of arr) await API.ds.insert(selectedDs.value.dataset_id, item);
+      for (const item of arr) await API.ds.insert(ds.datasetId, item);
     }
     showImportModalFlag.value = false;
     alert('导入完成');
-    await loadRecords(0);
-    await loadModules();
+    if (fullViewVisible.value) await loadFullViewRecords();
+    await loadAll();
   } catch (e) { console.error('导入失败:', e); alert('导入失败: ' + e); }
 }
 
-// ========== 持久化 ==========
+// ========== 工具函数 ==========
 
-async function restoreLastDataset(dsList: any[]) {
-  const lastId = localStorage.getItem('lastDatasetId');
-  if (!lastId) return;
-  const found = dsList.find((d: any) => (d.dataset_id || d.id) === lastId);
-  if (found) selectDataset(found);
+function buildRecordColumns(recs: any[]): string[] {
+  const cols = new Set<string>();
+  recs.forEach((r: any) => { Object.keys(r).forEach(k => { if (k !== 'id' && k !== '_created_at' && !k.startsWith('_')) cols.add(k); }); });
+  return Array.from(cols).slice(0, 8);
+}
+
+function getPreviewColumns(ds: DatasetData): string[] {
+  if (!ds.recentRecords || ds.recentRecords.length === 0) return [];
+  return buildRecordColumns(ds.recentRecords);
+}
+
+function truncateText(text: string, maxLen: number): string {
+  if (!text) return '';
+  return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
+}
+
+function formatDate(dateStr: string): string {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    return d.toISOString().slice(0, 10);
+  } catch { return dateStr.slice(0, 10); }
+}
+
+function renderMarkdown(text: string): string {
+  if (!text) return '';
+  try { return marked(text); } catch { return text; }
 }
 
 onMounted(async () => {
-  await loadModules();
-  if (modules.value.length) {
-    const allDs = modules.value.flatMap(m => m.dsList);
-    await restoreLastDataset(allDs);
-  }
+  await loadAll();
 });
 </script>
 
@@ -575,68 +775,138 @@ onMounted(async () => {
   flex-shrink: 0; background: white;
 }
 .content-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.split-panel { flex: 1; display: flex; overflow: hidden; }
-
-.left-panel {
-  width: 260px; min-width: 260px; border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; background: #fafbfc;
+.header-actions { display: flex; gap: 8px; }
+.content-body {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column;
 }
-.left-header {
-  padding: 10px 16px; font-size: 12px; font-weight: 600;
-  color: var(--text-muted); text-transform: uppercase;
-  border-bottom: 1px solid var(--border); background: white;
+.content-empty {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; color: var(--text-muted);
+}
+.empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+.empty-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.empty-desc { font-size: 13px; }
+
+/* Module Tabs */
+.module-tabs {
+  display: flex; gap: 0; padding: 0 20px; border-bottom: 1px solid var(--border);
+  background: white; flex-shrink: 0; overflow-x: auto;
+}
+.module-tab {
+  display: flex; align-items: center; gap: 6px; padding: 10px 16px;
+  font-size: 13px; font-weight: 500; cursor: pointer; border: none;
+  background: none; color: var(--text-secondary); white-space: nowrap;
+  border-bottom: 2px solid transparent; transition: all 0.2s;
+}
+.module-tab:hover { color: var(--text-primary); background: var(--hover); }
+.module-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-icon { font-size: 15px; }
+.tab-count {
+  font-size: 11px; background: rgba(0,0,0,0.06); padding: 0 6px;
+  border-radius: 8px; color: var(--text-muted);
+}
+.module-tab.active .tab-count { background: rgba(99,102,241,0.1); color: var(--primary); }
+
+/* Module Panel */
+.module-panel {
+  flex: 1; overflow: hidden; padding: 0;
+  display: flex; flex-direction: column;
+}
+.panel-header {
   display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  background: white; flex-shrink: 0;
 }
-.left-body { flex: 1; overflow-y: auto; padding: 4px 0; }
-.ds-item {
-  display: flex; align-items: center; gap: 6px; padding: 8px 16px;
-  cursor: pointer; font-size: 13px; border-radius: 0; margin: 0;
+.panel-title-area { display: flex; align-items: center; gap: 8px; }
+.panel-icon { font-size: 18px; }
+.panel-name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.panel-desc { font-size: 12px; color: var(--text-muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-actions { display: flex; align-items: center; gap: 8px; }
+.panel-meta { font-size: 12px; color: var(--text-muted); }
+.panel-btn {
+  background: none; border: none; cursor: pointer; font-size: 13px;
+  padding: 2px 5px; border-radius: 3px; color: var(--text-muted); line-height: 1;
 }
-.ds-item:hover { background: #e8eaed; }
-.ds-item.active { background: var(--primary); color: white; }
-.ds-item.active .ds-name { color: white; }
-.ds-item.active .ds-meta { color: rgba(255,255,255,0.6); }
-.ds-item.active .ds-actions { display: flex; }
-.ds-item.active .ds-btn { color: rgba(255,255,255,0.7); }
-.ds-item.active .ds-btn:hover { color: white; background: rgba(255,255,255,0.15); }
-.ds-item.active .ds-count { background: rgba(255,255,255,0.2); color: white; }
-.ds-icon { font-size: 14px; flex-shrink: 0; }
-.ds-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.ds-meta { font-size: 11px; color: var(--text-muted); margin-right: 4px; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ds-actions { display: none; gap: 2px; margin-right: 4px; flex-shrink: 0; }
-.ds-item:hover .ds-actions { display: flex; }
-.ds-btn { background: none; border: none; cursor: pointer; font-size: 12px; padding: 1px 3px; border-radius: 3px; color: var(--text-muted); line-height: 1; }
-.ds-btn:hover { background: var(--hover); color: var(--text-primary); }
-.ds-btn-danger:hover { color: #dc2626; }
-.ds-count { font-size: 11px; background: rgba(0,0,0,0.08); padding: 0 6px; border-radius: 8px; }
-.empty-hint { text-align: center; padding: 24px; font-size: 13px; color: var(--text-muted); }
+.panel-btn:hover { background: var(--hover); color: var(--text-primary); }
+.panel-btn-danger:hover { color: #dc2626; }
 
-.right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.tab-bar {
+/* Sub Tabs */
+.panel-subtabs {
   display: flex; gap: 0; padding: 0 20px; border-bottom: 1px solid var(--border);
   background: white; flex-shrink: 0;
 }
-.tab-btn {
-  background: none; border: none; padding: 10px 16px; font-size: 13px; cursor: pointer;
-  color: var(--text-secondary); border-bottom: 2px solid transparent; transition: all 0.2s;
-  border-radius: 0;
+.subtab {
+  padding: 10px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
+  border: none; background: none; color: var(--text-secondary);
+  border-bottom: 2px solid transparent; transition: all 0.2s;
 }
-.tab-btn:hover { color: var(--text-primary); background: var(--hover); }
-.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
-.tab-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-.ai-tab { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.ai-tab-header {
-  display: flex; align-items: center; justify-content: space-between; padding: 12px 20px;
-  border-bottom: 1px solid var(--border); background: white; flex-shrink: 0;
+.subtab:hover { color: var(--text-primary); background: var(--hover); }
+.subtab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+/* AI Section */
+.panel-ai-section { flex: 1; overflow-y: auto; }
+.ai-body { padding: 16px 20px; background: #f8faff; min-height: 200px; }
+.ai-loading { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; }
+.ai-text { font-size: 13px; line-height: 1.7; color: var(--text-primary); }
+.ai-text :deep(pre) { background: #f1f5f9; padding: 8px 12px; border-radius: var(--radius-sm); overflow-x: auto; font-size: 12px; }
+.ai-text :deep(code) { font-size: 12px; background: #f1f5f9; padding: 1px 4px; border-radius: 3px; }
+.ai-text :deep(h1) { font-size: 15px; margin: 12px 0 6px; }
+.ai-text :deep(h2) { font-size: 14px; margin: 10px 0 5px; }
+.ai-text :deep(h3) { font-size: 13px; margin: 8px 0 4px; }
+.ai-text :deep(p) { margin: 4px 0; }
+.ai-text :deep(ul) { padding-left: 18px; margin: 4px 0; }
+.ai-text :deep(li) { margin: 2px 0; }
+.ai-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.ai-empty { display: flex; align-items: center; gap: 12px; color: var(--text-muted); font-size: 13px; }
+
+/* Dataset Section */
+.panel-datasets { flex: 1; overflow-y: auto; }
+.dataset-section { border-bottom: 1px solid var(--border); }
+.dataset-section:last-child { border-bottom: none; }
+.dataset-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; background: white;
 }
-.ai-tab-header h3 { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.ai-tab-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: var(--text-muted); }
-.ai-tab-content { padding: 16px 20px; overflow-y: auto; flex: 1; font-size: 14px; line-height: 1.7; }
-.ai-tab-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: var(--text-muted); }
-.data-tab { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.right-toolbar {
-  display: flex; align-items: center; gap: 8px; padding: 12px 20px;
-  border-bottom: 1px solid var(--border); flex-wrap: wrap; background: white;
+.dataset-title-area { display: flex; align-items: center; gap: 6px; }
+.dataset-icon { font-size: 14px; }
+.dataset-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.dataset-count { font-size: 11px; color: var(--text-muted); }
+.dataset-actions { display: flex; align-items: center; gap: 6px; }
+.ds-btn {
+  background: none; border: none; cursor: pointer; font-size: 12px;
+  padding: 1px 4px; border-radius: 3px; color: var(--text-muted); line-height: 1;
+}
+.ds-btn:hover { color: var(--text-primary); }
+.ds-btn-danger:hover { color: #dc2626; }
+
+/* Preview Table */
+.preview-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+  margin: 0 16px 8px; width: calc(100% - 32px);
+}
+.preview-table th {
+  text-align: left; padding: 6px 10px; background: #f8fafc;
+  border-bottom: 1px solid var(--border); font-weight: 600;
+  color: var(--text-secondary); font-size: 11px;
+}
+.preview-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview-table tr:hover { background: var(--hover); }
+.th-actions { width: 60px; }
+.action-cell { white-space: nowrap; }
+.action-btn {
+  background: none; border: none; cursor: pointer; font-size: 11px;
+  color: var(--text-muted); padding: 1px 4px;
+}
+.action-btn:hover { color: var(--primary); }
+.action-btn.danger:hover { color: var(--danger); }
+.dataset-empty { padding: 8px 16px; font-size: 12px; color: var(--text-muted); }
+
+/* Full View Modal */
+.modal-box-wide { width: 90%; max-width: 1000px; }
+.modal-header-actions { display: flex; align-items: center; gap: 8px; }
+.modal-badge { font-size: 12px; color: var(--text-muted); background: #f5f5f7; padding: 2px 8px; border-radius: 10px; }
+.fullview-toolbar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
 }
 .search-box { position: relative; flex: 1; min-width: 160px; max-width: 260px; }
 .search-box input {
@@ -644,6 +914,8 @@ onMounted(async () => {
   border-radius: var(--radius-sm); font-size: 13px; outline: none;
 }
 .search-box input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+
+/* Data Table (full view) */
 .data-table {
   width: 100%; border-collapse: collapse; font-size: 13px;
   background: white; border-spacing: 0;
@@ -655,30 +927,8 @@ onMounted(async () => {
 }
 .data-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .data-table tr:hover { background: var(--hover); }
-.action-cell { white-space: nowrap; }
-.action-btn {
-  background: none; border: none; cursor: pointer; font-size: 12px;
-  color: var(--text-muted); padding: 2px 6px;
-}
-.action-btn:hover { color: var(--primary); }
-.action-btn.danger:hover { color: var(--danger); }
-.right-empty {
-  flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; color: var(--text-muted);
-}
-.empty-icon { font-size: 40px; margin-bottom: 8px; opacity: 0.4; }
-.empty-title { font-size: 14px; margin-bottom: 12px; }
 
-.detail-row {
-  display: flex; justify-content: space-between; padding: 8px 0;
-  border-bottom: 1px solid var(--border);
-}
-.detail-row:last-child { border-bottom: none; }
-.detail-row .label { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
-.detail-row .value { font-size: 13px; color: var(--text-primary); }
-
-.import-type-btns { display: flex; gap: 8px; }
-
+/* Modals */
 .modal-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.5); display: flex;
@@ -700,7 +950,6 @@ onMounted(async () => {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
 }
 .form-group { margin-bottom: 12px; }
-.module-row { display: flex; gap: 6px; align-items: center; }
 .form-group label {
   display: block; font-size: 12px; font-weight: 500;
   color: var(--text-secondary); margin-bottom: 5px;
@@ -712,10 +961,29 @@ onMounted(async () => {
 }
 .form-control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
 textarea.form-control { resize: vertical; font-family: inherit; }
-
+.detail-row {
+  display: flex; justify-content: space-between; padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.detail-row:last-child { border-bottom: none; }
+.detail-row .label { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+.detail-row .value { font-size: 13px; color: var(--text-primary); }
+.import-type-btns { display: flex; gap: 8px; }
+.right-empty {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; color: var(--text-muted);
+  padding: 40px 0;
+}
 .badge {
   display: inline-flex; align-items: center; padding: 2px 8px;
   border-radius: 20px; font-size: 12px; font-weight: 500;
 }
 .badge-gray { background: #f5f5f7; color: #909296; }
+
+.spinner {
+  width: 16px; height: 16px; border: 2px solid var(--border);
+  border-top-color: var(--primary); border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
