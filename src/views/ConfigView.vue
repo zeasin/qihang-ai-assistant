@@ -118,6 +118,15 @@
       <div class="card">
         <h2>💾 数据备份与恢复</h2>
         <div class="text-muted mb-2">备份数据库快照（含全部对话、数据集、待办、提醒等）。恢复前请先手动备份，恢复后需重启应用生效。</div>
+        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px;">
+          <div class="form-group" style="flex:1;min-width:300px;margin:0;">
+            <label style="font-size:12px;">备份目录（建议选择其他盘符）</label>
+            <div class="input-with-btn">
+              <input v-model="backupDir" type="text" class="form-control" placeholder="默认 ~/.qihang-work-ai/backups" readonly>
+              <button class="btn btn-secondary" @click="pickBackupDir">选择</button>
+            </div>
+          </div>
+        </div>
         <div class="flex" style="gap:8px;flex-wrap:wrap;margin-bottom:12px;">
           <button class="btn btn-primary" @click="createBackup" :disabled="backupBusy">{{ backupBusy ? '备份中...' : '一键备份' }}</button>
           <button class="btn btn-secondary" @click="restoreBackup">从备份恢复...</button>
@@ -238,6 +247,7 @@ const backupStatus = ref('');
 const backupList = ref<any[]>([]);
 const autoBackupEnabled = ref(false);
 const backupRetention = ref('30');
+const backupDir = ref('');
 
 async function loadBackups() {
   try { backupList.value = await API.backup.list(); } catch { backupList.value = []; }
@@ -248,7 +258,24 @@ async function loadAutoBackup() {
     const s = await API.backup.autoStatus();
     autoBackupEnabled.value = !!s.enabled;
     backupRetention.value = String(s.retention || 30);
+    backupDir.value = s.dir || '';
   } catch {}
+}
+
+async function pickBackupDir() {
+  try {
+    const dir = await API.backup.pickDir();
+    if (!dir) return;
+    const res = await API.backup.setDir(dir);
+    if (res.ok) {
+      backupDir.value = res.dir || dir;
+      backupStatus.value = `✅ 备份目录已设置为: ${dir}`;
+      await loadBackups();
+      setTimeout(() => { if (backupStatus.value.startsWith('✅')) backupStatus.value = ''; }, 5000);
+    } else {
+      backupStatus.value = '❌ ' + (res.error || '设置失败');
+    }
+  } catch (e: any) { backupStatus.value = '❌ ' + (e.message || '设置失败'); }
 }
 
 function formatSize(size: number): string {

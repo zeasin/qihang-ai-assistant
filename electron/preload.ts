@@ -87,6 +87,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pickFile: () => ipcRenderer.invoke('backup:pickFile'),
     deleteFile: (file: string) => ipcRenderer.invoke('backup:deleteFile', { file }),
     openDir: (dir?: string) => ipcRenderer.invoke('backup:openDir', { dir }),
+    setDir: (dir: string) => ipcRenderer.invoke('backup:setDir', { dir }),
+    pickDir: () => ipcRenderer.invoke('backup:pickDir'),
   },
 
   // Chat (unified: general chat + coding workbench)

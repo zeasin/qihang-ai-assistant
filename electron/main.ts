@@ -694,8 +694,21 @@ ipcMain.handle('backup:auto:set', (_, { enabled }) => {
 ipcMain.handle('backup:auto:status', () => ({
   enabled: backup.isAutoBackupEnabled(),
   retention: backup.getAutoRetention(),
-  dir: require('path').join(require('os').homedir(), '.qihang-work-ai', 'backups'),
+  dir: backup.getBackupDir(),
 }));
+ipcMain.handle('backup:setDir', (_, { dir }) => {
+  try {
+    backup.setBackupDir(dir || '');
+    return { ok: true, dir: backup.getBackupDir() };
+  } catch (e: any) { return { ok: false, error: e && e.message ? e.message : String(e) }; }
+});
+ipcMain.handle('backup:pickDir', async () => {
+  const res = await dialog.showOpenDialog(mainWindow!, {
+    title: '选择备份目录',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  return res.canceled || !res.filePaths.length ? null : res.filePaths[0];
+});
 ipcMain.handle('backup:pickFile', async () => {
   const res = await dialog.showOpenDialog(mainWindow!, {
     title: '选择备份文件',
@@ -706,7 +719,7 @@ ipcMain.handle('backup:pickFile', async () => {
 });
 ipcMain.handle('backup:deleteFile', async (_, { file }) => {
   try {
-    const homeBackupDir = path.join(require('os').homedir(), '.qihang-work-ai', 'backups');
+    const homeBackupDir = backup.getBackupDir();
     const normalized = path.resolve(file || '');
     if (!normalized.startsWith(homeBackupDir)) return { ok: false, error: '只允许删除备份目录内的文件' };
     if (fs.existsSync(normalized)) fs.unlinkSync(normalized);
@@ -715,7 +728,7 @@ ipcMain.handle('backup:deleteFile', async (_, { file }) => {
 });
 ipcMain.handle('backup:openDir', async (_, { dir }) => {
   try {
-    const d = dir || path.join(require('os').homedir(), '.qihang-work-ai', 'backups');
+    const d = dir || backup.getBackupDir();
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
     const { shell } = require('electron');
     shell.openPath(d);

@@ -18,6 +18,25 @@ const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 运行期间每 1 小时检查一�
 let autoTimer: NodeJS.Timeout | null = null;
 let autoEnabled = true;
 
+/** 备份目录：优先读 config.json 的 backupDir，否则默认 ~/.qihang-work-ai/backups */
+export function getBackupDir(): string {
+  try {
+    const cfg = require('./app-config');
+    const d = cfg.getConfig('backupDir');
+    if (d) return d;
+  } catch {}
+  return BACKUP_DIR;
+}
+
+/** 保存备份目录到 config.json */
+export function setBackupDir(dir: string): void {
+  try {
+    const cfg = require('./app-config');
+    cfg.saveConfig({ backupDir: dir || null });
+    if (dir && !fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch {}
+}
+
 function dbPath(): string {
   const db = getDb();
   const name = db.name;
@@ -35,7 +54,7 @@ export function backupFileName(d = new Date()): string {
  * @param targetDir 备份目录，默认 ~/.qihang-work-ai/backups
  */
 export async function createBackup(targetDir?: string): Promise<{ path: string; size: number }> {
-  const dir = targetDir || BACKUP_DIR;
+  const dir = targetDir || getBackupDir();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, backupFileName());
   const db = getDb();
@@ -47,7 +66,7 @@ export async function createBackup(targetDir?: string): Promise<{ path: string; 
 
 /** 列出备份目录中的备份文件（按时间倒序） */
 export function listBackups(dir?: string): { path: string; name: string; size: number; createdAt: string }[] {
-  const d = dir || BACKUP_DIR;
+  const d = dir || getBackupDir();
   if (!fs.existsSync(d)) return [];
   try {
     return fs.readdirSync(d)
@@ -66,7 +85,7 @@ export function listBackups(dir?: string): { path: string; name: string; size: n
 
 /** 清理旧备份，仅保留最近 N 份 */
 export function pruneBackups(retention: number, dir?: string): number {
-  const d = dir || BACKUP_DIR;
+  const d = dir || getBackupDir();
   const list = listBackups(d);
   if (list.length <= retention) return 0;
   let removed = 0;
