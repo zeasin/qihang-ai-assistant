@@ -80,7 +80,7 @@
           <thead><tr><th>菜单</th><th>说明</th></tr></thead>
           <tbody>
           <tr><td>💬 对话</td><td>AI 对话工作台，支持多轮对话、图片识别、模型切换，pi agent 驱动</td></tr>
-          <tr><td>💻 编程</td><td>代码项目工作台，管理项目文件树，基于项目的 AI 编程对话</td></tr>
+          <tr><td>💻 编程</td><td>代码项目工作台，基于项目的 AI 编程对话；代码任务在隔离 worktree 中执行，可在会话内审查/合并/提交改动</td></tr>
           <tr><td>📁 知识库</td><td>文件浏览 + 概览看板（统计、日报、待办、提醒、索引管理）</td></tr>
           <tr><td>🗃️ 数据</td><td>多数据集管理，自定义 Schema，JSON/URL 批量导入</td></tr>
           <tr><td>🔔 任务</td><td>待办看板 + 定时提醒统一管理</td></tr>
@@ -129,6 +129,28 @@
           </tbody>
         </table>
         <p class="text-muted">对话模型通过 pi agent 配置（终端运行 <code>pi</code> 命令设置），支持 DeepSeek、OpenAI 兼容接口、Ollama 本地模型等。</p>
+      </div>
+
+      <div class="card card-feishu">
+        <h2>💻 飞书编程指令</h2>
+        <p class="text-muted mb-2">配置飞书 Bot 后，可在飞书里直接给 AI 下发编程任务。AI 会在 <strong>Git worktree 隔离目录</strong>中执行，<strong>绝不改动你的原项目目录</strong>；改动的代码可在「编程」页审查、合并、提交或丢弃。</p>
+        <table class="help-table">
+          <thead><tr><th>指令</th><th>说明</th></tr></thead>
+          <tbody>
+          <tr><td><code>列出项目</code></td><td>列出所有已配置的代码项目（类型为「代码库」）</td></tr>
+          <tr><td><code>切换到 项目名或序号</code></td><td>绑定当前要操作的代码项目，后续消息默认在该项目执行</td></tr>
+          <tr><td><code>/code：项目名或序号 任务</code></td><td>明确指定项目并下发编程任务（也支持 <code>code：</code> 前缀）</td></tr>
+          <tr><td><code>查代码：问题</code></td><td>在已绑定/识别到的代码项目中排查问题</td></tr>
+          <tr><td>消息里直接带项目名</td><td>自动识别消息中包含的项目名并路由到编程任务</td></tr>
+          </tbody>
+        </table>
+        <div class="tip">
+          <strong>示例</strong>：
+          <pre class="code-block">列出项目
+切换到 启航工作台
+/code：启航工作台 修复登录接口的超时问题</pre>
+        </div>
+        <p class="text-muted" style="margin-top:8px;">提示：<code>/code</code> 前缀是<strong>明确编程指令</strong>，与知识库问答互不干扰；只发 <code>/code：项目名</code>（不带任务）会提示补全任务内容。</p>
       </div>
 
       <div class="card">
@@ -309,6 +331,11 @@
 .card-prereq {
   border-color: var(--primary);
   background: linear-gradient(135deg, #fafaff 0%, #f5f3ff 100%);
+}
+
+.card-feishu {
+  border-color: #bbd7fb;
+  background: linear-gradient(135deg, #f8fbff 0%, #f0f7ff 100%);
 }
 
 .prereq-item {
