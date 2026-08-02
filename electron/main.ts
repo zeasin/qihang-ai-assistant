@@ -38,6 +38,7 @@ import { runPi, listPiModels, generateDailyReport as piGenerateDailyReport } fro
 import { buildNoteToolDefs, buildDataToolDefs, buildCodingToolDefs } from './services/tools';
 import { initCodingTasks, isCodingMessage, handleFeishuCodingMessage, getWorktreeService, listCodingProjects, collectSessionChanges, applySessionChanges, commitSessionChanges, abortSessionChanges, discardSessionChanges, latestCodingSessions } from './services/coding-task';
 import * as aitool from './services/ai-tools';
+import { listBuiltinSuites, applyBuiltinSuites } from './services/builtin-datasets';
 import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
 import * as indexer from './services/indexer';
@@ -670,6 +671,8 @@ ipcMain.handle('ds:insert', (_, { datasetId, data }) => db.ds.insert(datasetId, 
 ipcMain.handle('ds:updateRecord', (_, { id, data }) => db.ds.updateRecord(id, data));
 ipcMain.handle('ds:deleteRecord', (_, { id }) => db.ds.deleteRecord(id));
 ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
+ipcMain.handle('ds:suites:list', () => listBuiltinSuites());
+ipcMain.handle('ds:suites:apply', (_, { ids }) => applyBuiltinSuites(ids || []));
 ipcMain.handle('ds:pendingRecords', () => {
   const datasets = db.q("SELECT dataset_id, name FROM data_center_datasets ORDER BY name");
   const result: any[] = [];

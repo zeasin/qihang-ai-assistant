@@ -70,6 +70,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pendingRecords: () => ipcRenderer.invoke('ds:pendingRecords'),
   },
 
+  // Builtin dataset suites
+  suites: {
+    list: () => ipcRenderer.invoke('ds:suites:list'),
+    apply: (ids: string[]) => ipcRenderer.invoke('ds:suites:apply', { ids }),
+  },
+
   // Chat (unified: general chat + coding workbench)
   chat: {
     send: (question: string, sessionId: string, projectDir: string, kbIds: number[], images: unknown, agent: string, modelName: string) =>

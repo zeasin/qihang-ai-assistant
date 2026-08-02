@@ -3,8 +3,7 @@
     <div class="content-header">
       <h1 class="content-title">数据</h1>
       <div class="header-actions">
-        <button class="btn btn-sm btn-secondary" @click="showAddModule">+ 模块</button>
-        <button class="btn btn-sm btn-primary" @click="showAddDataset">+ 数据集</button>
+        <button class="btn btn-sm btn-secondary" @click="showSuitesModal">📦 内置模板</button>
       </div>
     </div>
 
@@ -114,7 +113,62 @@
     <div v-else class="content-empty">
       <div class="empty-icon">📋</div>
       <div class="empty-title">暂无数据模块</div>
-      <div class="empty-desc">点击上方「+ 模块」创建第一个数据模块，然后添加数据集</div>
+      <div class="empty-desc">选择一套或多套内置模板，一键初始化完整的数据模块；也可以手动点击「+ 模块」创建</div>
+      <div class="suite-grid">
+        <div
+          v-for="s in suites"
+          :key="s.id"
+          class="suite-card"
+          :class="{ selected: selectedSuiteIds.includes(s.id) }"
+          @click="toggleSuite(s.id)"
+        >
+          <div class="suite-check">✓</div>
+          <div class="suite-icon">{{ s.icon }}</div>
+          <div class="suite-name">{{ s.name }}</div>
+          <div class="suite-desc">{{ s.description }}</div>
+          <div class="suite-meta">{{ s.datasetCount }} 个数据集 · {{ s.sampleCount }} 条示例数据</div>
+        </div>
+      </div>
+      <div class="empty-actions">
+        <button class="btn btn-primary" @click="applySelectedSuites" :disabled="selectedSuiteIds.length === 0">
+          初始化所选（{{ selectedSuiteIds.length }} 套）
+        </button>
+      </div>
+    </div>
+
+    <!-- 内置模板弹窗 -->
+    <div v-if="showSuitesModalFlag" class="modal-overlay" @click="showSuitesModalFlag = false">
+      <div class="modal-box modal-box-wide" @click.stop>
+        <div class="modal-header">
+          <h3>📦 内置数据集模板</h3>
+          <button class="btn btn-secondary" @click="showSuitesModalFlag = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="suite-grid">
+            <div
+              v-for="s in suites"
+              :key="s.id"
+              class="suite-card"
+              :class="{ selected: selectedSuiteIds.includes(s.id), installed: installedSuiteIds().includes(s.id) }"
+              @click="toggleSuite(s.id)"
+            >
+              <div class="suite-check">✓</div>
+              <div class="suite-icon">{{ s.icon }}</div>
+              <div class="suite-name">{{ s.name }}</div>
+              <div class="suite-desc">{{ s.description }}</div>
+              <div class="suite-meta">{{ s.datasetCount }} 个数据集 · {{ s.sampleCount }} 条示例数据</div>
+              <div class="suite-badge" v-if="installedSuiteIds().includes(s.id)">已安装</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="footer-hint">已安装的模板可再次点击跳过</span>
+          <button class="btn btn-secondary" @click="showSuitesModalFlag = false">取消</button>
+          <button class="btn btn-primary" @click="applySelectedSuites" :disabled="selectedSuiteIds.length === 0">
+            初始化所选（{{ selectedSuiteIds.length }} 套）
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 全量数据查看模态框 -->
@@ -391,6 +445,64 @@ async function loadAll() {
       ensureAiAnalysis(result[0]);
     }
   } catch (e) { console.error('加载模块数据失败:', e); }
+}
+
+// ========== 内置模板 ==========
+
+interface SuiteInfo {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  datasetCount: number;
+  sampleCount: number;
+  moduleIds: string[];
+}
+
+const suites = ref<SuiteInfo[]>([]);
+const selectedSuiteIds = ref<string[]>([]);
+const showSuitesModalFlag = ref(false);
+
+async function loadSuites() {
+  if (!API) return;
+  try {
+    const list = await API.suites.list();
+    suites.value = list.map((s: any) => ({
+      id: s.id, name: s.name, icon: s.icon, description: s.description,
+      datasetCount: s.datasetCount, sampleCount: s.sampleCount,
+      moduleIds: (s.modules || []).map((m: any) => m.moduleId),
+    }));
+  } catch (e) { console.error('加载内置模板失败:', e); }
+}
+
+function showSuitesModal() {
+  showSuitesModalFlag.value = true;
+}
+
+function toggleSuite(id: string) {
+  const i = selectedSuiteIds.value.indexOf(id);
+  if (i >= 0) selectedSuiteIds.value.splice(i, 1);
+  else selectedSuiteIds.value.push(id);
+}
+
+function installedSuiteIds() {
+  const installed: string[] = [];
+  const modIds = new Set(modules.value.map((m: any) => m.id));
+  suites.value.forEach((s: any) => {
+    if (s.moduleIds.some((mid: string) => modIds.has(mid))) installed.push(s.id);
+  });
+  return installed;
+}
+
+async function applySelectedSuites() {
+  if (!API || selectedSuiteIds.value.length === 0) return;
+  try {
+    const res = await API.suites.apply(selectedSuiteIds.value);
+    showSuitesModalFlag.value = false;
+    selectedSuiteIds.value = [];
+    await loadAll();
+    alert(`初始化完成：${res.applied?.length || 0} 个模块已创建${res.skipped?.length ? `，${res.skipped.length} 个已存在已跳过` : ''}${res.failed?.length ? `，${res.failed.length} 个失败` : ''}`);
+  } catch (e) { console.error('初始化内置模板失败:', e); alert('初始化失败: ' + e); }
 }
 
 // ========== 模块管理 ==========
@@ -776,6 +888,7 @@ function renderMarkdown(text: string): string {
 
 onMounted(async () => {
   await loadAll();
+  await loadSuites();
   // 工具箱跳转：?action=import 自动打开导入弹窗
   if (route.query.action === 'import') showImportModal();
 });
@@ -802,6 +915,38 @@ onMounted(async () => {
 .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
 .empty-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
 .empty-desc { font-size: 13px; }
+.suite-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px; width: 100%; max-width: 900px;
+  margin-top: 20px;
+}
+.suite-card {
+  position: relative; border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 16px; cursor: pointer;
+  background: white; text-align: left; transition: all 0.2s;
+}
+.suite-card:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(99,102,241,0.12); }
+.suite-card.selected { border-color: var(--primary); background: #f8faff; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+.suite-check {
+  position: absolute; top: 10px; right: 10px;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1px solid var(--border); background: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: transparent;
+}
+.suite-card.selected .suite-check { background: var(--primary); border-color: var(--primary); color: white; }
+.suite-icon { font-size: 22px; margin-bottom: 6px; }
+.suite-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.suite-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.5; }
+.suite-meta { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+.suite-badge {
+  position: absolute; top: 10px; left: 10px;
+  font-size: 11px; color: #fff; background: #10b981;
+  padding: 1px 8px; border-radius: 10px;
+}
+.suite-card.installed { opacity: 0.55; cursor: default; }
+.empty-actions { margin-top: 20px; }
+.footer-hint { font-size: 12px; color: var(--text-muted); margin-right: auto; }
 
 /* ---- Sidebar ---- */
 .module-sidebar {
