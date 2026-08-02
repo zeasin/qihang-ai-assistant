@@ -39,6 +39,7 @@ import { buildNoteToolDefs, buildDataToolDefs, buildCodingToolDefs } from './ser
 import { initCodingTasks, isCodingMessage, handleFeishuCodingMessage, getWorktreeService, listCodingProjects, collectSessionChanges, applySessionChanges, commitSessionChanges, abortSessionChanges, discardSessionChanges, latestCodingSessions } from './services/coding-task';
 import * as aitool from './services/ai-tools';
 import { listBuiltinSuites, applyBuiltinSuites } from './services/builtin-datasets';
+import * as backup from './services/backup';
 import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
 import * as indexer from './services/indexer';
@@ -673,6 +674,54 @@ ipcMain.handle('ds:deleteRecord', (_, { id }) => db.ds.deleteRecord(id));
 ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
 ipcMain.handle('ds:suites:list', () => listBuiltinSuites());
 ipcMain.handle('ds:suites:apply', (_, { ids }) => applyBuiltinSuites(ids || []));
+
+// --- Backup / Restore ---
+ipcMain.handle('backup:create', async (_, { dir }) => {
+  try { return { ok: true, ...(await backup.createBackup(dir || undefined)) }; }
+  catch (e: any) { return { ok: false, error: e && e.message ? e.message : String(e) }; }
+});
+ipcMain.handle('backup:list', () => backup.listBackups());
+ipcMain.handle('backup:restore', async (_, { file }) => backup.restoreFromBackup(file || ''));
+ipcMain.handle('backup:prune', async (_, { retention }) => {
+  try { return { ok: true, removed: backup.pruneBackups(retention || 30) }; }
+  catch (e: any) { return { ok: false, error: e && e.message ? e.message : String(e) }; }
+});
+ipcMain.handle('backup:auto:set', (_, { enabled }) => {
+  appConfig.saveConfig({ autoBackupEnabled: enabled ? '1' : '0' });
+  if (enabled) backup.startAutoBackup(); else backup.stopAutoBackup();
+  return { ok: true, enabled: !!enabled };
+});
+ipcMain.handle('backup:auto:status', () => ({
+  enabled: backup.isAutoBackupEnabled(),
+  retention: backup.getAutoRetention(),
+  dir: require('path').join(require('os').homedir(), '.qihang-work-ai', 'backups'),
+}));
+ipcMain.handle('backup:pickFile', async () => {
+  const res = await dialog.showOpenDialog(mainWindow!, {
+    title: '选择备份文件',
+    properties: ['openFile'],
+    filters: [{ name: '备份文件', extensions: ['db'] }],
+  });
+  return res.canceled || !res.filePaths.length ? null : res.filePaths[0];
+});
+ipcMain.handle('backup:deleteFile', async (_, { file }) => {
+  try {
+    const homeBackupDir = path.join(require('os').homedir(), '.qihang-work-ai', 'backups');
+    const normalized = path.resolve(file || '');
+    if (!normalized.startsWith(homeBackupDir)) return { ok: false, error: '只允许删除备份目录内的文件' };
+    if (fs.existsSync(normalized)) fs.unlinkSync(normalized);
+    return { ok: true };
+  } catch (e: any) { return { ok: false, error: e && e.message ? e.message : String(e) }; }
+});
+ipcMain.handle('backup:openDir', async (_, { dir }) => {
+  try {
+    const d = dir || path.join(require('os').homedir(), '.qihang-work-ai', 'backups');
+    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+    const { shell } = require('electron');
+    shell.openPath(d);
+    return { ok: true };
+  } catch (e: any) { return { ok: false, error: e && e.message ? e.message : String(e) }; }
+});
 ipcMain.handle('ds:pendingRecords', () => {
   const datasets = db.q("SELECT dataset_id, name FROM data_center_datasets ORDER BY name");
   const result: any[] = [];
@@ -1559,6 +1608,7 @@ app.whenReady().then(async () => {
   }
 
   scheduler.start();
+  backup.startAutoBackup();
   startupElapsed('services started');
 
   updateTrayMenu(getServicesStatus());
@@ -1619,6 +1669,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   (app as any).isQuitting = true;
+  backup.stopAutoBackup();
   stopAllServices();
   db.close();
 });

@@ -114,6 +114,38 @@
         <span v-if="feishuStatus" class="text-muted" :style="{ color: feishuStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ feishuStatus }}</span>
       </div>
 
+      <!-- Backup / Restore -->
+      <div class="card">
+        <h2>💾 数据备份与恢复</h2>
+        <div class="text-muted mb-2">备份数据库快照（含全部对话、数据集、待办、提醒等）。恢复前请先手动备份，恢复后需重启应用生效。</div>
+        <div class="flex" style="gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+          <button class="btn btn-primary" @click="createBackup" :disabled="backupBusy">{{ backupBusy ? '备份中...' : '一键备份' }}</button>
+          <button class="btn btn-secondary" @click="restoreBackup">从备份恢复...</button>
+          <button class="btn btn-secondary" @click="openBackupDir">打开备份目录</button>
+        </div>
+        <div class="flex" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <label class="toggle" title="应用运行期间每小时检查一次，距上次备份超过 24 小时自动补一份">
+            <input type="checkbox" v-model="autoBackupEnabled" @change="saveAutoBackup">
+            <span class="slider"></span>
+          </label>
+          <span class="text-muted">自动备份（运行期间，距上次超 24 小时自动补一份）</span>
+          <div class="form-group" style="margin:0 0 0 16px;display:flex;align-items:center;gap:6px;">
+            <label style="font-size:12px;margin:0;">保留份数</label>
+            <input v-model="backupRetention" type="number" min="1" max="365" class="form-control" style="width:80px;" @change="saveAutoBackup">
+          </div>
+        </div>
+        <span v-if="backupStatus" class="text-muted" :style="{ color: backupStatus.startsWith('✅') ? '#22c55e' : backupStatus.startsWith('⏳') ? '#f59e0b' : '#ef4444' }">{{ backupStatus }}</span>
+        <div v-if="backupList.length" class="backup-list">
+          <div class="backup-item" v-for="b in backupList" :key="b.path">
+            <span class="backup-name">{{ b.name }}</span>
+            <span class="backup-size">{{ formatSize(b.size) }}</span>
+            <span class="backup-time">{{ formatTime(b.createdAt) }}</span>
+            <button class="btn btn-sm btn-secondary" @click="restoreBackupFile(b)">恢复</button>
+            <button class="btn btn-sm btn-danger" @click="deleteBackup(b)">删除</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Report Settings -->
       <div class="card">
         <h2>📊 综合日报设置</h2>
@@ -199,6 +231,107 @@ const embeddingApiKey = ref('');
 const embeddingStatus = ref('');
 const notesDir = ref('');
 const notesDirStatus = ref('');
+
+// Backup
+const backupBusy = ref(false);
+const backupStatus = ref('');
+const backupList = ref<any[]>([]);
+const autoBackupEnabled = ref(false);
+const backupRetention = ref('30');
+
+async function loadBackups() {
+  try { backupList.value = await API.backup.list(); } catch { backupList.value = []; }
+}
+
+async function loadAutoBackup() {
+  try {
+    const s = await API.backup.autoStatus();
+    autoBackupEnabled.value = !!s.enabled;
+    backupRetention.value = String(s.retention || 30);
+  } catch {}
+}
+
+function formatSize(size: number): string {
+  if (!size) return '0 B';
+  if (size < 1024) return size + ' B';
+  if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
+  return (size / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function formatTime(iso: string): string {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString('zh-CN', { hour12: false });
+  } catch { return iso; }
+}
+
+async function createBackup() {
+  backupBusy.value = true;
+  backupStatus.value = '⏳ 正在备份...';
+  try {
+    const res = await API.backup.create();
+    if (res.ok) {
+      backupStatus.value = `✅ 备份完成: ${res.path}`;
+      await loadBackups();
+    } else {
+      backupStatus.value = '❌ ' + (res.error || '备份失败');
+    }
+  } catch (e: any) { backupStatus.value = '❌ ' + (e.message || '备份失败'); }
+  backupBusy.value = false;
+  setTimeout(() => { if (backupStatus.value.startsWith('✅')) backupStatus.value = ''; }, 6000);
+}
+
+async function restoreBackup() {
+  try {
+    const file = await API.backup.pickFile();
+    if (!file) return;
+    if (!confirm('恢复会替换当前全部数据，且需要重启应用。确定继续？')) return;
+    const res = await API.backup.restore(file);
+    if (res.ok) {
+      alert('✅ 恢复成功，请重启应用生效');
+    } else {
+      alert('❌ 恢复失败: ' + (res.error || '未知错误'));
+    }
+  } catch (e: any) { alert('❌ 恢复失败: ' + (e.message || e)); }
+}
+
+async function restoreBackupFile(b: any) {
+  if (!confirm(`从备份「${b.name}」恢复？\n将替换当前全部数据，且需要重启应用。`)) return;
+  try {
+    const res = await API.backup.restore(b.path);
+    if (res.ok) {
+      alert('✅ 恢复成功，请重启应用生效');
+    } else {
+      alert('❌ 恢复失败: ' + (res.error || '未知错误'));
+    }
+  } catch (e: any) { alert('❌ 恢复失败: ' + (e.message || e)); }
+}
+
+async function deleteBackup(b: any) {
+  if (!confirm(`删除备份「${b.name}」？`)) return;
+  try {
+    const res = await API.backup.deleteFile(b.path);
+    if (!res.ok) alert('❌ 删除失败: ' + (res.error || '未知错误'));
+    await loadBackups();
+  } catch (e: any) { alert('❌ 删除失败: ' + (e.message || e)); }
+}
+
+async function saveAutoBackup() {
+  try {
+    await API.config.set({ autoBackupEnabled: autoBackupEnabled.value ? '1' : '0', backupRetention: backupRetention.value || '30' });
+    await API.backup.setAuto(autoBackupEnabled.value);
+    backupStatus.value = autoBackupEnabled.value ? '✅ 自动备份已开启' : '✅ 自动备份已关闭';
+    setTimeout(() => { if (backupStatus.value.startsWith('✅')) backupStatus.value = ''; }, 3000);
+  } catch (e: any) { backupStatus.value = '❌ ' + (e.message || '保存失败'); }
+}
+
+async function openBackupDir() {
+  try {
+    const s = await API.backup.autoStatus();
+    await API.backup.openDir(s.dir);
+  } catch {}
+}
 
 
 async function loadProjects() {
@@ -394,6 +527,8 @@ onMounted(async () => {
   await loadProjects();
   await loadNotesDir();
   await loadSchedulerStatus();
+  await loadBackups();
+  await loadAutoBackup();
   try {
     const svc = await API.service.status();
     feishuRunning.value = svc.feishu;
@@ -535,4 +670,11 @@ onBeforeUnmount(() => {});
 .toggle input:checked + .slider::before { transform: translateX(16px); }
 
 .task-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+
+.backup-list { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.backup-item { display: flex; align-items: center; gap: 10px; padding: 6px 4px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.backup-item:last-child { border-bottom: none; }
+.backup-name { flex: 1; font-family: 'SF Mono', 'Consolas', monospace; font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backup-size { font-size: 12px; color: var(--text-muted); min-width: 60px; text-align: right; }
+.backup-time { font-size: 12px; color: var(--text-muted); min-width: 140px; }
 </style>

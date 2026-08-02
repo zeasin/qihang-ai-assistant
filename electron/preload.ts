@@ -76,6 +76,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     apply: (ids: string[]) => ipcRenderer.invoke('ds:suites:apply', { ids }),
   },
 
+  // Backup / Restore
+  backup: {
+    create: (dir?: string) => ipcRenderer.invoke('backup:create', { dir }),
+    list: () => ipcRenderer.invoke('backup:list'),
+    restore: (file: string) => ipcRenderer.invoke('backup:restore', { file }),
+    prune: (retention: number) => ipcRenderer.invoke('backup:prune', { retention }),
+    setAuto: (enabled: boolean) => ipcRenderer.invoke('backup:auto:set', { enabled }),
+    autoStatus: () => ipcRenderer.invoke('backup:auto:status'),
+    pickFile: () => ipcRenderer.invoke('backup:pickFile'),
+    deleteFile: (file: string) => ipcRenderer.invoke('backup:deleteFile', { file }),
+    openDir: (dir?: string) => ipcRenderer.invoke('backup:openDir', { dir }),
+  },
+
   // Chat (unified: general chat + coding workbench)
   chat: {
     send: (question: string, sessionId: string, projectDir: string, kbIds: number[], images: unknown, agent: string, modelName: string) =>

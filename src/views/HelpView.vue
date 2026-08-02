@@ -182,7 +182,7 @@
           <tr><td>定时任务未执行</td><td>调度器未开启</td><td>在设置页确认调度器运行中，检查任务是否已启用</td></tr>
           <tr><td>可以完全离线使用吗</td><td>—</td><td>可以。对话模型和嵌入模型都配置为 Ollama 本地模型即可完全离线</td></tr>
           <tr><td>提示"模型连接失败"</td><td>pi agent 模型配置有误或 Ollama 未启动</td><td>运行 <code>pi</code> 检查配置，Ollama 需先 <code>ollama pull</code> 模型并确保服务运行</td></tr>
-          <tr><td>数据会丢失吗</td><td>—</td><td>数据保存在本机数据库，正常退出不丢失；建议定期备份 <code>memory.db</code> 和笔记目录</td></tr>
+          <tr><td>数据会丢失吗</td><td>—</td><td>数据保存在本机数据库，正常退出不丢失；可在「设置 → 数据备份与恢复」一键备份、自动备份或从备份恢复</td></tr>
           </tbody>
         </table>
       </div>
@@ -190,10 +190,10 @@
       <div class="card">
         <h2>🔒 数据与隐私</h2>
         <ul>
-          <li>所有数据保存在本机数据库（<code>~/.qihang-work-ai/qihang-work-ai.db</code>）与你的笔记文件夹中，不上传任何云端</li>
+          <li>数据保存在本机数据库（<code>~/.qihang-work-ai/qihang-work-ai.db</code>）与你的笔记文件夹中，不上传任何云端</li>
           <li>对话内容默认会发送给你配置的模型服务商（DeepSeek 等）用于生成回复</li>
           <li>如需<strong>完全离线</strong>：使用 Ollama 作为对话模型与嵌入模型即可（除软件自动更新外无任何网络请求）</li>
-          <li>建议定期备份数据库文件和笔记目录，后续版本将提供一键备份/恢复</li>
+          <li>「设置 → 数据备份与恢复」支持一键备份、每日自动备份（保留 N 份）与一键恢复</li>
         </ul>
       </div>
     </div>
