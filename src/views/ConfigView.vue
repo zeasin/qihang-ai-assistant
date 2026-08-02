@@ -23,31 +23,6 @@
         <span v-if="notesDirStatus" class="text-muted" :style="{ color: notesDirStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ notesDirStatus }}</span>
       </div>
 
-      <!-- Scheduled Tasks -->
-      <div class="card">
-        <h2>⏰ 定时任务</h2>
-        <div class="text-muted mb-2">管理系统内置的定时任务，可开启/关闭及设置是否发送飞书通知。</div>
-        <div class="task-controls">
-          <span v-if="schedulerRunning" class="badge badge-success">● 调度器运行中</span>
-          <span v-else class="badge badge-gray">○ 调度器已停止</span>
-        </div>
-        <table v-if="tasks.length" class="config-table">
-          <thead><tr><th style="width:30px">#</th><th>名称</th><th>类型</th><th>项目</th><th>Cron</th><th style="width:60px">启用</th><th style="width:80px">飞书通知</th></tr></thead>
-          <tbody>
-            <tr v-for="(t, i) in tasks" :key="t.id">
-              <td><code>{{ i + 1 }}</code></td>
-              <td>{{ t.name }}</td>
-              <td><span class="badge badge-gray">{{ t.task_type }}</span></td>
-              <td><span class="task-project-name">{{ projectName(t.project_id) }}</span></td>
-              <td><code>{{ t.cron_expression }}</code></td>
-              <td><label class="toggle"><input type="checkbox" :checked="t.enabled" @change="toggleTask(t)"><span class="slider"></span></label></td>
-              <td><label class="toggle"><input type="checkbox" :checked="t.notify_feishu" @change="toggleFeishu(t)"><span class="slider"></span></label></td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else class="text-muted" style="padding:12px 0;">暂无定时任务。</div>
-      </div>
-
       <!-- Embedding Model Configuration -->
       <div class="card">
         <h2>🧠 嵌入模型配置</h2>
@@ -208,9 +183,7 @@ const feishuAppSecret = ref('');
 const feishuRunning = ref(false);
 const feishuStatus = ref('');
 
-// Scheduled tasks
 const schedulerRunning = ref(false);
-const tasks = ref<any[]>([]);
 
 // Report settings
 const reportRetentionDays = ref('30');
@@ -270,24 +243,8 @@ function projectName(projectId: number | null): string {
   const p = projects.value.find(p => p.id === projectId);
   return p ? p.name : '—';
 }
-async function loadTasks() {
-  try { tasks.value = await API.task.list(); } catch { tasks.value = []; }
-}
 async function loadSchedulerStatus() {
   try { const s = await API.service.status(); schedulerRunning.value = s.scheduler; } catch {}
-}
-
-async function toggleTask(t: any) {
-  try {
-    await API.task.setEnabled(t.id, !t.enabled);
-    await loadTasks();
-  } catch {}
-}
-async function toggleFeishu(t: any) {
-  try {
-    await API.task.update(t.id, { notify_feishu: !t.notify_feishu });
-    t.notify_feishu = !t.notify_feishu;
-  } catch {}
 }
 
 async function saveWebhook() {
@@ -436,7 +393,6 @@ onMounted(async () => {
   await loadConfig();
   await loadProjects();
   await loadNotesDir();
-  await loadTasks();
   await loadSchedulerStatus();
   try {
     const svc = await API.service.status();

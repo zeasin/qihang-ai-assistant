@@ -531,11 +531,6 @@ onMounted(async () => {
   await loadTodos();
   await loadReminders();
   await loadPendingRecords();
-  try {
-    const tasks = await API.task.list();
-    const dailyReport = tasks.find((t: any) => t.task_type === 'daily_report');
-    if (dailyReport && dailyReport.cron_expression) reportCron.value = dailyReport.cron_expression;
-  } catch {}
   API.on('report:generated', () => {
     loadDailyReports();
   });

@@ -685,12 +685,7 @@ function start() {
   logger.info(`[Scheduler] started with 0 tasks + ${reminders.length} reminders`);
 }
 
-// 任务系统已移除（sys_tables 删表），保留空桩兼容导出
-function scheduleTask() {}
-function addTask() {}
-function removeTask() {}
-function ensureDailyReportTasks() {}
-async function checkAndRegenerateDailyReport() {}
+
 
 function scheduleReminder(r) {
   const cronExpr = getCronFromReminder(r);
@@ -734,4 +729,4 @@ function reload() {
 
 function isRunning() { return running; }
 
-export { start, stop, reload, isRunning, addTask, removeTask, addReminder, removeReminder, DEFAULT_REPORT_TEMPLATE };
+export { start, stop, reload, isRunning, addReminder, removeReminder, DEFAULT_REPORT_TEMPLATE };

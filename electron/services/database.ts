@@ -1,45 +1,24 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import Database from 'better-sqlite3';
 import logger from './logger';
 
 const DB_DIR = path.join(require('os').homedir(), '.qihang-work-ai');
 const DB_PATH = path.join(DB_DIR, 'qihang-work-ai.db');
 
-let SQL: any = null;
-let db: any = null;
-let saveTimer: any = null;
+let db: Database.Database | null = null;
 
-async function getDb() {
+function getDb(): Database.Database {
   if (db) return db;
   if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
-  if (!SQL) SQL = await require('sql.js')();
-  const isNew = !fs.existsSync(DB_PATH);
-  if (isNew) {
-    db = new SQL.Database();
-  } else {
-    const buf = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(buf);
-  }
+  db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL');
   initSchema();
   return db;
 }
 
-function saveDb() {
-  if (!db) return;
-  const data = db.export();
-  fs.writeFileSync(DB_PATH, Buffer.from(data));
-}
-
-function scheduleSave() {
-  if (saveTimer) return;
-  saveTimer = setImmediate(() => {
-    saveTimer = null;
-    saveDb();
-  });
-}
-
 function initSchema() {
-  db.run(`
+  getDb().exec(`
 
     CREATE TABLE IF NOT EXISTS prj_sessions (
       id TEXT PRIMARY KEY,
@@ -181,52 +160,48 @@ function initSchema() {
     );
 
   `);
-  // migration: add module_id to ai_analysis if not exists
-  try { db.run("ALTER TABLE ai_analysis ADD COLUMN module_id TEXT"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE ai_analysis ADD COLUMN module_id TEXT"); } catch (e) {}
 }
 
 // ========== Helpers ==========
 
-function q(sql, ...params) {
+function q<T = any>(sql: string, ...params: any[]): T[] {
   try {
-    const stmt = db.prepare(sql);
-    if (params && params.length) stmt.bind(params);
-    const rows: any[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free();
-    return rows;
-  } catch (e) {
+    const stmt = getDb().prepare(sql);
+    return (params.length ? stmt.all(...params) : stmt.all()) as T[];
+  } catch (e: any) {
     logger.error('[DB] SQL error: %s | SQL: %s', e.message, sql.slice(0, 200));
     throw e;
   }
 }
 
-function qOne(sql, ...params) {
-  const rows = q(sql, ...params);
-  return rows.length ? rows[0] : null;
-}
-
-function run(sql, ...params) {
+function qOne<T = any>(sql: string, ...params: any[]): T | null {
   try {
-    db.run(sql, params);
-    scheduleSave();
-  } catch (e) {
+    const stmt = getDb().prepare(sql);
+    return (params.length ? stmt.get(...params) : stmt.get()) as T | null;
+  } catch (e: any) {
     logger.error('[DB] SQL error: %s | SQL: %s', e.message, sql.slice(0, 200));
     throw e;
   }
 }
 
-function runMany(sqls) {
-  for (const s of sqls) db.run(s.sql, s.params || []);
-  scheduleSave();
+function run(sql: string, ...params: any[]) {
+  try {
+    getDb().prepare(sql).run(...params);
+  } catch (e: any) {
+    logger.error('[DB] SQL error: %s | SQL: %s', e.message, sql.slice(0, 200));
+    throw e;
+  }
 }
 
-function runRaw(sql, params) {
-  db.run(sql, params || []);
+function runRaw(sql: string, params: any[]) {
+  getDb().prepare(sql).run(...(params || []));
 }
 
-function save() {
-  saveDb();
+function save() {}
+
+function close() {
+  if (db) { try { db.close(); } catch {} db = null; }
 }
 
 // ========== Projects (unified: note + code) ==========
@@ -246,7 +221,7 @@ const project = {
     run('INSERT INTO prj_projects (name, type, dir, description, default_branch) VALUES (?, ?, ?, ?, ?)',
       name, t, dir || '', description || '', defaultBranch || '');
     const r = qOne('SELECT id FROM prj_projects WHERE name = ? AND type = ?', name, t);
-    return { id: r.id, name, type: t };
+    return { id: r!.id, name, type: t };
   },
   update: (id, data) => {
     const fields: any[] = []; const params: any[] = [];
@@ -278,14 +253,13 @@ const project = {
     run('DELETE FROM prj_sessions WHERE project_id = ?', id);
     run('DELETE FROM prj_projects WHERE id = ?', id);
   },
-  // Document operations (for note-type projects)
   docCount: () => {
-    try { const r = qOne('SELECT COUNT(*) as c FROM kb_documents'); return r ? r.c : 0; } catch { return 0; }
+    try { const r = qOne<{c: number}>("SELECT COUNT(*) as c FROM kb_documents"); return r ? r.c : 0; } catch { return 0; }
   },
   insertDoc: (pathVal, content, fileMtime, title) => {
     run("INSERT OR REPLACE INTO kb_documents (path, content, indexed_at, file_mtime, title) VALUES (?, ?, datetime('now', '+8 hours'), ?, ?)", pathVal, content, fileMtime || null, title || '');
-    const r = qOne('SELECT id FROM kb_documents WHERE path = ?', pathVal);
-    return r.id;
+    const r = qOne<{id: number}>('SELECT id FROM kb_documents WHERE path = ?', pathVal);
+    return r!.id;
   },
   insertChunk: (docId, content, embedding) => {
     if (embedding) {
@@ -294,7 +268,7 @@ const project = {
       run('INSERT INTO kb_chunks (doc_id, content) VALUES (?, ?)', docId, content);
     }
   },
-  getChunks: () => q('SELECT c.content FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id').map(r => r.content),
+  getChunks: () => q<{content: string}>('SELECT c.content FROM kb_chunks c JOIN kb_documents d ON c.doc_id = d.id').map(r => r.content),
   deleteDocs: () => {
     run('DELETE FROM kb_chunks');
     run('DELETE FROM kb_documents');
@@ -360,7 +334,7 @@ const dm = {
     if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE data_center_modules SET ${fields.join(', ')} WHERE id = ?`, ...params); }
   },
   remove: (id) => {
-    const dsList = q('SELECT dataset_id FROM data_center_datasets WHERE module_id = ?', id);
+    const dsList = q<{dataset_id: string}>('SELECT dataset_id FROM data_center_datasets WHERE module_id = ?', id);
     for (const d of dsList) { run('DELETE FROM data_center_records WHERE dataset_id = ?', d.dataset_id); }
     run('DELETE FROM data_center_datasets WHERE module_id = ?', id);
     run('DELETE FROM data_center_modules WHERE id = ?', id);
@@ -394,7 +368,7 @@ const ds = {
     if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE data_center_datasets SET ${fields.join(', ')} WHERE id = ? OR dataset_id = ?`, ...params, id); }
   },
   remove: (id) => {
-    const dsRow = qOne('SELECT dataset_id FROM data_center_datasets WHERE id = ? OR dataset_id = ?', id, id);
+    const dsRow = qOne<{dataset_id: string}>('SELECT dataset_id FROM data_center_datasets WHERE id = ? OR dataset_id = ?', id, id);
     if (dsRow) { run('DELETE FROM data_center_records WHERE dataset_id = ?', dsRow.dataset_id); }
     run('DELETE FROM data_center_datasets WHERE id = ? OR dataset_id = ?', id, id);
   },
@@ -417,7 +391,7 @@ const aa = {
   save: (moduleId, type, content, prompt, reportDate) => {
     run("INSERT INTO ai_analysis (module_id, type, content, prompt, report_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))",
       moduleId, type, content, prompt || '', reportDate || '');
-    const r = qOne("SELECT id FROM ai_analysis WHERE module_id = ? AND type = ? ORDER BY id DESC LIMIT 1", moduleId, type);
+    const r = qOne<{id: number}>("SELECT id FROM ai_analysis WHERE module_id = ? AND type = ? ORDER BY id DESC LIMIT 1", moduleId, type);
     return r ? r.id : null;
   },
   get: (id) => qOne('SELECT * FROM ai_analysis WHERE id = ?', id),
@@ -459,8 +433,8 @@ const todo = {
   add: (data) => {
     run('INSERT INTO plan_todos (title, description, priority, due_date, status) VALUES (?, ?, ?, ?, ?)',
       data.title, data.description || '', data.priority || 'mid', data.due_date || '', data.status || 'pending');
-    const r = qOne('SELECT id FROM plan_todos WHERE title = ? ORDER BY id DESC', data.title);
-    return { id: r.id };
+    const r = qOne<{id: number}>('SELECT id FROM plan_todos WHERE title = ? ORDER BY id DESC', data.title);
+    return { id: r!.id };
   },
   update: (id, data) => {
     const fields: any[] = []; const params: any[] = [];
@@ -475,8 +449,4 @@ const todo = {
   remove: (id) => run('DELETE FROM plan_todos WHERE id = ?', id),
 };
 
-function close() {
-  if (db) { db.close(); db = null; }
-}
-
-export { getDb, close, q, qOne, run, runMany, runRaw, save, project, chat, dm, ds, aa, reminder, todo };
+export { getDb, close, q, qOne, run, runRaw, save, project, chat, dm, ds, aa, reminder, todo };

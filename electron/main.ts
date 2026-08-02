@@ -728,7 +728,7 @@ ipcMain.handle('coding:switchAgent', (_, { sessionId, agent }) => {
   db.chat.updateSessionAgent(sessionId, agent);
   return db.chat.getSession(sessionId);
 });
-ipcMain.handle('agents:list', () => []);
+
 ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, agent, images, modelName }) => {
   const sid = sessionId || ('coding_' + Date.now());
   try {
@@ -834,11 +834,7 @@ ipcMain.handle('service:reloadScheduler', () => {
   scheduler.reload();
   return true;
 });
-ipcMain.handle('task:list', () => []);
-ipcMain.handle('task:add', () => ({}));
-ipcMain.handle('task:update', () => true);
-ipcMain.handle('task:remove', () => true);
-ipcMain.handle('task:setEnabled', () => true);
+
 ipcMain.handle('reminder:list', () => db.reminder.list());
 ipcMain.handle('reminder:add', (_, data) => {
   const r = db.reminder.add(data);

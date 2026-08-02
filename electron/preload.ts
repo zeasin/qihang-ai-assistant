@@ -121,15 +121,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     indexAll: () => ipcRenderer.invoke('service:indexAll'),
   },
 
-  // Tasks
-  task: {
-    list: () => ipcRenderer.invoke('task:list'),
-    add: (data: unknown) => ipcRenderer.invoke('task:add', data),
-    update: (id: number, data: unknown) => ipcRenderer.invoke('task:update', id, data),
-    remove: (id: number) => ipcRenderer.invoke('task:remove', id),
-    setEnabled: (id: number, enabled: boolean) => ipcRenderer.invoke('task:setEnabled', id, enabled),
-  },
-
   // Reminders
   reminder: {
     list: () => ipcRenderer.invoke('reminder:list'),
@@ -193,7 +184,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('coding:session:updateTitle', { sessionId, title }),
     switchAgent: (sessionId: string, agent: string) =>
       ipcRenderer.invoke('coding:switchAgent', { sessionId, agent }),
-    agents: () => ipcRenderer.invoke('agents:list'),
     send: (question: string, sessionId: string, projectDir: string, agent: string, images: unknown, modelName: string) =>
       ipcRenderer.invoke('coding:send', { question, sessionId, projectDir, agent, images, modelName }),
   },

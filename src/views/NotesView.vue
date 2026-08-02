@@ -509,11 +509,6 @@ async function loadOverviewData() {
   try { todos.value = (await API.todo.list()).filter((t: any) => t.status !== 'done').slice(0, 10); } catch {}
   try { reminders.value = await API.reminder.list(); } catch {}
   try { pendingRecords.value = await API.ds.pendingRecords(); } catch {}
-  try {
-    const tasks = await API.task.list();
-    const dailyReport = tasks.find((t: any) => t.task_type === 'daily_report');
-    if (dailyReport && dailyReport.cron_expression) reportCron.value = dailyReport.cron_expression;
-  } catch {}
 }
 
 function switchToOverview() {
