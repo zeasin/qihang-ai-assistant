@@ -593,12 +593,12 @@ async function buildNoteToolDefs(projectId) {
   ];
 }
 
-async function buildDataToolDefs(projectDir) {
+async function buildDataToolDefs(projectDir, opts: { noWeb?: boolean } = {}) {
   const { Type } = await ensureT();
   const optStr = (description?: string) => Type.Optional(Type.Union([Type.String({ description }), Type.Null()]));
   const optNum = (description?: string) => Type.Optional(Type.Union([Type.Number({ description }), Type.String(), Type.Null()]));
   const bind = (fn) => (args) => fn(args, projectDir);
-  return [
+  const defs = [
     { name: 'query_dataset', label: 'query_dataset', description: '查询本地数据集中的记录。数据集用于存储结构化信息，如代办事项、客户信息、项目、Bug等。', parameters: Type.Object({ datasetName: Type.String({ description: '数据集名称，如 todos, customers, projects, bugs' }), conditions: optStr('查询条件关键字'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryDatasetTool({ ...args, limit: toNumber(args.limit, 20) }, projectDir)) },
     { name: 'list_datasets', label: 'list_datasets', description: '列出所有可用的数据集及其结构。', parameters: Type.Object({}), execute: exec(() => listDatasetsTool()) },
     { name: 'create_dataset', label: 'create_dataset', description: '创建一个新的数据集，用于存储结构化信息（如待办、客户、项目、Bug 等）。创建后可用 insert_dataset_record 写入记录。', parameters: Type.Object({ name: Type.String({ description: '数据集名称，如 todos, customers' }), description: Type.Optional(Type.String({ description: '数据集说明' })), schemaJson: Type.Optional(Type.String({ description: '可选的 Schema JSON 字符串，如 {"fields":[{"name":"title"}]}' })) }), execute: exec(createDatasetTool) },
@@ -608,6 +608,7 @@ async function buildDataToolDefs(projectDir) {
     { name: 'web_search', label: 'web_search', description: '搜索外网资料，通过搜索引擎获取与查询词相关的网页标题、链接和摘要。适合查询最新资讯、技术文档、百科知识等。', parameters: Type.Object({ query: Type.String({ description: '搜索关键词，尽量精确' }), maxResults: optNum('返回结果条数上限，默认8，最大15') }), execute: exec((args) => webSearchTool({ ...args, maxResults: toNumber(args.maxResults, 8) })) },
     { name: 'web_fetch', label: 'web_fetch', description: '读取外部 URL 的文本内容，自动去除 HTML 标签和脚本，返回纯文本。适合阅读网页文章、API 文档、新闻等。', parameters: Type.Object({ url: Type.String({ description: '要读取的完整 URL（须以 http:// 或 https:// 开头）' }), maxLength: optNum('返回内容最大字符数，默认8000，最大50000') }), execute: exec((args) => webFetchTool({ ...args, maxLength: toNumber(args.maxLength, 8000) })) },
   ];
+  return opts.noWeb ? defs.filter(d => d.name !== 'web_search' && d.name !== 'web_fetch') : defs;
 }
 
 async function buildCodingToolDefs(projectDir) {

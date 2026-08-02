@@ -9,6 +9,7 @@
         :class="{ active: isActive(item.path) }"
         :title="item.label"
       >
+        <span v-if="item.beta" class="beta-tag">beta</span>
         <span class="nav-icon" v-html="item.icon"></span>
         <span class="nav-label">{{ item.label }}</span>
       </router-link>
@@ -64,6 +65,12 @@ const navItems = [
     label: '任务',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>'
   },
+  {
+    path: '/tools',
+    label: '工具箱',
+    beta: true,
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>'
+  },
 ];
 
 const isActive = (path: string) => {
@@ -91,6 +98,7 @@ const isActive = (path: string) => {
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -103,6 +111,21 @@ const isActive = (path: string) => {
   border-radius: var(--radius-sm);
   text-decoration: none;
   line-height: 1.2;
+}
+
+.beta-tag {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: #f59e0b;
+  color: #fff;
+  letter-spacing: 0.3px;
+  transform: rotate(8deg);
 }
 
 .nav-item:hover {

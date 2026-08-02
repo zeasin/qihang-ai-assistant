@@ -4,7 +4,7 @@ const VALID_CHANNELS = [
   'chat:delta', 'chat:status', 'chat:tool', 'chat:done', 'chat:error',
   'coding:delta', 'coding:status', 'coding:tool', 'coding:done', 'coding:error',
   'kb:scan-progress', 'service:status', 'service:toggle', 'feishu:message',
-  'indexer:progress', 'report:generated',
+  'indexer:progress', 'report:generated', 'aitool:delta',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -157,6 +157,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     moduleAnalysisList: (moduleId: string) => ipcRenderer.invoke('archive:moduleAnalysisList', { moduleId }),
     saveAnalysisToNotes: (moduleId: string, analysisId: number) => ipcRenderer.invoke('archive:saveAnalysisToNotes', { moduleId, analysisId }),
     moduleOverview: (moduleId: string) => ipcRenderer.invoke('archive:moduleOverview', { moduleId }),
+  },
+
+  // AI 工具箱
+  aitool: {
+    generate: (tool: string, prompt: string, sessionId: string, name?: string, params?: string) =>
+      ipcRenderer.invoke('aitool:generate', { tool, prompt, sessionId, name, params }),
+    exportPptx: (md: string, defaultName: string) =>
+      ipcRenderer.invoke('aitool:exportPptx', { md, defaultName }),
+    exportHtml: (md: string, defaultName: string) =>
+      ipcRenderer.invoke('aitool:exportHtml', { md, defaultName }),
+    exportMindmap: (md: string, defaultName: string) =>
+      ipcRenderer.invoke('aitool:exportMindmap', { md, defaultName }),
+    exportText: (text: string, defaultName: string, ext?: string) =>
+      ipcRenderer.invoke('aitool:exportText', { text, defaultName, ext }),
+    fetch: (url: string) => ipcRenderer.invoke('aitool:fetch', { url }),
+    imageGenerate: (prompt: string, width: number, height: number, name?: string) =>
+      ipcRenderer.invoke('aitool:image:generate', { prompt, width, height, name }),
+    imageSave: (b64: string, mimeType: string, defaultName: string) =>
+      ipcRenderer.invoke('aitool:image:save', { b64, mimeType, defaultName }),
+    imageConfig: () => ipcRenderer.invoke('aitool:image:config'),
+    imageSetConfig: (baseUrl: string, apiKey: string, model: string) =>
+      ipcRenderer.invoke('aitool:image:setConfig', { baseUrl, apiKey, model }),
+    historyList: (tool?: string) => ipcRenderer.invoke('aitool:history:list', { tool }),
+    historyGet: (id: number) => ipcRenderer.invoke('aitool:history:get', { id }),
+    historyRemove: (id: number) => ipcRenderer.invoke('aitool:history:remove', { id }),
+    historyClear: (tool?: string) => ipcRenderer.invoke('aitool:history:clear', { tool }),
+    historyImage: (filePath: string) => ipcRenderer.invoke('aitool:history:image', { filePath }),
   },
 
   // Config

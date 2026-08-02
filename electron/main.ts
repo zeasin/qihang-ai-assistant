@@ -36,6 +36,7 @@ import * as db from './services/database';
 import * as appConfig from './services/app-config';
 import { runPi, listPiModels, generateDailyReport as piGenerateDailyReport } from './services/pi-agent';
 import { buildNoteToolDefs, buildDataToolDefs, buildCodingToolDefs } from './services/tools';
+import * as aitool from './services/ai-tools';
 import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
 import * as indexer from './services/indexer';
@@ -1293,6 +1294,161 @@ ipcMain.handle("embedding:test", async (_, { model, host, apiKey }) => {
   } catch (e) {
     return { ok: false, message: "❌ 测试异常: " + (e.message || e) };
   }
+});
+
+// ========== AI 工具箱（aitool:*） ==========
+
+ipcMain.handle('aitool:generate', async (event, { tool, prompt, sessionId, name, params }) => {
+  try {
+    const { buildReportToolDefs, buildNoteToolDefs, buildDataToolDefs } = require('./services/tools');
+    let customTools: any[] | undefined;
+
+    // 笔记库工具：PPT / 周报日报 基于本地笔记库内容（后端直接读取笔记内容注入 prompt，AI 有真实素材）
+    let kbPrompt = prompt;
+    if (tool === 'ppt' || tool === 'report') {
+      const notesDir = appConfig.getNotesDir();
+      if (notesDir) {
+        const notesText = aitool.collectNotesText(notesDir, 25000);
+        const fileCount = notesText ? (notesText.match(/【/g) || []).length : 0;
+        const notesBlock = notesText
+          ? `以下是笔记库中的文件内容（共 ${fileCount} 个文件，内容来自你的真实笔记，创作时请引用其中具体的项目、数据、名称）：\n\n${notesText}\n\n`
+          : '';
+        const kbTools: any[] = [];
+        const noteProj = db.project.list('note').find(p => p.dir === notesDir);
+        if (noteProj) kbTools.push(...(await buildNoteToolDefs(noteProj.id)));
+        kbTools.push(...(await buildDataToolDefs(notesDir, { noWeb: true })));
+        if (tool === 'report') kbTools.unshift(...(await buildReportToolDefs(undefined)));
+        customTools = kbTools;
+        kbPrompt = `${notesBlock}${prompt}`;
+      } else if (tool === 'report') {
+        customTools = await buildReportToolDefs(undefined);
+      }
+    }
+
+    const text = await aitool.generateWithPi({
+      prompt: kbPrompt,
+      sessionId: `${tool}_${sessionId || Date.now()}`,
+      customTools,
+      onDelta: (delta) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('aitool:delta', { sessionId, text: delta });
+        }
+      },
+    });
+    try { db.aitoolHistory.add(tool, name || '', params || '', text, 'text'); } catch {}
+    return { ok: true, text };
+  } catch (e: any) {
+    return { ok: false, error: e.message || String(e) };
+  }
+});
+
+async function saveWithDialog(defaultName: string, filters: Electron.FileFilter[], writeFn: (path: string) => void | Promise<void>) {
+  if (!mainWindow) return { ok: false, error: '窗口未就绪' };
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '导出文件',
+    defaultPath: path.join(aitool.defaultExportDir(), defaultName),
+    filters,
+  });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+  try {
+    await writeFn(result.filePath);
+    return { ok: true, path: result.filePath };
+  } catch (e: any) {
+    return { ok: false, error: e.message || String(e) };
+  }
+}
+
+ipcMain.handle('aitool:exportPptx', async (_, { md, defaultName }) => {
+  const name = aitool.safeFileName(defaultName || '演示文稿') + '.pptx';
+  return saveWithDialog(name, [{ name: 'PPT', extensions: ['pptx'] }], (p) => aitool.exportPptx(md, p));
+});
+
+ipcMain.handle('aitool:exportHtml', async (_, { md, defaultName }) => {
+  const name = aitool.safeFileName(defaultName || '演示文稿') + '.html';
+  return saveWithDialog(name, [{ name: 'HTML 演示', extensions: ['html'] }], (p) => aitool.exportHtml(md, p));
+});
+
+ipcMain.handle('aitool:exportMindmap', async (_, { md, defaultName }) => {
+  const name = aitool.safeFileName(defaultName || '思维导图') + '.mm';
+  return saveWithDialog(name, [{ name: 'FreeMind', extensions: ['mm'] }], (p) => aitool.exportMindmap(md, p));
+});
+
+ipcMain.handle('aitool:exportText', async (_, { text, defaultName, ext }) => {
+  const e = ext || '.md';
+  const name = aitool.safeFileName(defaultName || '文档') + e;
+  return saveWithDialog(name, [{ name: '文档', extensions: [e.replace('.', '')] }], (p) => aitool.exportText(text, p, e));
+});
+
+ipcMain.handle('aitool:fetch', async (_, { url }) => {
+  return await aitool.fetchUrl(url);
+});
+
+ipcMain.handle('aitool:image:generate', async (_, { prompt, width, height, name }) => {
+  const res = await aitool.generateImage(prompt, { width, height });
+  if (res.ok) {
+    try {
+      const imgDir = path.join(aitool.defaultExportDir(), '历史图片');
+      fs.mkdirSync(imgDir, { recursive: true });
+      const fileName = aitool.safeFileName(name || prompt.slice(0, 20)) + '_' + Date.now() + '.png';
+      const filePath = path.join(imgDir, fileName);
+      fs.writeFileSync(filePath, Buffer.from(res.b64!, 'base64'));
+      db.aitoolHistory.add('image', name || prompt.slice(0, 30), prompt, filePath, 'image');
+    } catch (e) {
+      logger.warn('[AI-Tool] image history save failed: %s', (e as any).message);
+    }
+  }
+  return res;
+});
+
+ipcMain.handle('aitool:image:save', async (_, { b64, mimeType, defaultName }) => {
+  if (!mainWindow) return { ok: false, error: '窗口未就绪' };
+  const name = aitool.safeFileName(defaultName || '图片') + '.png';
+  return saveWithDialog(name, [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }], (p) => { aitool.saveBase64Image(b64, p, mimeType); });
+});
+
+ipcMain.handle('aitool:history:list', (_, { tool } = {}) => {
+  return db.aitoolHistory.list(tool || undefined, 100);
+});
+ipcMain.handle('aitool:history:get', (_, { id }) => {
+  return db.aitoolHistory.get(id);
+});
+ipcMain.handle('aitool:history:remove', (_, { id }) => {
+  db.aitoolHistory.remove(id);
+  return { ok: true };
+});
+ipcMain.handle('aitool:history:clear', (_, { tool } = {}) => {
+  db.aitoolHistory.clear(tool || undefined);
+  return { ok: true };
+});
+
+ipcMain.handle('aitool:history:image', (_, { filePath }) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: '图片文件不存在' };
+    const buf = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png';
+    return { ok: true, dataUrl: `data:${mime};base64,${buf.toString('base64')}` };
+  } catch (e) {
+    return { ok: false, error: (e as any).message };
+  }
+});
+
+ipcMain.handle('aitool:image:config', () => {
+  const cfg = aitool.getImageGenConfig();
+  return {
+    baseUrl: cfg.baseUrl,
+    apiKey: cfg.apiKey,
+    model: cfg.model,
+  };
+});
+
+ipcMain.handle('aitool:image:setConfig', (_, { baseUrl, apiKey, model }) => {
+  appConfig.saveConfig({
+    imageGenBaseUrl: (baseUrl || '').trim(),
+    imageGenApiKey: (apiKey || '').trim(),
+    imageGenModel: (model || '').trim(),
+  });
+  return { ok: true };
 });
 
 // ========== App Lifecycle ==========

@@ -159,6 +159,16 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
+    CREATE TABLE IF NOT EXISTS ai_tools_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tool TEXT NOT NULL,
+      name TEXT DEFAULT '',
+      params TEXT DEFAULT '',
+      result TEXT DEFAULT '',
+      result_type TEXT DEFAULT 'text',
+      created_at TEXT DEFAULT (datetime('now', '+8 hours'))
+    );
+
   `);
   try { getDb().exec("ALTER TABLE ai_analysis ADD COLUMN module_id TEXT"); } catch (e) {}
 }
@@ -449,4 +459,25 @@ const todo = {
   remove: (id) => run('DELETE FROM plan_todos WHERE id = ?', id),
 };
 
-export { getDb, close, q, qOne, run, runRaw, save, project, chat, dm, ds, aa, reminder, todo };
+// ========== AI 工具箱历史 ==========
+const aitoolHistory = {
+  add: (tool, name, params, result, resultType = 'text') => {
+    run("INSERT INTO ai_tools_history (tool, name, params, result, result_type, created_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+8 hours'))",
+      tool, name || '', params || '', result || '', resultType);
+    const r = qOne<{id: number}>('SELECT id FROM ai_tools_history ORDER BY id DESC LIMIT 1');
+    return r ? r.id : null;
+  },
+  list: (tool?: string, limit = 100) => {
+    const sql = tool ? 'SELECT id, tool, name, result_type, created_at FROM ai_tools_history WHERE tool = ? ORDER BY id DESC LIMIT ?'
+      : 'SELECT id, tool, name, result_type, created_at FROM ai_tools_history ORDER BY id DESC LIMIT ?';
+    return tool ? q(sql, tool, limit) : q(sql, limit);
+  },
+  get: (id) => qOne('SELECT * FROM ai_tools_history WHERE id = ?', id),
+  remove: (id) => run('DELETE FROM ai_tools_history WHERE id = ?', id),
+  clear: (tool?: string) => {
+    if (tool) run('DELETE FROM ai_tools_history WHERE tool = ?', tool);
+    else run('DELETE FROM ai_tools_history');
+  },
+};
+
+export { getDb, close, q, qOne, run, runRaw, save, project, chat, dm, ds, aa, reminder, todo, aitoolHistory };

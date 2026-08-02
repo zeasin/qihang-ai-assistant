@@ -23,6 +23,7 @@
     "node-cron": "^4.6.0",
     "ollama": "^0.5.14",
     "pinia": "^3.0.0",
+    "pptxgenjs": "^4.0.1",
     "typebox": "^1.1.38",
     "vue": "^3.5.0",
     "vue-router": "^4.5.0",
