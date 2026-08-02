@@ -158,6 +158,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     reportGenerating: () => ipcRenderer.invoke('insights:reportGenerating'),
   },
 
+  // Archive
+  archive: {
+    report: (moduleId: string) => ipcRenderer.invoke('archive:report', { moduleId }),
+  },
+
   // Config
   config: {
     get: () => ipcRenderer.invoke('config:get'),

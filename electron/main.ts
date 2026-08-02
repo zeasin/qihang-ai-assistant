@@ -867,6 +867,43 @@ ipcMain.handle('todo:list', () => db.todo.list());
 ipcMain.handle('todo:add', (_, data) => db.todo.add(data));
 ipcMain.handle('todo:update', (_, id, data) => { db.todo.update(id, data); return true; });
 ipcMain.handle('todo:remove', (_, id) => { db.todo.remove(id); return true; });
+
+// --- Archive ---
+
+// 生成模块级业务分析报告（基于模块下所有数据集的业务内容）
+ipcMain.handle('archive:report', async (_, { moduleId }) => {
+  const mod = db.dm.get(moduleId);
+  if (!mod) return { ok: false, error: '模块不存在' };
+  const dsRows = db.q('SELECT dataset_id, name, description FROM data_center_datasets WHERE module_id = ?', moduleId);
+  if (!dsRows.length) return { ok: false, error: '该模块下无数据集' };
+  let businessData = '';
+  let totalRecords = 0;
+  for (const dsRow of dsRows) {
+    const rows = db.ds.query(dsRow.dataset_id, null);
+    totalRecords += rows.length;
+    if (rows.length > 0) {
+      businessData += `\n\n### 数据集：${dsRow.name}${dsRow.description ? '（' + dsRow.description + '）' : ''}\n\n`;
+      for (const r of rows) {
+        const data = typeof r.data_json === 'string' ? JSON.parse(r.data_json) : r;
+        const fields = Object.entries(data)
+          .filter(([k, v]) => v !== null && v !== '' && typeof v === 'string')
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('；') || JSON.stringify(data);
+        businessData += `- ${fields}\n`;
+      }
+    }
+  }
+  if (!businessData.trim()) businessData = '该模块下所有数据集暂无记录';
+  const dsNames = dsRows.map(d => d.name).join('、');
+  const prompt = `你是一位业务分析专家。以下是业务模块「${mod.name}」中的业务数据，请从**业务运营角度**进行深度分析：\n\n日期：${new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)}\n\n模块：${mod.name}\n包含数据项：${dsNames}\n\n业务数据：\n${businessData}\n\n请生成一份面向业务管理者的分析报告，包含：\n1. 业务整体概况 — 当前业务状态与关键指标\n2. 核心业务洞察 — 从数据中发现的业务趋势、问题和机会\n3. 关键事件与进展 — 值得关注的业务动态\n4. 风险与预警 — 潜在风险点及需关注的事项\n5. 行动建议 — 可落地的业务优化建议`;
+  try {
+    const content = await piGenerateDailyReport('archive_' + Date.now(), prompt);
+    return { ok: true, content };
+  } catch (e: any) {
+    return { ok: false, error: e.message || '生成失败' };
+  }
+});
+
 ipcMain.handle('insights:stats', () => {
   const fileCount = (db.qOne("SELECT COUNT(*) as c FROM kb_documents") || {}).c || 0;
   const chunkCount = (db.qOne("SELECT COUNT(*) as c FROM kb_chunks") || {}).c || 0;

@@ -92,6 +92,9 @@ interface ElectronAPI {
     get: () => Promise<any>;
     set: (config: any) => Promise<boolean>;
   };
+  archive: {
+    report: (moduleId: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
+  };
   llm: {
     test: (opts: { provider?: string; model?: string; apiKey?: string; baseUrl?: string }) => Promise<{ ok: boolean; message: string; response?: string }>;
   };

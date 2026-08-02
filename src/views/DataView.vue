@@ -29,48 +29,71 @@
           <div v-if="!allDatasets.length" class="empty-hint">暂无数据集</div>
         </div>
       </div>
-      <div class="right-panel">
-        <template v-if="selectedDs">
-          <div class="right-toolbar">
-            <div class="search-box">
-              <input type="text" v-model="searchKeyword" placeholder="搜索记录..." @keyup.enter="loadRecords(0)">
-            </div>
-            <button class="btn btn-sm btn-secondary" @click="loadRecords(0)">搜索</button>
-            <button class="btn btn-sm btn-primary" @click="showAddRecord">+ 记录</button>
-            <button class="btn btn-sm btn-secondary" @click="showImportModal">📥 导入</button>
-          </div>
-          <table class="data-table" v-if="records.length > 0">
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th v-for="col in recordColumns" :key="col">{{ col }}</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="rec in records" :key="rec._id || rec.id">
-                <td><span class="badge badge-gray">{{ rec.status || '无' }}</span></td>
-                <td v-for="col in recordColumns" :key="col">{{ rec[col] || '' }}</td>
-                <td class="action-cell">
-                  <button class="action-btn" @click="viewRecord(rec)">👁️</button>
-                  <button class="action-btn" @click="editRecord(rec)">✏️</button>
-                  <button class="action-btn danger" @click="deleteRecord(rec)">🗑️</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="right-empty">
-            <div class="empty-icon">📝</div>
-            <div class="empty-title">暂无记录</div>
-            <button class="btn btn-primary btn-sm" @click="showAddRecord">+ 新增记录</button>
-          </div>
-        </template>
-        <div v-else class="right-empty">
-          <div class="empty-icon">📋</div>
-          <div class="empty-title">从左侧选择一个数据集</div>
-        </div>
-      </div>
-    </div>
+       <div class="right-panel">
+         <template v-if="selectedDs">
+           <div class="tab-bar">
+             <button class="tab-btn" :class="{ active: activeTab === 'ai' }" @click="switchTab('ai')">🤖 AI 分析概览</button>
+             <button class="tab-btn" :class="{ active: activeTab === 'data' }" @click="switchTab('data')">📋 数据记录</button>
+           </div>
+           <div class="tab-content">
+             <div v-if="activeTab === 'ai'" class="ai-tab">
+               <div class="ai-tab-header">
+                  <h3>📊 {{ selectedDs.moduleName }} — 业务分析概览</h3>
+                 <button class="btn btn-sm btn-secondary" :disabled="aiReportLoading" @click="refreshAiReport">🔄 重新生成</button>
+               </div>
+               <div v-if="aiReportLoading" class="ai-tab-loading">
+                 <div class="spinner"></div>
+                 <p>正在生成分析报告...</p>
+               </div>
+               <div v-else-if="aiReportContent" class="ai-tab-content" v-html="renderAiReportMarkdown(aiReportContent)"></div>
+               <div v-else class="ai-tab-empty">
+                 <div class="empty-icon">🤖</div>
+                 <div class="empty-title">点击「重新生成」获取 AI 分析报告</div>
+               </div>
+             </div>
+             <div v-if="activeTab === 'data'" class="data-tab">
+               <div class="right-toolbar">
+                 <div class="search-box">
+                   <input type="text" v-model="searchKeyword" placeholder="搜索记录..." @keyup.enter="loadRecords(0)">
+                 </div>
+                 <button class="btn btn-sm btn-secondary" @click="loadRecords(0)">搜索</button>
+                 <button class="btn btn-sm btn-primary" @click="showAddRecord">+ 记录</button>
+                 <button class="btn btn-sm btn-secondary" @click="showImportModal">📥 导入</button>
+               </div>
+               <table class="data-table" v-if="records.length > 0">
+                 <thead>
+                   <tr>
+                     <th>状态</th>
+                     <th v-for="col in recordColumns" :key="col">{{ col }}</th>
+                     <th>操作</th>
+                   </tr>
+                 </thead>
+                 <tbody>
+                   <tr v-for="rec in records" :key="rec._id || rec.id">
+                     <td><span class="badge badge-gray">{{ rec.status || '无' }}</span></td>
+                     <td v-for="col in recordColumns" :key="col">{{ rec[col] || '' }}</td>
+                     <td class="action-cell">
+                       <button class="action-btn" @click="viewRecord(rec)">👁️</button>
+                       <button class="action-btn" @click="editRecord(rec)">✏️</button>
+                       <button class="action-btn danger" @click="deleteRecord(rec)">🗑️</button>
+                     </td>
+                   </tr>
+                 </tbody>
+               </table>
+               <div v-else class="right-empty">
+                 <div class="empty-icon">📝</div>
+                 <div class="empty-title">暂无记录</div>
+                 <button class="btn btn-primary btn-sm" @click="showAddRecord">+ 新增记录</button>
+               </div>
+             </div>
+           </div>
+         </template>
+         <div v-else class="right-empty">
+           <div class="empty-icon">📋</div>
+           <div class="empty-title">从左侧选择一个数据集</div>
+         </div>
+       </div>
+     </div>
 
     <!-- 数据集模态框 -->
     <div v-if="showDsModal" class="modal-overlay">
@@ -214,6 +237,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { marked } from 'marked';
 
 const API = (window as any).electronAPI;
 
@@ -228,7 +252,7 @@ const allDatasets = computed(() => {
   const list: any[] = [];
   for (const mod of modules.value) {
     for (const ds of mod.dsList) {
-      list.push({ ...ds, moduleName: mod.name });
+      list.push({ ...ds, moduleName: mod.name, moduleId: mod.id });
     }
   }
   return list;
@@ -275,8 +299,12 @@ const pageSize = 20;
 
 function selectDataset(ds: any) {
   selectedDs.value = ds;
+  aiReportContent.value = '';
   localStorage.setItem('lastDatasetId', ds.dataset_id || ds.id);
   loadRecords(0);
+  if (activeTab.value === 'ai') {
+    refreshAiReport();
+  }
 }
 
 async function loadRecords(page: number) {
@@ -353,6 +381,41 @@ async function deleteDataset(ds: any) {
     }
     await loadModules();
   } catch (e) { console.error('删除数据集失败:', e); }
+}
+
+// ========== Tab ==========
+
+const activeTab = ref('ai');
+const aiReportLoading = ref(false);
+const aiReportContent = ref('');
+
+function switchTab(tab: string) {
+  activeTab.value = tab;
+  if (tab === 'ai' && selectedDs.value && !aiReportContent.value) {
+    refreshAiReport();
+  }
+}
+
+async function refreshAiReport() {
+  if (!selectedDs.value || !API) return;
+  const moduleId = selectedDs.value.moduleId;
+  if (!moduleId || moduleId === '__ungrouped__') return;
+  aiReportLoading.value = true;
+  aiReportContent.value = '';
+  try {
+    const res = await API.archive.report(moduleId);
+    if (res.ok && res.content) {
+      aiReportContent.value = res.content;
+    }
+  } catch (e) {
+    console.error('AI 报告生成失败:', e);
+  }
+  aiReportLoading.value = false;
+}
+
+function renderAiReportMarkdown(text: string): string {
+  if (!text) return '';
+  try { return marked(text); } catch { return text; }
 }
 
 // ========== 记录 CRUD ==========
@@ -549,6 +612,28 @@ onMounted(async () => {
 .empty-hint { text-align: center; padding: 24px; font-size: 13px; color: var(--text-muted); }
 
 .right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.tab-bar {
+  display: flex; gap: 0; padding: 0 20px; border-bottom: 1px solid var(--border);
+  background: white; flex-shrink: 0;
+}
+.tab-btn {
+  background: none; border: none; padding: 10px 16px; font-size: 13px; cursor: pointer;
+  color: var(--text-secondary); border-bottom: 2px solid transparent; transition: all 0.2s;
+  border-radius: 0;
+}
+.tab-btn:hover { color: var(--text-primary); background: var(--hover); }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.tab-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.ai-tab { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.ai-tab-header {
+  display: flex; align-items: center; justify-content: space-between; padding: 12px 20px;
+  border-bottom: 1px solid var(--border); background: white; flex-shrink: 0;
+}
+.ai-tab-header h3 { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.ai-tab-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: var(--text-muted); }
+.ai-tab-content { padding: 16px 20px; overflow-y: auto; flex: 1; font-size: 14px; line-height: 1.7; }
+.ai-tab-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: var(--text-muted); }
+.data-tab { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .right-toolbar {
   display: flex; align-items: center; gap: 8px; padding: 12px 20px;
   border-bottom: 1px solid var(--border); flex-wrap: wrap; background: white;
