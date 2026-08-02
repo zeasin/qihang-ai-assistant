@@ -322,9 +322,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { marked } from 'marked';
 
 const API = (window as any).electronAPI;
+const route = useRoute();
 
 interface ModuleData {
   id: string;
@@ -774,6 +776,8 @@ function renderMarkdown(text: string): string {
 
 onMounted(async () => {
   await loadAll();
+  // 工具箱跳转：?action=import 自动打开导入弹窗
+  if (route.query.action === 'import') showImportModal();
 });
 </script>
 

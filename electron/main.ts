@@ -35,6 +35,7 @@ try {
 import * as db from './services/database';
 import * as appConfig from './services/app-config';
 import { runPi, listPiModels, generateDailyReport as piGenerateDailyReport } from './services/pi-agent';
+import { buildNoteToolDefs, buildDataToolDefs, buildCodingToolDefs } from './services/tools';
 import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
 import * as indexer from './services/indexer';
@@ -363,10 +364,17 @@ const feishuMessageHandler = async (msg) => {
       ? `以下是笔记库目录，请用 grep/find 等工具自行搜索相关文件后回答：\n笔记库路径：${notesDir}\n\n用户问题：${context.cleanText}`
       : context.cleanText;
     setMode('kb');
+    const toolDefs: any[] = [];
+    if (notesDir) {
+      const noteProj = db.project.list('note').find(p => p.dir === notesDir);
+      if (noteProj) toolDefs.push(...(await buildNoteToolDefs(noteProj.id)));
+      toolDefs.push(...(await buildDataToolDefs(notesDir)));
+    }
     await runPi({
       prompt,
       sessionId,
       cwd: notesDir || undefined,
+      customTools: toolDefs,
       onDone: (text) => {
         logger.info('[Feishu] Sending card reply: "%s"', (text || '').slice(0, 200));
         if (text) {
@@ -679,6 +687,20 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
     // ===== pi agent 引擎（与工作台一致） =====
     sendToRenderer('chat:status', { sessionId: sid, text: 'AI 正在分析问题...' });
 
+    // 注入本地工具：数据集查询/项目文件读取/外网搜索（按会话上下文），笔记库读写（关联的 note 项目）
+    const toolDefs: any[] = [];
+    if (projectDir) {
+      toolDefs.push(...(await buildDataToolDefs(projectDir)));
+      const noteProjByDir = db.project.list('note').find(p => p.dir === projectDir);
+      if (noteProjByDir) toolDefs.push(...(await buildNoteToolDefs(noteProjByDir.id)));
+    }
+    if (kbIds && kbIds.length) {
+      for (const kid of kbIds) {
+        const p = kid ? db.project.get(kid) : null;
+        if (p && p.type === 'note' && p.dir) toolDefs.push(...(await buildNoteToolDefs(p.id)));
+      }
+    }
+
     let reply = '';
     const modelPattern = piModelPattern(modelName);
     await runPi({
@@ -687,6 +709,7 @@ ipcMain.handle('chat:send', async (event, { question, sessionId, projectDir, kbI
       cwd: projectDir || undefined,
       modelPattern,
       images,
+      customTools: toolDefs,
       onDelta: (delta) => {
         reply += delta;
         sendToRenderer('chat:delta', { sessionId: sid, text: delta });
@@ -773,6 +796,7 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
       cwd: projectDir || undefined,
       modelPattern,
       images,
+      customTools: projectDir ? await buildCodingToolDefs(projectDir) : [],
       onDelta,
       onThinking: (t) => sendToRenderer('coding:tool', { sessionId: sid, type: 'thinking', text: t }),
       onTool,

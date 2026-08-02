@@ -59,6 +59,7 @@ interface SessionHandle {
   session: any;
   modelRegistry: any;
   currentModelPattern?: string;
+  customTools: any[];
   tail: Promise<void>; // 同一会话内的串行链，保证 prompt 不并发
 }
 const sessions = new Map<string, SessionHandle>();
@@ -72,11 +73,18 @@ async function getSession(opts: {
   sessionId: string;
   cwd?: string;
   modelPattern?: string;
+  customTools?: any[];
 }): Promise<SessionHandle> {
   const sdk = await loadSdk();
-  const { sessionId, cwd, modelPattern } = opts;
+  const { sessionId, cwd, modelPattern, customTools = [] } = opts;
   let handle = sessions.get(sessionId);
-  if (handle) return handle;
+  if (handle) {
+    // 会话已缓存：工具集在创建时固定，后续调用若请求不同工具集，沿用已注册的并告警
+    if (customTools.length && handle.customTools.length !== customTools.length) {
+      logger.warn('[PiAgent] session %s already created with %d tools, ignoring new %d tools', sessionId, handle.customTools.length, customTools.length);
+    }
+    return handle;
+  }
 
   const bundle = await getRuntime();
   const sm = sdk.SessionManager.open(sessionFilePath(sessionId));
@@ -98,12 +106,12 @@ async function getSession(opts: {
     model,
     sessionManager: sm,
     thinkingLevel: 'off',
-    customTools: [],
+    customTools,
     settingsManager: sdk.SettingsManager.create(cwd || process.cwd(), getAgentDir()),
   });
   if (modelFallbackMessage) logger.warn('[PiAgent] %s', modelFallbackMessage);
 
-  handle = { session, modelRegistry: bundle.modelRegistry, tail: Promise.resolve() };
+  handle = { session, modelRegistry: bundle.modelRegistry, customTools, tail: Promise.resolve() };
   sessions.set(sessionId, handle);
   return handle;
 }
@@ -177,6 +185,8 @@ export interface RunPiOptions extends RunPiCallbacks {
   modelPattern?: string;
   images?: Array<{ data: string; mimeType: string }>;
   timeoutMs?: number;
+  /** 注入的自定义工具定义（pi SDK ToolDefinition[]，参见 ./tools） */
+  customTools?: any[];
 }
 
 /**
@@ -196,11 +206,12 @@ export async function runPi(opts: RunPiOptions): Promise<void> {
     onTool = () => {},
     onDone = () => {},
     onError = () => {},
+    customTools,
   } = opts;
 
   let handle: SessionHandle;
   try {
-    handle = await getSession({ sessionId, cwd, modelPattern });
+    handle = await getSession({ sessionId, cwd, modelPattern, customTools });
   } catch (e: any) {
     onError(`pi 会话初始化失败: ${e.message}`);
     return;
@@ -311,8 +322,11 @@ export async function runPi(opts: RunPiOptions): Promise<void> {
 
 /**
  * 使用 pi agent 生成日报（非流式，返回完整文本，过滤思考过程）
+ * 注入日报查询工具（待办/对话/文档/数据记录/提醒/日期），供 AI 自行查数生成。
  */
 export async function generateDailyReport(sessionId: string, prompt: string): Promise<string> {
+  const { buildReportToolDefs } = require('./tools');
+  const customTools = await buildReportToolDefs(undefined);
   return new Promise((resolve, reject) => {
     let done = false;
     const timeout = setTimeout(() => {
@@ -322,6 +336,7 @@ export async function generateDailyReport(sessionId: string, prompt: string): Pr
     runPi({
       prompt,
       sessionId: sessionId + '_report',
+      customTools,
       onDone: (finalText) => {
         done = true;
         clearTimeout(timeout);

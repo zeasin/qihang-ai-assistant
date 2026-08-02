@@ -148,9 +148,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue';
+import { useRoute } from 'vue-router';
 import { marked } from 'marked';
 
 const API = window.electronAPI;
+const route = useRoute();
 
 // ========== 状态 ==========
 const sessions = ref<any[]>([]);
@@ -479,6 +481,12 @@ const autoResizeTextarea = () => {
 onMounted(async () => {
   await Promise.all([loadKbLibraries(), loadSessions(), loadPiModels()]);
   await restoreState();
+  // 工具箱跳转：?prompt= 预填输入框
+  const qp = route.query.prompt;
+  if (typeof qp === 'string' && qp.trim()) {
+    inputText.value = qp.trim();
+    nextTick(() => inputRef.value?.focus());
+  }
 });
 
 onBeforeUnmount(() => {

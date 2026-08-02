@@ -5,11 +5,18 @@ import { execSync } from 'child_process';
 import * as db from './database';
 import logger from './logger';
 
-let cachedZ: any = null;
-async function ensureZ() {
-  if (!cachedZ) cachedZ = (await import('zod')).z;
-  return cachedZ;
+// typebox 是 ESM-only 包，而本文件编译为 CJS，用 Function 构造器保留运行时真正的动态 import()
+let cachedType: any = null;
+async function ensureT() {
+  if (!cachedType) cachedType = await new Function('spec', 'return import(spec)')('typebox');
+  return cachedType;
 }
+
+// LLM 可能传数字或字符串，统一转换为数字
+const toNumber = (v: any, def = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+};
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '__pycache__', '.cache', 'dist', 'build', 'target', '.idea', '.vscode', 'release', 'out', 'tmp', 'temp']);
 
@@ -279,10 +286,6 @@ async function listDatasetsTool() {
   return all.length ? all.map(d => `- ${d.name} (${d.id}): ${d.schema_json}`).join('\n') : '暂无数据集';
 }
 
-async function listScheduledTasksTool() {
-  return '暂无定时任务（任务系统已移除）';
-}
-
 async function readProjectFileTool({ filePath }, projectDir) {
   const root = projectRoot(projectDir);
   const fullPath = path.isAbsolute(filePath) ? filePath : path.join(root, filePath);
@@ -469,59 +472,70 @@ async function getTodayInfoTool({}, kbId) {
 }
 
 // ========== 组装 ==========
-
-let cachedZodSchema: any = null;
+// 输出格式与 pi SDK 的 ToolDefinition 兼容：{ name, label, description, parameters, execute }
+// execute 返回 AgentToolResult：{ content: [{ type: 'text', text }], details: {} }
 
 const bindNote = (fn, projectId) => (args) => fn({ ...args, projectId });
 
+const exec = (fn) => async (_toolCallId, params) => ({
+  content: [{ type: 'text', text: String(await fn(params) ?? '') }],
+  details: {},
+});
+
 async function buildNoteToolDefs(projectId) {
-  const z = await ensureZ();
+  const { Type } = await ensureT();
+  const optStr = (description?: string) => Type.Optional(Type.Union([Type.String({ description }), Type.Null()]));
+  const wrap = (fn) => exec(bindNote(fn, projectId));
   return [
-    { name: 'list_notes', description: '列出笔记库中的目录和笔记文件。读取笔记前应先调用本工具确认路径。', schema: z.object({ path: z.string().optional().nullable().describe('相对笔记库根目录的路径，默认根目录') }), func: bindNote(listNotesTool, projectId) },
-    { name: 'read_note', description: '读取笔记库中笔记文件的完整内容。若文件不存在会返回相似文件名建议，可据此用 list_notes 确认路径。', schema: z.object({ path: z.string().describe('相对笔记库根目录的文件路径') }), func: bindNote(readNoteTool, projectId) },
-    { name: 'write_note', description: '创建或覆盖写入笔记库中的笔记文件（可自动创建子目录，建议以 .md 结尾）。', schema: z.object({ path: z.string().describe('相对笔记库根目录的文件路径'), content: z.string().describe('笔记完整内容（Markdown 格式）') }), func: bindNote(writeNoteTool, projectId) },
-    { name: 'edit_note', description: '编辑笔记库中的笔记文件：将 oldString 替换为 newString。', schema: z.object({ path: z.string().describe('相对笔记库根目录的文件路径'), oldString: z.string().describe('被替换的原文（须唯一）'), newString: z.string().describe('替换后的内容') }), func: bindNote(editNoteTool, projectId) },
-    { name: 'delete_note', description: '删除笔记库中的笔记文件。', schema: z.object({ path: z.string().describe('相对笔记库根目录的文件路径') }), func: bindNote(deleteNoteTool, projectId) },
+    { name: 'list_notes', label: 'list_notes', description: '列出笔记库中的目录和笔记文件。读取笔记前应先调用本工具确认路径。', parameters: Type.Object({ path: optStr('相对笔记库根目录的路径，默认根目录') }), execute: wrap(listNotesTool) },
+    { name: 'read_note', label: 'read_note', description: '读取笔记库中笔记文件的完整内容。若文件不存在会返回相似文件名建议，可据此用 list_notes 确认路径。', parameters: Type.Object({ path: Type.String({ description: '相对笔记库根目录的文件路径' }) }), execute: wrap(readNoteTool) },
+    { name: 'write_note', label: 'write_note', description: '创建或覆盖写入笔记库中的笔记文件（可自动创建子目录，建议以 .md 结尾）。', parameters: Type.Object({ path: Type.String({ description: '相对笔记库根目录的文件路径' }), content: Type.String({ description: '笔记完整内容（Markdown 格式）' }) }), execute: wrap(writeNoteTool) },
+    { name: 'edit_note', label: 'edit_note', description: '编辑笔记库中的笔记文件：将 oldString 替换为 newString。', parameters: Type.Object({ path: Type.String({ description: '相对笔记库根目录的文件路径' }), oldString: Type.String({ description: '被替换的原文（须唯一）' }), newString: Type.String({ description: '替换后的内容' }) }), execute: wrap(editNoteTool) },
+    { name: 'delete_note', label: 'delete_note', description: '删除笔记库中的笔记文件。', parameters: Type.Object({ path: Type.String({ description: '相对笔记库根目录的文件路径' }) }), execute: wrap(deleteNoteTool) },
   ];
 }
 
 async function buildDataToolDefs(projectDir) {
-  const z = await ensureZ();
+  const { Type } = await ensureT();
+  const optStr = (description?: string) => Type.Optional(Type.Union([Type.String({ description }), Type.Null()]));
+  const optNum = (description?: string) => Type.Optional(Type.Union([Type.Number({ description }), Type.String(), Type.Null()]));
   const bind = (fn) => (args) => fn(args, projectDir);
   return [
-    { name: 'query_dataset', description: '查询本地数据集中的记录。数据集用于存储结构化信息，如代办事项、客户信息、项目、Bug等。', schema: z.object({ datasetName: z.string().describe('数据集名称，如 todos, customers, projects, bugs'), conditions: z.string().optional().nullable().describe('查询条件关键字'), limit: z.coerce.number().optional().nullable().describe('返回条数上限，默认20') }), func: (args) => queryDatasetTool(args, projectDir) },
-    { name: 'list_datasets', description: '列出所有可用的数据集及其结构。', schema: z.object({}), func: () => listDatasetsTool() },
-    { name: 'list_scheduled_tasks', description: '列出所有已配置的定时任务。', schema: z.object({}), func: () => listScheduledTasksTool() },
-    { name: 'read_project_file', description: '读取项目目录下的文件内容。若文件不存在会返回相似文件名建议，可据此用 list_directory 确认准确路径。', schema: z.object({ filePath: z.string().describe('相对于项目根目录的文件路径，或绝对路径') }), func: bind(readProjectFileTool) },
-    { name: 'web_search', description: '搜索外网资料，通过搜索引擎获取与查询词相关的网页标题、链接和摘要。适合查询最新资讯、技术文档、百科知识等。', schema: z.object({ query: z.string().describe('搜索关键词，尽量精确'), maxResults: z.coerce.number().optional().nullable().describe('返回结果条数上限，默认8，最大15') }), func: (args) => webSearchTool(args) },
-    { name: 'web_fetch', description: '读取外部 URL 的文本内容，自动去除 HTML 标签和脚本，返回纯文本。适合阅读网页文章、API 文档、新闻等。', schema: z.object({ url: z.string().describe('要读取的完整 URL（须以 http:// 或 https:// 开头）'), maxLength: z.coerce.number().optional().nullable().describe('返回内容最大字符数，默认8000，最大50000') }), func: (args) => webFetchTool(args) },
+    { name: 'query_dataset', label: 'query_dataset', description: '查询本地数据集中的记录。数据集用于存储结构化信息，如代办事项、客户信息、项目、Bug等。', parameters: Type.Object({ datasetName: Type.String({ description: '数据集名称，如 todos, customers, projects, bugs' }), conditions: optStr('查询条件关键字'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryDatasetTool({ ...args, limit: toNumber(args.limit, 20) }, projectDir)) },
+    { name: 'list_datasets', label: 'list_datasets', description: '列出所有可用的数据集及其结构。', parameters: Type.Object({}), execute: exec(() => listDatasetsTool()) },
+    { name: 'read_project_file', label: 'read_project_file', description: '读取项目目录下的文件内容。若文件不存在会返回相似文件名建议，可据此用 list_directory 确认准确路径。', parameters: Type.Object({ filePath: Type.String({ description: '相对于项目根目录的文件路径，或绝对路径' }) }), execute: exec(bind(readProjectFileTool)) },
+    { name: 'web_search', label: 'web_search', description: '搜索外网资料，通过搜索引擎获取与查询词相关的网页标题、链接和摘要。适合查询最新资讯、技术文档、百科知识等。', parameters: Type.Object({ query: Type.String({ description: '搜索关键词，尽量精确' }), maxResults: optNum('返回结果条数上限，默认8，最大15') }), execute: exec((args) => webSearchTool({ ...args, maxResults: toNumber(args.maxResults, 8) })) },
+    { name: 'web_fetch', label: 'web_fetch', description: '读取外部 URL 的文本内容，自动去除 HTML 标签和脚本，返回纯文本。适合阅读网页文章、API 文档、新闻等。', parameters: Type.Object({ url: Type.String({ description: '要读取的完整 URL（须以 http:// 或 https:// 开头）' }), maxLength: optNum('返回内容最大字符数，默认8000，最大50000') }), execute: exec((args) => webFetchTool({ ...args, maxLength: toNumber(args.maxLength, 8000) })) },
   ];
 }
 
 async function buildCodingToolDefs(projectDir) {
-  const z = await ensureZ();
+  const { Type } = await ensureT();
+  const optStr = (description?: string) => Type.Optional(Type.Union([Type.String({ description }), Type.Null()]));
   const bind = (fn) => (args) => fn(args, projectDir);
   const base = await buildDataToolDefs(projectDir);
   const coding = [
-    { name: 'list_directory', description: '列出目录下的文件和子目录。读取或搜索文件前，若不确定路径应先调用本工具（传 "." 查看根目录）确认目录结构。', schema: z.object({ path: z.string().describe('目录路径，相对项目根目录或绝对路径') }), func: bind(listDirectoryTool) },
-    { name: 'grep', description: '在项目文件中按正则表达式搜索文本，返回 文件:行号:内容。', schema: z.object({ pattern: z.string().describe('正则表达式'), path: z.string().optional().nullable().describe('搜索起始目录（可选）'), ext: z.string().optional().nullable().describe('扩展名过滤，逗号分隔，如 js,ts,vue') }), func: bind(grepTool) },
-    { name: 'find', description: '按文件名查找项目中的文件。', schema: z.object({ query: z.string().describe('文件名包含的关键字'), path: z.string().optional().nullable().describe('查找起始目录（可选）'), ext: z.string().optional().nullable().describe('扩展名过滤，逗号分隔') }), func: bind(findFilesTool) },
-    { name: 'write_file', description: '写入/创建项目文件（可自动创建目录）。', schema: z.object({ filePath: z.string().describe('相对于项目根目录的文件路径'), content: z.string().describe('文件完整内容') }), func: bind(writeFileTool) },
-    { name: 'edit_file', description: '编辑项目文件：将 oldString 替换为 newString。', schema: z.object({ filePath: z.string().describe('相对于项目根目录的文件路径'), oldString: z.string().describe('被替换的原文（须唯一）'), newString: z.string().describe('替换后的内容') }), func: bind(editFileTool) },
-    { name: 'bash', description: '在项目根目录执行 shell 命令（如 git status, npm test 等）。', schema: z.object({ command: z.string().describe('要执行的 shell 命令') }), func: bind(bashTool) },
+    { name: 'list_directory', label: 'list_directory', description: '列出目录下的文件和子目录。读取或搜索文件前，若不确定路径应先调用本工具（传 "." 查看根目录）确认目录结构。', parameters: Type.Object({ path: Type.String({ description: '目录路径，相对项目根目录或绝对路径' }) }), execute: exec(bind(listDirectoryTool)) },
+    { name: 'grep', label: 'grep', description: '在项目文件中按正则表达式搜索文本，返回 文件:行号:内容。', parameters: Type.Object({ pattern: Type.String({ description: '正则表达式' }), path: optStr('搜索起始目录（可选）'), ext: optStr('扩展名过滤，逗号分隔，如 js,ts,vue') }), execute: exec(bind(grepTool)) },
+    { name: 'find', label: 'find', description: '按文件名查找项目中的文件。', parameters: Type.Object({ query: Type.String({ description: '文件名包含的关键字' }), path: optStr('查找起始目录（可选）'), ext: optStr('扩展名过滤，逗号分隔') }), execute: exec(bind(findFilesTool)) },
+    { name: 'write_file', label: 'write_file', description: '写入/创建项目文件（可自动创建目录）。', parameters: Type.Object({ filePath: Type.String({ description: '相对于项目根目录的文件路径' }), content: Type.String({ description: '文件完整内容' }) }), execute: exec(bind(writeFileTool)) },
+    { name: 'edit_file', label: 'edit_file', description: '编辑项目文件：将 oldString 替换为 newString。', parameters: Type.Object({ filePath: Type.String({ description: '相对于项目根目录的文件路径' }), oldString: Type.String({ description: '被替换的原文（须唯一）' }), newString: Type.String({ description: '替换后的内容' }) }), execute: exec(bind(editFileTool)) },
+    { name: 'bash', label: 'bash', description: '在项目根目录执行 shell 命令（如 git status, npm test 等）。', parameters: Type.Object({ command: Type.String({ description: '要执行的 shell 命令' }) }), execute: exec(bind(bashTool)) },
   ];
   return projectDir ? [...coding, ...base] : base;
 }
 
 async function buildReportToolDefs(kbId) {
-  const z = await ensureZ();
+  const { Type } = await ensureT();
+  const optStr = (description?: string) => Type.Optional(Type.Union([Type.String({ description }), Type.Null()]));
+  const optNum = (description?: string) => Type.Optional(Type.Union([Type.Number({ description }), Type.String(), Type.Null()]));
   return [
-    { name: 'query_todos', description: '查询待办事项（plan_todos），可按状态( done / in_progress / pending )、优先级、日期范围过滤。不传参数则返回最近的待办。', schema: z.object({ status: z.string().optional().nullable().describe('过滤状态: done / in_progress / pending'), priority: z.string().optional().nullable().describe('过滤优先级: high / mid / low'), date_from: z.string().optional().nullable().describe('起始日期 YYYY-MM-DD'), date_to: z.string().optional().nullable().describe('结束日期 YYYY-MM-DD'), limit: z.coerce.number().optional().nullable().describe('返回条数上限，默认30') }), func: queryTodosTool },
-    { name: 'query_messages', description: '查询聊天/对话记录（prj_messages）。可过滤日期范围、角色( user / assistant )。', schema: z.object({ date_from: z.string().optional().nullable(), date_to: z.string().optional().nullable(), role: z.string().optional().nullable().describe('角色: user / assistant'), limit: z.coerce.number().optional().nullable().describe('默认20') }), func: queryMessagesTool },
-    { name: 'query_documents', description: '查询知识库中文档更新记录（kb_documents）。可过滤日期范围。', schema: z.object({ date_from: z.string().optional().nullable(), date_to: z.string().optional().nullable(), limit: z.coerce.number().optional().nullable().describe('默认20') }), func: queryDocumentsTool },
-    { name: 'query_data_records', description: '查询数据中心记录（data_center_records）。可过滤数据集名称、日期范围。', schema: z.object({ dataset_name: z.string().optional().nullable().describe('数据集名称关键词（模糊匹配）'), date_from: z.string().optional().nullable(), date_to: z.string().optional().nullable(), limit: z.coerce.number().optional().nullable().describe('默认20') }), func: queryDataRecordsTool },
-    { name: 'query_reminders', description: '查询已启用的提醒事项（plan_reminders）。', schema: z.object({}), func: queryRemindersTool },
-    { name: 'get_today_info', description: '获取当前日期信息（今天的中国日期、项目/知识库名称等）。', schema: z.object({}), func: async (args, ctx) => getTodayInfoTool(args, kbId) },
+    { name: 'query_todos', label: 'query_todos', description: '查询待办事项（plan_todos），可按状态( done / in_progress / pending )、优先级、日期范围过滤。不传参数则返回最近的待办。', parameters: Type.Object({ status: optStr('过滤状态: done / in_progress / pending'), priority: optStr('过滤优先级: high / mid / low'), date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), limit: optNum('返回条数上限，默认30') }), execute: exec((args) => queryTodosTool({ ...args, limit: toNumber(args.limit, 30) })) },
+    { name: 'query_messages', label: 'query_messages', description: '查询聊天/对话记录（prj_messages）。可过滤日期范围、角色( user / assistant )。', parameters: Type.Object({ date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), role: optStr('角色: user / assistant'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryMessagesTool({ ...args, limit: toNumber(args.limit, 20) })) },
+    { name: 'query_documents', label: 'query_documents', description: '查询知识库中文档更新记录（kb_documents）。可过滤日期范围。', parameters: Type.Object({ date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryDocumentsTool({ ...args, limit: toNumber(args.limit, 20) })) },
+    { name: 'query_data_records', label: 'query_data_records', description: '查询数据中心记录（data_center_records）。可过滤数据集名称、日期范围。', parameters: Type.Object({ dataset_name: optStr('数据集名称关键词（模糊匹配）'), date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryDataRecordsTool({ ...args, limit: toNumber(args.limit, 20) })) },
+    { name: 'query_reminders', label: 'query_reminders', description: '查询已启用的提醒事项（plan_reminders）。', parameters: Type.Object({}), execute: exec(() => queryRemindersTool()) },
+    { name: 'get_today_info', label: 'get_today_info', description: '获取当前日期信息（今天的中国日期、项目/知识库名称等）。', parameters: Type.Object({}), execute: exec((args) => getTodayInfoTool(args, kbId)) },
   ];
 }
 

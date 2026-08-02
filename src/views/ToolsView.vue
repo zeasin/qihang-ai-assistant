@@ -15,6 +15,7 @@
           <div class="tool-icon">{{ tool.icon }}</div>
           <div class="tool-name">{{ tool.name }}</div>
           <div class="tool-desc">{{ tool.description }}</div>
+          <div class="tool-target">→ {{ tool.target }}</div>
         </div>
       </div>
     </div>
@@ -22,42 +23,40 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
 
 interface Tool {
   id: number;
   name: string;
   description: string;
   icon: string;
+  target: string;
   action: string;
 }
 
-const tools = ref<Tool[]>([]);
+const tools = ref<Tool[]>([
+  { id: 1, name: '通用识别', description: '上传图片，AI 自动识别内容并分析，支持多种场景。', icon: '🖼️', target: '打开 AI 对话', action: '/chat?prompt=请识别这张图片的内容并给出分析。' },
+  { id: 2, name: '识题', description: '粘贴题目图片，AI 给出详细解答过程和答案。', icon: '❓', target: '打开 AI 对话', action: '/chat?prompt=请解答这道题目：' },
+  { id: 3, name: '试卷识别', description: '上传整张试卷图片，AI 提取全部题目并逐一解答。', icon: '📝', target: '打开 AI 对话', action: '/chat?prompt=请识别这张试卷图片，提取所有题目并逐一给出解答。' },
+  { id: 4, name: '数据导入', description: '从 JSON 粘贴或 URL 远程地址批量导入数据到数据集。', icon: '📥', target: '打开数据页导入', action: '/data?action=import' },
+  { id: 5, name: '数据采集', description: '从网页/API 拉取 JSON 数据，自动写入数据集（URL 导入）。', icon: '🔧', target: '打开数据页导入', action: '/data?action=import' },
+  { id: 6, name: '数据加工', description: '管理数据集：筛选、编辑、删除记录，自定义 Schema。', icon: '📋', target: '打开数据页', action: '/data' },
+]);
 
-// ========== 默认工具列表 ==========
-const defaultTools: Tool[] = [
-  { id: 1, name: '通用识别', description: '上传图片，AI 自动识别内容并分析。支持多种场景。', icon: '🖼️', action: 'image/general' },
-  { id: 2, name: '识题', description: '拍照上传题目，AI 给出详细解答过程和答案。', icon: '❓', action: 'image/solve' },
-  { id: 3, name: '试卷识别', description: '识别整张试卷，自动提取题目、答案、解析。', icon: '📝', action: 'image/exam' },
-  { id: 4, name: '数据导入', description: '从外部导入数据到笔记库，支持 JSON、CSV 等格式。', icon: '📥', action: 'data/import' },
-  { id: 5, name: '数据采集', description: '从网页或 API 自动采集数据，定时执行。', icon: '🔧', action: 'data/collector' },
-  { id: 6, name: '数据加工', description: '对采集的数据进行清洗、转换、标准化处理。', icon: '📋', action: 'data/processing' }
-];
+const router = useRouter();
 
-// ========== 加载工具列表 ==========
-async function loadTools() {
-  tools.value = defaultTools;
-}
-
-// ========== 打开工具 ==========
 const openTool = (tool: Tool) => {
-  // 使用路由导航或打开新窗口
-  window.open(`/${tool.action}`, '_blank');
+  const [path, query] = tool.action.split('?');
+  const params: Record<string, string> = {};
+  if (query) {
+    for (const kv of query.split('&')) {
+      const [k, v] = kv.split('=');
+      if (k && v !== undefined) params[k] = decodeURIComponent(v);
+    }
+  }
+  router.push({ path, query: Object.keys(params).length ? params : undefined });
 };
-
-onMounted(() => {
-  loadTools();
-});
 </script>
 
 <style scoped>
@@ -127,5 +126,11 @@ onMounted(() => {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.tool-target {
+  font-size: 12px;
+  color: var(--primary);
 }
 </style>
