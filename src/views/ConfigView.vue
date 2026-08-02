@@ -23,8 +23,8 @@
         <span v-if="notesDirStatus" class="text-muted" :style="{ color: notesDirStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ notesDirStatus }}</span>
       </div>
 
-      <!-- Embedding Model Configuration -->
-      <div class="card">
+      <!-- Embedding Model Configuration (hidden) -->
+      <div v-if="false" class="card">
         <h2>🧠 嵌入模型配置</h2>
         <div class="text-muted mb-2">配置笔记库索引使用的嵌入模型（Embedding Model），用于语义搜索。支持 Ollama 和 OpenAI 兼容接口（如 vLLM、LM Studio 等）。填写 API Key 则使用 OpenAI 兼容接口，否则使用 Ollama。</div>
         <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
@@ -48,30 +48,6 @@
           <button class="btn btn-secondary" @click="testEmbedding" style="margin-bottom:12px;">测试连接</button>
         </div>
         <span v-if="embeddingStatus" class="text-muted" :style="{ color: embeddingStatus.startsWith('✅') ? '#22c55e' : embeddingStatus.startsWith('⏳') ? '#f59e0b' : '#ef4444' }">{{ embeddingStatus }}</span>
-      </div>
-
-      <!-- 笔记库索引排除配置 -->
-      <div class="card">
-        <h2>📂 笔记库索引配置</h2>
-        <div class="text-muted mb-2">配置笔记库索引时排除的目录和文件（逗号分隔，支持通配符 *）。</div>
-        <div v-if="noteProject" class="project-ignore-config">
-          <div class="project-ignore-header">
-            <span class="project-ignore-name">{{ noteProject.name }}</span>
-            <span class="project-ignore-dir">{{ noteProject.dir }}</span>
-          </div>
-          <div class="form-row" style="gap:8px;flex-wrap:wrap;">
-            <div class="form-group" style="flex:1;min-width:200px;">
-              <label style="font-size:12px;color:var(--text-muted);">排除目录</label>
-              <input v-model="noteProject.ignore_dirs_local" type="text" class="form-control" placeholder="dist, build, temp">
-            </div>
-            <div class="form-group" style="flex:1;min-width:200px;">
-              <label style="font-size:12px;color:var(--text-muted);">排除文件</label>
-              <input v-model="noteProject.ignore_files_local" type="text" class="form-control" placeholder="draft*, *test*, tmp_*.md">
-            </div>
-            <button class="btn btn-sm btn-primary" @click="saveProjectIgnore(noteProject)" style="align-self:end;margin-bottom:12px;">保存</button>
-          </div>
-        </div>
-        <div v-if="!noteProject" class="text-muted" style="padding:12px 0;">暂无笔记库，请先在「笔记库设置」中配置目录。</div>
       </div>
 
       <!-- Feishu Webhook -->
@@ -210,7 +186,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 
 const API = window.electronAPI;
 
@@ -364,15 +340,6 @@ async function openBackupDir() {
 async function loadProjects() {
   try { projects.value = await API.project.list(); } catch { projects.value = []; }
 }
-const noteProjects = computed(() => projects.value
-  .filter((p: any) => p.type === 'note')
-  .map((p: any) => ({
-    ...p,
-    ignore_dirs_local: p.ignore_dirs || '',
-    ignore_files_local: p.ignore_files || '',
-  }))
-);
-const noteProject = computed(() => noteProjects.value[0] || null);
 async function loadNotesDir() {
   notesDir.value = await API.kb.getDir();
 }
@@ -392,16 +359,6 @@ async function saveNotesDir() {
   } catch (e: any) {
     notesDirStatus.value = '❌ ' + (e.message || '保存失败');
   }
-}
-async function saveProjectIgnore(p: any) {
-  try {
-    await API.project.update(p.id, { ignore_dirs: p.ignore_dirs_local, ignore_files: p.ignore_files_local });
-  } catch {}
-}
-function projectName(projectId: number | null): string {
-  if (!projectId) return '—';
-  const p = projects.value.find(p => p.id === projectId);
-  return p ? p.name : '—';
 }
 async function loadSchedulerStatus() {
   try { const s = await API.service.status(); schedulerRunning.value = s.scheduler; } catch {}
@@ -595,29 +552,6 @@ onBeforeUnmount(() => {});
   background: #fafbfc;
 }
 
-/* 笔记库索引配置 */
-.project-ignore-config {
-  background: var(--bg-main);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px 16px;
-  margin-bottom: 8px;
-}
-.project-ignore-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.project-ignore-name {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text-primary);
-}
-.project-ignore-dir {
-  font-size: 12px;
-  color: var(--text-muted);
-}
 .vars-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .vars-table th { text-align: left; padding: 6px 10px; background: var(--hover); font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border); position: sticky; top: 0; }
 .vars-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); color: var(--text-primary); }

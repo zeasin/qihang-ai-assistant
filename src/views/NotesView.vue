@@ -7,24 +7,13 @@
 
     <!-- ========== Tab 1: 文件浏览 ========== -->
     <div v-if="activeTab === 'files'" class="notes-body">
-      <div class="left-panel" :class="{ collapsed: leftCollapsed }">
+      <div class="left-panel">
         <div class="panel-header">
           <div class="panel-title">文件浏览</div>
-          <button class="btn-icon" @click="leftCollapsed = !leftCollapsed" title="收起/展开侧栏">
-            {{ leftCollapsed ? '▶' : '◀' }}
-          </button>
         </div>
         <div class="project-bar">
           <span v-if="notesDir" class="proj-name">{{ notesDir }}</span>
           <span v-else class="proj-name text-muted">未配置笔记库</span>
-          <button class="btn-icon" :disabled="indexing" @click="indexCurrentProject" :title="hasIndexed ? '重新索引' : '构建索引'">{{ indexing ? '⏳' : '📇' }}</button>
-          <span class="index-status">{{ indexing ? progressText : (hasIndexed ? '已索引' : '') }}</span>
-        </div>
-        <div v-if="indexing" class="index-progress">
-          <div class="progress-track">
-            <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
-          </div>
-          <div v-if="progressFile" class="progress-file">{{ progressFile }}</div>
         </div>
         <div class="search-bar">
           <input v-model="searchQuery" class="search-input" placeholder="搜索当前项目..." @keydown.enter="doSearch" />
@@ -87,39 +76,6 @@
         <div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,0.1);color:#ef4444;">🔔</div><div class="stat-num">{{ stats.remindersActive }}</div><div class="stat-label">提醒</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(99,102,241,0.1);color:#6366f1;">💬</div><div class="stat-num">{{ stats.totalChats }}</div><div class="stat-label">对话</div></div>
         <div class="stat-card"><div class="stat-icon" style="background:rgba(251,146,60,0.1);color:#fb923c;">📊</div><div class="stat-num">{{ stats.todayDataRecords }}</div><div class="stat-label">今日数据</div></div>
-      </div>
-
-      <div class="index-info-card">
-        <div class="index-info-header">
-          <span class="index-info-title">🧠 向量模型</span>
-          <span class="index-info-badge" :class="{ configured: indexerModel, unconfigured: !indexerModel }">
-            {{ indexerModel ? '已配置' : '未配置' }}
-          </span>
-        </div>
-        <div v-if="!indexerModel" class="index-info-warning">
-          ⚠️ 未配置向量模型，笔记库无法索引，将影响语义搜索功能。请到「设置」页配置嵌入模型。
-        </div>
-        <div v-else class="index-info-details">
-          <div class="index-info-row">
-            <span class="info-label">模型</span>
-            <span class="info-value">{{ indexerModel }}</span>
-          </div>
-          <div class="index-info-row">
-            <span class="info-label">服务地址</span>
-            <span class="info-value">{{ indexerHost }}</span>
-          </div>
-          <div class="index-info-row">
-            <span class="info-label">运行状态</span>
-            <span class="info-value" :class="{ running: indexerRunning, stopped: !indexerRunning }">
-              {{ indexerRunning ? '● 运行中' : '○ 已停止' }}
-            </span>
-          </div>
-          <div class="index-sub-stats">
-            <div class="index-sub-card"><div class="index-sub-num">{{ indexerFileCount }}</div><div class="index-sub-label">文件</div></div>
-            <div class="index-sub-card"><div class="index-sub-num">{{ indexerChunkCount }}</div><div class="index-sub-label">片段</div></div>
-            <div class="index-sub-card"><div class="index-sub-num">{{ indexerEmbeddedCount }}/{{ indexerChunkCount }}</div><div class="index-sub-label">已嵌入</div></div>
-          </div>
-        </div>
       </div>
 
       <div class="dashboard-grid">
@@ -213,29 +169,10 @@ const notesDir = ref('');
 const treeData = ref<TreeNode[]>([]);
 const selectedFile = ref<any>(null);
 const fileContent = ref('');
-const leftCollapsed = ref(false);
 const searchQuery = ref('');
 const searchActive = ref(false);
 const searched = ref(false);
 const searchResults = ref<any[]>([]);
-const indexing = ref(false);
-const indexedState = ref<Record<string, boolean>>({});
-const hasIndexed = computed(() => indexedState.value[notesDir.value] ?? false);
-const progressPhase = ref('');
-const progressCurrent = ref(0);
-const progressTotal = ref(0);
-const progressFile = ref('');
-
-const progressText = computed(() => {
-  const phase = progressPhase.value === 'embed' ? '生成嵌入' : '扫描文件';
-  return progressTotal.value > 0
-    ? `${phase} ${progressCurrent.value}/${progressTotal.value}`
-    : phase;
-});
-const progressPct = computed(() => {
-  if (!progressTotal.value) return 0;
-  return Math.round((progressCurrent.value / progressTotal.value) * 100);
-});
 
 const renderedContent = computed(() => {
   if (!fileContent.value) return '';
@@ -254,7 +191,6 @@ async function loadNotesDir() {
     notesDir.value = await API.kb.getDir();
     if (notesDir.value) {
       await loadFileTree();
-      await loadIndexedState();
     }
   } catch (e) {
     console.warn('加载笔记库失败:', e);
@@ -286,15 +222,6 @@ async function selectFile(item: TreeNode) {
   }
 }
 
-async function loadIndexedState() {
-  try {
-    const status = await API.kb.status();
-    indexedState.value[notesDir.value] = status?.indexed ?? false;
-  } catch {
-    indexedState.value[notesDir.value] = false;
-  }
-}
-
 function escapeHtml(text: string): string {
   if (!text) return '';
   const d = document.createElement('div');
@@ -319,34 +246,6 @@ async function doSearch() {
   } catch { searchResults.value = []; }
 }
 
-function onScanProgress(data: any) {
-  if (data.phase === 'done') {
-    indexedState.value[notesDir.value] = true;
-    indexing.value = false;
-    return;
-  }
-  progressPhase.value = data.phase || '';
-  progressCurrent.value = data.current || 0;
-  progressTotal.value = data.total || 0;
-  progressFile.value = data.file || '';
-}
-
-async function indexCurrentProject() {
-  if (!notesDir.value || indexing.value) return;
-  indexing.value = true;
-  progressPhase.value = 'scan';
-  progressCurrent.value = 0;
-  progressTotal.value = 0;
-  progressFile.value = '';
-
-  API.on('kb:scan-progress', onScanProgress);
-
-  try {
-    await API.kb.scan(notesDir.value);
-  } catch { indexing.value = false; }
-  API.removeAllListeners('kb:scan-progress');
-}
-
 function clearSearch() {
   searchActive.value = false;
   searchQuery.value = '';
@@ -362,13 +261,6 @@ function openSearchResult(r: any) {
 const stats = ref({
   fileCount: 0, chunkCount: 0, todayModified: 0, projectCount: 0, codeProjectCount: 0, totalChats: 0, todoPending: 0, todoOverdue: 0, remindersActive: 0, todayDataRecords: 0
 });
-
-const indexerModel = ref('');
-const indexerHost = ref('');
-const indexerRunning = ref(false);
-const indexerFileCount = ref(0);
-const indexerChunkCount = ref(0);
-const indexerEmbeddedCount = ref(0);
 
 const reports = ref<any[]>([]);
 const expandedReport = ref<number | null>(null);
@@ -492,15 +384,6 @@ async function loadOverviewData() {
   const d = new Date();
   todayStr.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   try { stats.value = await API.insights.stats(); } catch {}
-  try {
-    const info = await API.insights.indexerInfo();
-    indexerModel.value = info.model || '';
-    indexerHost.value = info.host || '';
-    indexerRunning.value = info.running || false;
-    indexerFileCount.value = info.docCount || 0;
-    indexerChunkCount.value = info.chunkCount || 0;
-    indexerEmbeddedCount.value = info.embeddedCount || 0;
-  } catch {}
   try { reports.value = await API.insights.reports(); } catch {}
   if (reports.value.length && expandedReport.value === null) {
     expandedReport.value = 0;
@@ -523,7 +406,6 @@ onMounted(() => {
   });
 });
 onUnmounted(() => {
-  API.removeAllListeners('kb:scan-progress');
   API.removeAllListeners('report:generated');
 });
 </script>
@@ -582,12 +464,6 @@ onUnmounted(() => {
   transition: width 0.2s ease, min-width 0.2s ease;
   flex-shrink: 0;
   overflow: hidden;
-}
-
-.left-panel.collapsed {
-  width: 0;
-  min-width: 0;
-  border-right: none;
 }
 
 .panel-header {
@@ -839,11 +715,6 @@ onUnmounted(() => {
   margin: 24px 0;
 }
 
-.index-status { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
-.index-progress { padding: 6px 14px 8px; border-bottom: 1px solid var(--border); }
-.progress-track { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
-.progress-fill { height: 100%; background: var(--primary); border-radius: 2px; transition: width 0.2s ease; }
-.progress-file { font-size: 11px; color: var(--text-muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .text-muted { color: var(--text-muted); font-size: 13px; }
 
 .search-bar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
@@ -955,101 +826,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.index-info-card {
-  background: white;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  padding: 16px 20px;
-  margin-bottom: 14px;
-}
-.index-info-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-.index-info-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.index-info-badge {
-  font-size: 11px;
-  padding: 2px 10px;
-  border-radius: 10px;
-  font-weight: 500;
-}
-.index-info-badge.configured {
-  background: rgba(34, 197, 94, 0.1);
-  color: #16a34a;
-}
-.index-info-badge.unconfigured {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-}
-.index-info-warning {
-  font-size: 13px;
-  color: #ef4444;
-  background: #fef2f2;
-  border: 1px solid #fca5a5;
-  border-radius: var(--radius-sm);
-  padding: 10px 14px;
-  line-height: 1.5;
-}
-.index-info-details {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.index-info-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-.index-info-row .info-label {
-  color: var(--text-muted);
-  min-width: 64px;
-}
-.index-info-row .info-value {
-  color: var(--text-primary);
-}
-.index-info-row .info-value.running {
-  color: #16a34a;
-}
-.index-info-row .info-value.stopped {
-  color: var(--text-muted);
-}
-.index-sub-stats {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-.index-sub-card {
-  flex: 1;
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 2px;
-}
-.index-sub-card .index-sub-num {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-  line-height: 1.2;
-}
-.index-sub-card .index-sub-label {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .card {

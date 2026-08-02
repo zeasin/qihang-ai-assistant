@@ -124,23 +124,6 @@ function updateTrayMenu(servicesStatus?) {
       label: `定时任务: ${s.scheduler ? '● 运行中' : '○ 已停止'}`,
       click: () => mainWindow?.webContents.send('service:toggle', 'scheduler'),
     },
-    {
-      label: `自动索引: ${s.indexer ? '● 运行中' : '○ 已停止'}`,
-      click: () => mainWindow?.webContents.send('service:toggle', 'indexer'),
-    },
-    { type: 'separator' },
-    {
-      label: '重新索引所有知识库',
-      click: async () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('service:status', { text: '开始重新索引...' });
-        }
-        await indexer.indexAll();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('service:status', { text: '索引完成' });
-        }
-      },
-    },
     { type: 'separator' },
     {
       label: '退出',
@@ -188,7 +171,8 @@ function createWindow() {
       mainWindow!.webContents.openDevTools({ mode: 'detach' });
     });
   } else {
-    mainWindow!.loadFile(path.join(__dirname, '../dist/index.html'));
+    // dist-electron/electron -> 项目根目录 dist/，需要向上两级
+    mainWindow!.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 
   mainWindow!.once('ready-to-show', () => mainWindow!.show());
