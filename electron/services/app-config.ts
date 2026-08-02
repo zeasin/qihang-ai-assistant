@@ -1,13 +1,26 @@
 /**
  * 应用级配置（config.json）
- * 笔记库等配置保存在项目根目录 config.json，不再写入数据库。
+ * 开发模式保存在项目根目录 config.json；打包版保存在用户主目录
+ * .qihang-work-ai 下（与数据库、日志同一目录），避免写入安装目录
+ * /asar 内部导致无法保存。
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { app } from 'electron';
 import logger from './logger';
 
-export const CONFIG_PATH =
-  process.env.QIHANG_CONFIG_PATH || path.join(__dirname, '..', '..', '..', 'config.json');
+function resolveConfigPath(): string {
+  if (process.env.QIHANG_CONFIG_PATH) return process.env.QIHANG_CONFIG_PATH;
+  if (app.isPackaged) {
+    // 与数据库（qihang-work-ai.db）、日志同一目录
+    return path.join(os.homedir(), '.qihang-work-ai', 'config.json');
+  }
+  // 开发模式沿用项目根目录 config.json
+  return path.join(__dirname, '..', '..', '..', 'config.json');
+}
+
+export const CONFIG_PATH = resolveConfigPath();
 
 let cached: any | null = null;
 
@@ -41,6 +54,8 @@ export function saveConfig(patch: Record<string, unknown>): void {
   const cfg = { ...loadConfig(), ...patch };
   cached = cfg;
   try {
+    const dir = path.dirname(CONFIG_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf-8');
   } catch (e: any) {
     logger.warn('[AppConfig] 写入 config.json 失败: %s', e && e.message ? e.message : e);

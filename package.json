@@ -20,6 +20,7 @@
     "highlight.js": "^11.11.1",
     "katex": "^0.17.0",
     "marked": "^15.0.0",
+    "mysql2": "^3.23.2",
     "node-cron": "^4.6.0",
     "ollama": "^0.5.14",
     "pinia": "^3.0.0",
@@ -45,8 +46,17 @@
     "directories": {
       "output": "release"
     },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json",
+      "LICENSE",
+      "!config.json",
+      "!nul"
+    ],
     "asarUnpack": [
-      "**/node_modules/better-sqlite3/**"
+      "**/node_modules/better-sqlite3/**",
+      "**/electron/worker/**"
     ],
     "win": {
       "target": "zip"

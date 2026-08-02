@@ -40,6 +40,7 @@ import { initCodingTasks, isCodingMessage, handleFeishuCodingMessage, getWorktre
 import * as aitool from './services/ai-tools';
 import { listBuiltinSuites, applyBuiltinSuites } from './services/builtin-datasets';
 import * as backup from './services/backup';
+import { migrateLocalToCloud } from './services/migrate-cloud';
 import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
 import * as indexer from './services/indexer';
@@ -725,6 +726,30 @@ ipcMain.handle('backup:openDir', async (_, { dir }) => {
     return { ok: true };
   } catch (e: any) { return { ok: false, error: e && e.message ? e.message : String(e) }; }
 });
+
+// --- 云端数据库（MySQL） ---
+ipcMain.handle('db:status', () => {
+  const s = db.getCloudStatus();
+  return {
+    enabled: s.enabled,
+    configured: s.configured,
+    state: s.state,
+    error: s.error,
+    mode: db.getDbMode(),
+    host: appConfig.getConfig('dbHost'),
+    port: appConfig.getConfig('dbPort') || '3306',
+    dbName: appConfig.getConfig('dbName'),
+    dbSsl: appConfig.getConfig('dbSsl'),
+  };
+});
+ipcMain.handle('db:test', async () => db.checkCloud());
+ipcMain.handle('db:reload', () => {
+  db.reloadCloud();
+  return { ok: true };
+});
+ipcMain.handle('db:migrate', async () => migrateLocalToCloud());
+
+
 ipcMain.handle('ds:pendingRecords', () => {
   const datasets = db.q("SELECT dataset_id, name FROM data_center_datasets ORDER BY name");
   const result: any[] = [];
@@ -1585,10 +1610,40 @@ app.whenReady().then(async () => {
   if (process.platform !== 'darwin') {
     Menu.setApplicationMenu(null);
   }
+  // 命令行迁移模式：electron . --migrate-cloud
+  if (process.argv.includes('--migrate-cloud')) {
+    logger.info('[Migrate] 命令行迁移模式启动');
+    const r = await migrateLocalToCloud((msg, cur, total) => {
+      logger.info('[Migrate] %s (%d/%d)', msg, cur, total);
+    });
+    if (r.ok) {
+      logger.info('[Migrate] 迁移完成: %j', r.counts);
+      console.log('[Migrate] 迁移完成: ' + JSON.stringify(r.counts));
+    } else {
+      logger.error('[Migrate] 迁移失败: %s', r.error);
+      console.error('[Migrate] 迁移失败: ' + r.error);
+    }
+    app.exit(r.ok ? 0 : 1);
+    return;
+  }
   try {
     await db.getDb();
   } catch (e) {
     logger.error('DB init error: %s', e);
+  }
+  // 云端数据库健康检查（未配置云 MySQL 时为本地模式，不弹窗）
+  const cloudHealth = await db.checkCloud();
+  if (cloudHealth.ok) {
+    logger.info('Database mode: %s%s', cloudHealth.mode === 'cloud' ? 'cloud (MySQL)' : 'local (SQLite)',
+      cloudHealth.mode === 'cloud' && cloudHealth.latencyMs !== undefined ? ', latency=' + cloudHealth.latencyMs + 'ms' : '');
+  } else {
+    logger.error('Cloud DB init error: %s', cloudHealth.error);
+    dialog.showErrorBox('云端数据库连接失败',
+      '已配置云 MySQL 但连接失败，应用主数据将无法读写。\n\n错误信息：' + (cloudHealth.error || '未知错误') +
+      '\n\n请在 设置 → 云端数据库 中检查配置，并确认：\n' +
+      '1. 云 MySQL 实例已开启外网访问\n' +
+      '2. 本机公网 IP 已加入云 MySQL 白名单\n' +
+      '3. 数据库名存在且账号有权限');
   }
   startupElapsed('db loaded');
   createTray();

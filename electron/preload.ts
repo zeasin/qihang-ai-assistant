@@ -91,6 +91,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pickDir: () => ipcRenderer.invoke('backup:pickDir'),
   },
 
+  // 云端数据库（MySQL）
+  db: {
+    status: () => ipcRenderer.invoke('db:status'),
+    test: () => ipcRenderer.invoke('db:test'),
+    reload: () => ipcRenderer.invoke('db:reload'),
+    migrate: () => ipcRenderer.invoke('db:migrate'),
+  },
+
   // Chat (unified: general chat + coding workbench)
   chat: {
     send: (question: string, sessionId: string, projectDir: string, kbIds: number[], images: unknown, agent: string, modelName: string) =>

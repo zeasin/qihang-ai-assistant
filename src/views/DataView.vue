@@ -78,6 +78,7 @@
                   <span class="ds-card-count">{{ ds.recordCount }} 条</span>
                 </div>
                 <div class="ds-card-actions">
+                  <button class="text-btn" @click="showAddRecord(ds)">+ 记录</button>
                   <button class="text-btn" @click="showEditDatasetPortal(activeModule, ds)">编辑</button>
                   <button class="text-btn text-btn-del" @click="deleteDatasetPortal(activeModule, ds)">删除</button>
                   <button class="btn btn-sm btn-primary" @click="openFullView(activeModule, ds)">查看全部 →</button>
@@ -95,7 +96,10 @@
                   </tr>
                 </tbody>
               </table>
-              <div v-else class="ds-empty">暂无记录</div>
+              <div v-else class="ds-empty">
+                暂无记录
+                <button class="btn btn-sm btn-secondary" @click="showAddRecord(ds)">+ 新增记录</button>
+              </div>
             </div>
             <div v-if="activeModule.datasets.length === 0" class="ds-empty-large">
               <p>该模块暂无数据集</p>
@@ -752,8 +756,8 @@ function getSchemaOptions(ds: any, key: string) {
   return Array.isArray(opts) && opts.length ? opts : [];
 }
 
-function showAddRecord() {
-  const ds = fullViewDs.value;
+function showAddRecord(dsArg?: any) {
+  const ds = dsArg || fullViewDs.value;
   if (!ds) return;
   currentRecordDs = ds;
   editingRecordId.value = '';
