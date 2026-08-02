@@ -9,93 +9,105 @@
     </div>
 
     <div class="content-body" v-if="modules.length > 0">
-      <div class="module-tabs">
-        <button
-          v-for="mod in modules"
-          :key="mod.id"
-          class="module-tab"
-          :class="{ active: activeModuleId === mod.id }"
-          @click="switchModule(mod)"
-        >
-          <span class="tab-icon">{{ mod.icon || '📁' }}</span>
-          <span class="tab-name">{{ mod.name }}</span>
-          <span class="tab-count">{{ mod.totalRecords }}</span>
-        </button>
+      <div class="module-sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">模块</span>
+          <button class="sidebar-add" @click="showAddModule" title="新建模块">+</button>
+        </div>
+        <div class="sidebar-list">
+          <div
+            v-for="mod in modules"
+            :key="mod.id"
+            class="sidebar-item"
+            :class="{ active: activeModuleId === mod.id }"
+            @click="switchModule(mod)"
+          >
+            <span class="sidebar-item-name">{{ mod.name }}</span>
+            <span class="sidebar-item-count">{{ mod.totalRecords }}</span>
+            <span class="sidebar-item-actions" v-if="activeModuleId === mod.id">
+              <button class="si-btn" @click.stop="showEditModule(mod)" title="编辑">✎</button>
+              <button class="si-btn si-btn-del" @click.stop="deleteModule(mod)" title="删除">×</button>
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div v-if="activeModule" class="module-panel">
-        <div class="panel-header">
-          <div class="panel-title-area">
-            <span class="panel-icon">{{ activeModule.icon || '📁' }}</span>
-            <span class="panel-name">{{ activeModule.name }}</span>
-            <span class="panel-desc" v-if="activeModule.description">{{ activeModule.description }}</span>
+      <div v-if="activeModule" class="module-main">
+        <div class="main-header">
+          <div class="main-title">
+            <h2>{{ activeModule.name }}</h2>
+            <span class="main-meta" v-if="activeModule.description">{{ activeModule.description }}</span>
           </div>
-          <div class="panel-actions">
-            <span class="panel-meta">{{ activeModule.totalRecords }} 条记录 · {{ activeModule.datasets.length }} 个数据集</span>
-            <button class="panel-btn" @click="showEditModule(activeModule)" title="编辑模块">✏️</button>
-            <button class="panel-btn panel-btn-danger" @click="deleteModule(activeModule)" title="删除模块">🗑️</button>
+          <div class="main-actions">
+            <button class="btn btn-sm btn-primary" @click="showAddDataset">+ 数据集</button>
           </div>
         </div>
 
-        <div class="panel-subtabs">
-          <button class="subtab" :class="{ active: moduleSubTab === 'ai' }" @click="moduleSubTab = 'ai'">🤖 AI 分析</button>
-          <button class="subtab" :class="{ active: moduleSubTab === 'data' }" @click="moduleSubTab = 'data'">📋 数据</button>
-        </div>
-
-        <div v-if="moduleSubTab === 'ai'" class="panel-ai-section">
-          <div class="ai-body">
-            <div v-if="activeModule.aiLoading" class="ai-loading">
-              <div class="spinner"></div>
-              <span>AI 正在分析业务数据...</span>
+        <div class="main-content">
+          <div class="ai-collapse">
+            <div class="ai-collapse-header" @click="toggleAiCollapse(activeModule)">
+              <span class="ai-icon">🤖</span>
+              <span class="ai-label">AI 业务分析</span>
+              <span class="ai-status" v-if="activeModule.aiLoading">生成中...</span>
+              <span class="ai-date" v-else-if="activeModule.aiAnalysis">{{ formatDate(activeModule.aiAnalysis.created_at) }}</span>
+              <span class="ai-toggle" v-if="!activeModule.aiLoading">{{ activeModule.aiCollapsed ? '展开' : '收起' }}</span>
             </div>
-            <div v-else-if="activeModule.aiAnalysis" class="ai-content">
-              <div class="ai-text" v-html="renderMarkdown(activeModule.aiAnalysis.content)"></div>
-              <div class="ai-actions">
-                <button class="btn btn-sm btn-secondary" @click="refreshAiAnalysis(activeModule, true)">🔄 刷新分析</button>
-                <button class="btn btn-sm btn-secondary" @click="archiveAnalysis(activeModule)" :disabled="activeModule.saving">📥 存档到笔记库</button>
+            <div v-if="!activeModule.aiCollapsed" class="ai-collapse-body">
+              <div v-if="activeModule.aiLoading" class="ai-loading">
+                <div class="spinner"></div>
+                <span>AI 正在分析业务数据...</span>
+              </div>
+              <div v-else-if="activeModule.aiAnalysis" class="ai-content">
+                <div class="ai-text" v-html="renderMarkdown(activeModule.aiAnalysis.content)"></div>
+                <div class="ai-bar">
+                  <button class="text-btn" @click="refreshAiAnalysis(activeModule, true)">↻ 刷新</button>
+                  <button class="text-btn" @click="archiveAnalysis(activeModule)" :disabled="activeModule.saving">📥 存档到笔记库</button>
+                </div>
+              </div>
+              <div v-else class="ai-loading">
+                <div class="spinner"></div>
+                <span>AI 正在分析...</span>
               </div>
             </div>
-            <div v-else class="ai-empty">
-              <span>AI 正在分析...</span>
+          </div>
+
+          <div class="data-section">
+            <div v-for="ds in activeModule.datasets" :key="ds.datasetId" class="ds-card">
+              <div class="ds-card-header">
+                <div class="ds-card-title">
+                  <span class="ds-card-name">{{ ds.name }}</span>
+                  <span class="ds-card-count">{{ ds.recordCount }} 条</span>
+                </div>
+                <div class="ds-card-actions">
+                  <button class="text-btn" @click="showEditDatasetPortal(activeModule, ds)">编辑</button>
+                  <button class="text-btn text-btn-del" @click="deleteDatasetPortal(activeModule, ds)">删除</button>
+                  <button class="btn btn-sm btn-primary" @click="openFullView(activeModule, ds)">查看全部 →</button>
+                </div>
+              </div>
+              <table class="preview-table" v-if="ds.recentRecords && ds.recentRecords.length > 0">
+                <thead>
+                  <tr>
+                    <th v-for="col in getPreviewColumns(ds)" :key="col">{{ col }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="rec in ds.recentRecords" :key="rec.id" class="pv-row" @click="viewRecordPortal(rec)">
+                    <td v-for="col in getPreviewColumns(ds)" :key="col" :title="rec[col] || ''">{{ truncateText(rec[col], 24) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-else class="ds-empty">暂无记录</div>
+            </div>
+            <div v-if="activeModule.datasets.length === 0" class="ds-empty-large">
+              <p>该模块暂无数据集</p>
+              <button class="btn btn-sm btn-primary" @click="showAddDataset">+ 创建数据集</button>
             </div>
           </div>
         </div>
+      </div>
 
-        <div v-if="moduleSubTab === 'data'" class="panel-datasets">
-          <div v-for="ds in activeModule.datasets" :key="ds.datasetId" class="dataset-section">
-            <div class="dataset-header">
-              <div class="dataset-title-area">
-                <span class="dataset-icon">📋</span>
-                <span class="dataset-name">{{ ds.name }}</span>
-                <span class="dataset-count">{{ ds.recordCount }} 条</span>
-              </div>
-              <div class="dataset-actions">
-                <button class="ds-btn" @click="showEditDatasetPortal(activeModule, ds)" title="编辑数据集">✏️</button>
-                <button class="ds-btn ds-btn-danger" @click="deleteDatasetPortal(activeModule, ds)" title="删除数据集">🗑️</button>
-                <button class="btn btn-sm btn-secondary" @click="openFullView(activeModule, ds)">查看全部 →</button>
-              </div>
-            </div>
-            <table class="preview-table" v-if="ds.recentRecords && ds.recentRecords.length > 0">
-              <thead>
-                <tr>
-                  <th v-for="col in getPreviewColumns(ds)" :key="col">{{ col }}</th>
-                  <th class="th-actions">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="rec in ds.recentRecords" :key="rec.id">
-                  <td v-for="col in getPreviewColumns(ds)" :key="col" :title="rec[col] || ''">{{ truncateText(rec[col], 20) }}</td>
-                  <td class="action-cell">
-                    <button class="action-btn" @click="viewRecordPortal(rec)">👁️</button>
-                    <button class="action-btn" @click="editRecordPortal(activeModule, ds, rec)">✏️</button>
-                    <button class="action-btn danger" @click="deleteRecordPortal(rec)">🗑️</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-else class="dataset-empty">暂无记录</div>
-          </div>
-        </div>
+      <div v-else class="panel-placeholder">
+        <p>选择一个模块</p>
       </div>
     </div>
 
@@ -127,22 +139,16 @@
           <table class="data-table" v-if="fullViewRecords.length > 0">
             <thead>
               <tr>
-                <th>状态</th>
-                <th v-for="col in fullViewColumns" :key="col">{{ col }}</th>
-                <th>操作</th>
+                <th class="th-status">状态</th>
+                <th v-for="col in fullViewColumns" :key="col" class="th-data">{{ col }}</th>
               </tr>
             </thead>
-            <tbody>
-              <tr v-for="rec in fullViewRecords" :key="rec.id">
-                <td><span class="badge badge-gray">{{ rec.status || '无' }}</span></td>
-                <td v-for="col in fullViewColumns" :key="col">{{ rec[col] || '' }}</td>
-                <td class="action-cell">
-                  <button class="action-btn" @click="viewRecordPortal(rec)">👁️</button>
-                  <button class="action-btn" @click="editRecordPortal(fullViewMod, fullViewDs, rec)">✏️</button>
-                  <button class="action-btn danger" @click="deleteRecordPortal(rec)">🗑️</button>
-                </td>
-              </tr>
-            </tbody>
+<tbody>
+                <tr v-for="rec in fullViewRecords" :key="rec.id" class="fv-row" @click="viewRecordPortal(rec)">
+                  <td class="td-status" @click.stop><span class="badge badge-gray">{{ rec.status || '无' }}</span></td>
+                  <td v-for="col in fullViewColumns" :key="col" class="td-data" :title="rec[col] || ''">{{ truncateText(rec[col], 30) || '' }}</td>
+                </tr>
+              </tbody>
           </table>
           <div v-else class="right-empty">
             <div class="empty-icon">📝</div>
@@ -328,6 +334,7 @@ interface ModuleData {
   totalRecords: number;
   aiLoading: boolean;
   aiAnalysis: any;
+  aiCollapsed: boolean;
   saving: boolean;
   datasets: DatasetData[];
 }
@@ -343,7 +350,6 @@ interface DatasetData {
 
 const modules = ref<ModuleData[]>([]);
 const activeModuleId = ref<string | null>(null);
-const moduleSubTab = ref<'ai' | 'data'>('ai');
 
 const activeModule = computed(() => {
   if (!activeModuleId.value) return null;
@@ -372,6 +378,7 @@ async function loadAll() {
         totalRecords: ov?.datasets?.reduce((s: number, d: any) => s + (d.recordCount || 0), 0) || 0,
         aiLoading: false,
         aiAnalysis: ov?.analysis || null,
+        aiCollapsed: true,
         saving: false,
         datasets: ov?.datasets || [],
       });
@@ -507,7 +514,12 @@ function ensureAiAnalysis(mod: ModuleData) {
 
 function switchModule(mod: ModuleData) {
   activeModuleId.value = mod.id;
+  mod.aiCollapsed = true;
   ensureAiAnalysis(mod);
+}
+
+function toggleAiCollapse(mod: ModuleData) {
+  mod.aiCollapsed = !mod.aiCollapsed;
 }
 
 async function refreshAiAnalysis(mod: ModuleData, force?: boolean) {
@@ -777,7 +789,7 @@ onMounted(async () => {
 .content-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
 .header-actions { display: flex; gap: 8px; }
 .content-body {
-  flex: 1; overflow-y: auto; display: flex; flex-direction: column;
+  flex: 1; display: flex; overflow: hidden;
 }
 .content-empty {
   flex: 1; display: flex; flex-direction: column;
@@ -787,122 +799,145 @@ onMounted(async () => {
 .empty-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
 .empty-desc { font-size: 13px; }
 
-/* Module Tabs */
-.module-tabs {
-  display: flex; gap: 0; padding: 0 20px; border-bottom: 1px solid var(--border);
-  background: white; flex-shrink: 0; overflow-x: auto;
-}
-.module-tab {
-  display: flex; align-items: center; gap: 6px; padding: 10px 16px;
-  font-size: 13px; font-weight: 500; cursor: pointer; border: none;
-  background: none; color: var(--text-secondary); white-space: nowrap;
-  border-bottom: 2px solid transparent; transition: all 0.2s;
-}
-.module-tab:hover { color: var(--text-primary); background: var(--hover); }
-.module-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
-.tab-icon { font-size: 15px; }
-.tab-count {
-  font-size: 11px; background: rgba(0,0,0,0.06); padding: 0 6px;
-  border-radius: 8px; color: var(--text-muted);
-}
-.module-tab.active .tab-count { background: rgba(99,102,241,0.1); color: var(--primary); }
-
-/* Module Panel */
-.module-panel {
-  flex: 1; overflow: hidden; padding: 0;
+/* ---- Sidebar ---- */
+.module-sidebar {
+  width: 200px; min-width: 200px;
+  border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
+  background: #fafbfc;
 }
-.panel-header {
+.sidebar-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 20px; border-bottom: 1px solid var(--border);
-  background: white; flex-shrink: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
 }
-.panel-title-area { display: flex; align-items: center; gap: 8px; }
-.panel-icon { font-size: 18px; }
-.panel-name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
-.panel-desc { font-size: 12px; color: var(--text-muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.panel-actions { display: flex; align-items: center; gap: 8px; }
-.panel-meta { font-size: 12px; color: var(--text-muted); }
-.panel-btn {
+.sidebar-title { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.sidebar-add {
+  width: 22px; height: 22px; border-radius: 4px;
+  border: none; background: transparent;
+  font-size: 16px; line-height: 1; cursor: pointer;
+  color: var(--text-muted); display: flex; align-items: center; justify-content: center;
+}
+.sidebar-add:hover { background: var(--hover); color: var(--primary); }
+.sidebar-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.sidebar-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 16px; cursor: pointer;
+  font-size: 13px; color: var(--text-secondary);
+  border-left: 3px solid transparent;
+  transition: none;
+}
+.sidebar-item:hover { background: var(--hover); color: var(--text-primary); }
+.sidebar-item.active { background: white; color: var(--text-primary); border-left-color: var(--primary); font-weight: 500; }
+.sidebar-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-item-count { font-size: 11px; color: var(--text-muted); }
+.sidebar-item-actions { display: none; gap: 2px; flex-shrink: 0; }
+.sidebar-item.active .sidebar-item-actions { display: flex; }
+.si-btn {
   background: none; border: none; cursor: pointer; font-size: 13px;
-  padding: 2px 5px; border-radius: 3px; color: var(--text-muted); line-height: 1;
+  padding: 0 3px; color: var(--text-muted); line-height: 1;
 }
-.panel-btn:hover { background: var(--hover); color: var(--text-primary); }
-.panel-btn-danger:hover { color: #dc2626; }
+.si-btn:hover { color: var(--text-primary); }
+.si-btn-del:hover { color: #dc2626; }
 
-/* Sub Tabs */
-.panel-subtabs {
-  display: flex; gap: 0; padding: 0 20px; border-bottom: 1px solid var(--border);
+/* ---- Main ---- */
+.module-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.main-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 24px; border-bottom: 1px solid var(--border);
   background: white; flex-shrink: 0;
 }
-.subtab {
-  padding: 10px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
-  border: none; background: none; color: var(--text-secondary);
-  border-bottom: 2px solid transparent; transition: all 0.2s;
+.main-title { display: flex; align-items: baseline; gap: 10px; }
+.main-title h2 { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.main-meta { font-size: 12px; color: var(--text-muted); }
+.main-actions { display: flex; gap: 8px; }
+.main-content { flex: 1; overflow-y: auto; }
+.panel-placeholder {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted); font-size: 14px;
 }
-.subtab:hover { color: var(--text-primary); background: var(--hover); }
-.subtab.active { color: var(--primary); border-bottom-color: var(--primary); }
 
-/* AI Section */
-.panel-ai-section { flex: 1; overflow-y: auto; }
-.ai-body { padding: 16px 20px; background: #f8faff; min-height: 200px; }
-.ai-loading { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; }
-.ai-text { font-size: 13px; line-height: 1.7; color: var(--text-primary); }
-.ai-text :deep(pre) { background: #f1f5f9; padding: 8px 12px; border-radius: var(--radius-sm); overflow-x: auto; font-size: 12px; }
-.ai-text :deep(code) { font-size: 12px; background: #f1f5f9; padding: 1px 4px; border-radius: 3px; }
-.ai-text :deep(h1) { font-size: 15px; margin: 12px 0 6px; }
-.ai-text :deep(h2) { font-size: 14px; margin: 10px 0 5px; }
-.ai-text :deep(h3) { font-size: 13px; margin: 8px 0 4px; }
-.ai-text :deep(p) { margin: 4px 0; }
-.ai-text :deep(ul) { padding-left: 18px; margin: 4px 0; }
-.ai-text :deep(li) { margin: 2px 0; }
-.ai-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
-.ai-empty { display: flex; align-items: center; gap: 12px; color: var(--text-muted); font-size: 13px; }
+/* ---- AI Collapse ---- */
+.ai-collapse { border-bottom: 1px solid var(--border); }
+.ai-collapse-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 24px; cursor: pointer; user-select: none;
+  background: #f8faff;
+}
+.ai-collapse-header:hover { background: #eef2ff; }
+.ai-icon { font-size: 15px; }
+.ai-label { font-size: 13px; font-weight: 500; color: var(--text-primary); flex: 1; }
+.ai-status { font-size: 12px; color: var(--primary); }
+.ai-date { font-size: 11px; color: var(--text-muted); }
+.ai-toggle { font-size: 12px; color: var(--primary); }
+.ai-collapse-body { padding: 16px 24px 20px; background: #f8faff; }
+.ai-loading { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 13px; }
+.ai-text { font-size: 14px; line-height: 1.8; color: var(--text-primary); }
+.ai-text :deep(pre) { background: #f1f5f9; padding: 12px 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; margin: 12px 0; }
+.ai-text :deep(code) { font-size: 13px; background: #f1f5f9; padding: 2px 5px; border-radius: 3px; }
+.ai-text :deep(h1) { font-size: 18px; margin: 20px 0 8px; }
+.ai-text :deep(h2) { font-size: 16px; margin: 16px 0 6px; }
+.ai-text :deep(h3) { font-size: 14px; margin: 12px 0 4px; }
+.ai-text :deep(p) { margin: 6px 0; }
+.ai-text :deep(ul) { padding-left: 20px; margin: 6px 0; }
+.ai-text :deep(li) { margin: 3px 0; }
+.ai-text :deep(blockquote) { border-left: 3px solid var(--primary); padding-left: 12px; margin: 8px 0; color: var(--text-secondary); }
+.ai-text :deep(strong) { font-weight: 600; }
+.ai-bar {
+  display: flex; gap: 12px; margin-top: 20px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
 
-/* Dataset Section */
-.panel-datasets { flex: 1; overflow-y: auto; }
-.dataset-section { border-bottom: 1px solid var(--border); }
-.dataset-section:last-child { border-bottom: none; }
-.dataset-header {
+/* ---- Data Section ---- */
+.data-section { padding: 16px 24px; display: flex; flex-direction: column; gap: 16px; }
+.ds-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 8px; overflow: hidden;
+}
+.ds-card-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 16px; background: white;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
 }
-.dataset-title-area { display: flex; align-items: center; gap: 6px; }
-.dataset-icon { font-size: 14px; }
-.dataset-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
-.dataset-count { font-size: 11px; color: var(--text-muted); }
-.dataset-actions { display: flex; align-items: center; gap: 6px; }
-.ds-btn {
-  background: none; border: none; cursor: pointer; font-size: 12px;
-  padding: 1px 4px; border-radius: 3px; color: var(--text-muted); line-height: 1;
-}
-.ds-btn:hover { color: var(--text-primary); }
-.ds-btn-danger:hover { color: #dc2626; }
+.ds-card-title { display: flex; align-items: center; gap: 8px; }
+.ds-card-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+.ds-card-count { font-size: 12px; color: var(--text-muted); }
+.ds-card-actions { display: flex; align-items: center; gap: 8px; }
 
 /* Preview Table */
-.preview-table {
-  width: 100%; border-collapse: collapse; font-size: 12px;
-  margin: 0 16px 8px; width: calc(100% - 32px);
-}
+.preview-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .preview-table th {
-  text-align: left; padding: 6px 10px; background: #f8fafc;
-  border-bottom: 1px solid var(--border); font-weight: 600;
-  color: var(--text-secondary); font-size: 11px;
+  text-align: left; padding: 8px 14px; background: #fafbfc;
+  border-bottom: 1px solid var(--border); font-weight: 500;
+  color: var(--text-secondary); font-size: 12px;
 }
-.preview-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.preview-table tr:hover { background: var(--hover); }
-.th-actions { width: 60px; }
-.action-cell { white-space: nowrap; }
-.action-btn {
-  background: none; border: none; cursor: pointer; font-size: 11px;
-  color: var(--text-muted); padding: 1px 4px;
+.preview-table td { padding: 8px 14px; border-bottom: 1px solid var(--border); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview-table tr:last-child td { border-bottom: none; }
+.preview-table tbody tr:hover { background: #f8f9fb; }
+.th-actions { width: 56px; }
+.row-actions { white-space: nowrap; opacity: 0; }
+.preview-table tbody tr:hover .row-actions { opacity: 1; }
+.row-btn {
+  background: none; border: none; cursor: pointer; font-size: 12px;
+  color: var(--text-muted); padding: 2px 5px; border-radius: 3px;
 }
-.action-btn:hover { color: var(--primary); }
-.action-btn.danger:hover { color: var(--danger); }
-.dataset-empty { padding: 8px 16px; font-size: 12px; color: var(--text-muted); }
+.row-btn:hover { color: var(--text-primary); background: var(--hover); }
+.row-btn-del:hover { color: #dc2626; }
+.ds-empty { padding: 12px 16px; font-size: 13px; color: var(--text-muted); }
+.ds-empty-large { padding: 40px 0; text-align: center; color: var(--text-muted); font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+/* Text Button */
+.text-btn {
+  background: none; border: none; cursor: pointer; font-size: 12px;
+  color: var(--text-secondary); padding: 4px 8px; border-radius: 4px;
+}
+.text-btn:hover { background: var(--hover); color: var(--primary); }
+.text-btn-del:hover { color: #dc2626; }
 
 /* Full View Modal */
-.modal-box-wide { width: 90%; max-width: 1000px; }
+.fv-row { cursor: pointer; }
+.fv-row:hover { background: var(--hover); }
+.fv-row td { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-row { cursor: pointer; }
 .modal-header-actions { display: flex; align-items: center; gap: 8px; }
 .modal-badge { font-size: 12px; color: var(--text-muted); background: #f5f5f7; padding: 2px 8px; border-radius: 10px; }
 .fullview-toolbar {
@@ -921,12 +956,16 @@ onMounted(async () => {
   background: white; border-spacing: 0;
 }
 .data-table th {
-  text-align: left; padding: 10px 14px; background: #f8fafc;
+  text-align: left; padding: 10px 16px; background: #f8fafc;
   border-bottom: 2px solid var(--border); font-weight: 600;
   color: var(--text-secondary); position: sticky; top: 0; z-index: 1;
 }
-.data-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.data-table td { padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .data-table tr:hover { background: var(--hover); }
+.th-status { width: 80px; }
+.td-status { text-align: center; }
+.th-data { }
+.td-data { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Modals */
 .modal-overlay {
@@ -939,6 +978,9 @@ onMounted(async () => {
   box-shadow: 0 10px 25px rgba(0,0,0,0.1); max-width: 90%;
   max-height: 90vh; overflow-y: auto; width: 480px;
 }
+.modal-box-wide { width: 1200px; max-width: 1200px; height: 90vh; display: flex; flex-direction: column; }
+.modal-box-wide .modal-header { flex-shrink: 0; }
+.modal-box-wide .modal-body { flex: 1; overflow-y: auto; }
 .modal-header {
   padding: 14px 20px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
