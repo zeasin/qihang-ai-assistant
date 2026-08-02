@@ -73,6 +73,9 @@
             <h3 class="chat-title">{{ currentSession?.title || '对话' }}</h3>
             <span class="chat-project-badge" v-if="currentProject">📁 {{ currentProject.name }}</span>
           </div>
+          <div class="chat-header-right">
+            <button class="btn btn-sm btn-secondary" :disabled="isStreaming" @click="openChangesModal" title="查看该会话在隔离 worktree 中的改动，可合并/提交/丢弃">🛠️ 审查变更</button>
+          </div>
         </div>
 
         <!-- 消息列表 -->
@@ -172,6 +175,51 @@
         <div class="detail-row"><span class="detail-label">类型</span><span class="detail-value">{{ detailProject?.type }}</span></div>
         <div class="detail-row"><span class="detail-label">文件夹</span><span class="detail-value">{{ detailProject?.dir || '未设置' }}</span></div>
         <div class="detail-row" v-if="detailProject?.description"><span class="detail-label">描述</span><span class="detail-value">{{ detailProject?.description }}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 变更审查弹窗 -->
+  <div v-if="showChangesModal" class="modal-overlay" @click.self="closeChangesModal">
+    <div class="modal-box changes-modal" @click.stop>
+      <div class="modal-header">
+        <h3>🛠️ 变更审查</h3>
+        <button class="modal-close" @click="closeChangesModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div v-if="changesLoading" class="changes-loading">正在收集改动...</div>
+        <template v-else-if="changesError">
+          <div class="changes-error">{{ changesError }}</div>
+        </template>
+        <template v-else>
+          <div class="changes-meta" v-if="changes">
+            <span class="meta-badge" :class="{ isolated: changes.isolated }">{{ changes.isolated ? '🔒 隔离 worktree' : '📂 原目录执行' }}</span>
+            <span class="meta-badge">{{ changes.integrationStatus === 'integrated' ? '✅ 已合并' : changes.integrationStatus === 'pending_review' ? '⏳ 待提交' : '🧩 待合并' }}</span>
+            <span class="meta-badge" v-if="changes.pendingCommits">⬆ {{ changes.pendingCommits }} 待合并提交</span>
+          </div>
+          <div class="changes-summary" v-if="changes && changes.files">
+            <span>改动文件: {{ changes.files.length }}</span>
+            <span v-if="changes.latestCommit">最近提交: {{ changes.latestCommit.message.slice(0, 40) }}</span>
+          </div>
+          <div class="changes-files" v-if="changes && changes.files.length">
+            <div v-for="(f, i) in changes.files" :key="i" class="change-file">
+              <span class="change-type" :class="f.changeType">{{ typeLabel(f.changeType) }}</span>
+              <span class="change-path">{{ f.path }}</span>
+              <span class="change-stat" v-if="!f.binary">+{{ f.additions }} -{{ f.deletions }}</span>
+            </div>
+          </div>
+          <div class="changes-diff" v-if="changes && changes.diff">
+            <pre>{{ changes.diff.slice(0, 30000) }}</pre>
+          </div>
+        </template>
+      </div>
+      <div class="modal-footer changes-actions">
+        <span class="changes-hint" v-if="changes && changes.isolated">改动合并到主项目后仍不提交，需手动提交</span>
+        <button class="btn btn-secondary" @click="closeChangesModal">关闭</button>
+        <button v-if="changes?.integrationStatus === 'not_applied'" class="btn btn-primary" :disabled="changesBusy" @click="doApply">合并到主项目</button>
+        <button v-if="changes?.integrationStatus === 'pending_review'" class="btn btn-primary" :disabled="changesBusy" @click="doCommit">提交变更</button>
+        <button v-if="changes?.integrationStatus === 'pending_review'" class="btn btn-secondary" :disabled="changesBusy" @click="doAbort">撤销合并</button>
+        <button class="btn btn-danger" :disabled="changesBusy" @click="doDiscard">丢弃改动</button>
       </div>
     </div>
   </div>
@@ -652,6 +700,92 @@ const autoResizeTextarea = () => {
     inputRef.value.style.height = Math.min(inputRef.value.scrollHeight, 120) + 'px';
   }
 };
+
+// ========== 变更审查 ==========
+const showChangesModal = ref(false);
+const changesLoading = ref(false);
+const changesBusy = ref(false);
+const changesError = ref('');
+const changes = ref<any>(null);
+
+async function openChangesModal() {
+  const projectId = currentSession.value?.project_id;
+  if (!projectId) return;
+  showChangesModal.value = true;
+  changesError.value = '';
+  changes.value = null;
+  await refreshChanges(projectId);
+}
+
+async function refreshChanges(projectId: number) {
+  changesLoading.value = true;
+  changesError.value = '';
+  try {
+    const res = await API.coding.changes(currentSessionId.value, projectId);
+    if (res?.ok) changes.value = res.changes;
+    else changesError.value = res?.error || '收集失败';
+  } catch (e: any) {
+    changesError.value = e.message || '收集失败';
+  } finally {
+    changesLoading.value = false;
+  }
+}
+
+function typeLabel(t: string) {
+  return ({ added: '新增', modified: '修改', deleted: '删除', renamed: '重命名' } as any)[t] || t;
+}
+
+async function runChangesAction(action: () => Promise<any>, okText: string) {
+  const projectId = currentSession.value?.project_id;
+  if (!projectId) return;
+  changesBusy.value = true;
+  try {
+    const res = await action();
+    if (res?.ok) {
+      alert(okText);
+      await refreshChanges(projectId);
+    } else {
+      alert(res?.error || '操作失败');
+    }
+  } catch (e: any) {
+    alert(e.message || '操作失败');
+  } finally {
+    changesBusy.value = false;
+  }
+}
+
+function doApply() {
+  const projectId = currentSession.value?.project_id;
+  if (!projectId) return;
+  if (!confirm('将 worktree 改动合并进主项目（staged，不提交）。确定？')) return;
+  runChangesAction(() => API.coding.applyChanges(currentSessionId.value, projectId), '已合并到主项目（待提交）');
+}
+
+function doCommit() {
+  const projectId = currentSession.value?.project_id;
+  if (!projectId) return;
+  if (!confirm('提交变更到主项目本地分支？')) return;
+  runChangesAction(() => API.coding.commitChanges(currentSessionId.value, projectId), '已提交');
+}
+
+function doAbort() {
+  const projectId = currentSession.value?.project_id;
+  if (!projectId) return;
+  if (!confirm('撤销主项目中待提交的合并？')) return;
+  runChangesAction(() => API.coding.abortChanges(currentSessionId.value, projectId), '已撤销合并');
+}
+
+function doDiscard() {
+  const projectId = currentSession.value?.project_id;
+  if (!projectId) return;
+  if (!confirm('将丢弃 worktree 中的全部改动（不可恢复）。确定？')) return;
+  runChangesAction(() => API.coding.discardChanges(currentSessionId.value, projectId), '已丢弃改动');
+}
+
+function closeChangesModal() {
+  showChangesModal.value = false;
+  changes.value = null;
+}
 
 // ========== 项目弹窗 ==========
 function openAddProject() {
@@ -1468,4 +1602,29 @@ onBeforeUnmount(() => {
 .project-detail-modal .detail-row { display: flex; gap: 8px; font-size: 13px; }
 .project-detail-modal .detail-label { color: var(--text-muted); flex-shrink: 0; min-width: 56px; }
 .project-detail-modal .detail-value { color: var(--text-primary); word-break: break-all; }
+
+/* 变更审查弹窗 */
+.changes-modal { width: 720px; max-width: 90vw; }
+.changes-modal .modal-body { max-height: 60vh; }
+.changes-loading, .changes-error { color: var(--text-secondary); font-size: 13px; padding: 12px 0; }
+.changes-error { color: #dc2626; }
+.changes-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.meta-badge { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: #f1f5f9; color: #475569; }
+.meta-badge.isolated { background: #ecfdf5; color: #047857; }
+.changes-summary { display: flex; gap: 16px; font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+.changes-files { max-height: 160px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; }
+.change-file { display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 12px; border-bottom: 1px solid #f1f5f9; }
+.change-file:last-child { border-bottom: none; }
+.change-type { flex-shrink: 0; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #f1f5f9; color: #475569; }
+.change-type.added { background: #ecfdf5; color: #047857; }
+.change-type.deleted { background: #fef2f2; color: #dc2626; }
+.change-type.modified { background: #eff6ff; color: #2563eb; }
+.change-path { flex: 1; color: var(--text-primary); word-break: break-all; }
+.change-stat { flex-shrink: 0; color: var(--text-muted); font-family: monospace; }
+.changes-diff { border: 1px solid var(--border); border-radius: 8px; background: #0f172a; max-height: 320px; overflow: auto; }
+.changes-diff pre { margin: 0; padding: 12px; color: #e2e8f0; font-size: 12px; font-family: ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; }
+.changes-actions .changes-hint { font-size: 12px; color: var(--text-muted); margin-right: auto; align-self: center; }
+.btn-danger { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
+.btn-danger:hover { background: #fee2e2; border-color: #fca5a5; }
+.btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

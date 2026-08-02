@@ -213,6 +213,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('coding:switchAgent', { sessionId, agent }),
     send: (question: string, sessionId: string, projectDir: string, agent: string, images: unknown, modelName: string) =>
       ipcRenderer.invoke('coding:send', { question, sessionId, projectDir, agent, images, modelName }),
+    changes: (sessionId: string, projectId: number) =>
+      ipcRenderer.invoke('coding:changes', { sessionId, projectId }),
+    applyChanges: (sessionId: string, projectId: number) =>
+      ipcRenderer.invoke('coding:changes:apply', { sessionId, projectId }),
+    commitChanges: (sessionId: string, projectId: number, message?: string, push?: boolean) =>
+      ipcRenderer.invoke('coding:changes:commit', { sessionId, projectId, message, push }),
+    abortChanges: (sessionId: string, projectId: number) =>
+      ipcRenderer.invoke('coding:changes:abort', { sessionId, projectId }),
+    discardChanges: (sessionId: string, projectId: number) =>
+      ipcRenderer.invoke('coding:changes:discard', { sessionId, projectId }),
+    listProjects: () => ipcRenderer.invoke('coding:projects'),
+    listSessions: (limit?: number) => ipcRenderer.invoke('coding:sessions', { limit }),
   },
 
   // Event listeners (streaming)

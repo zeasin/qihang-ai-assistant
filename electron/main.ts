@@ -36,6 +36,7 @@ import * as db from './services/database';
 import * as appConfig from './services/app-config';
 import { runPi, listPiModels, generateDailyReport as piGenerateDailyReport } from './services/pi-agent';
 import { buildNoteToolDefs, buildDataToolDefs, buildCodingToolDefs } from './services/tools';
+import { initCodingTasks, isCodingMessage, handleFeishuCodingMessage, getWorktreeService, listCodingProjects, collectSessionChanges, applySessionChanges, commitSessionChanges, abortSessionChanges, discardSessionChanges, latestCodingSessions } from './services/coding-task';
 import * as aitool from './services/ai-tools';
 import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
@@ -309,6 +310,21 @@ const feishuMessageHandler = async (msg) => {
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('feishu:message', msg);
+  }
+
+  // 编程消息（识别到代码项目 或 命中编程关键词）→ 走 worktree 隔离任务
+  try {
+    if (isCodingMessage(msg.text, db)) {
+      const result = await handleFeishuCodingMessage(msg, { db, feishu, appConfig });
+      if (result.handled) {
+        if (result.reply) feishu.replyCard(msg, result.reply, '🤖 启航AI·编程');
+        return;
+      }
+    }
+  } catch (e) {
+    logger.error('[Feishu] Coding task error: %s', e.message);
+    feishu.replyCard(msg, `编程任务出错: ${e.message}`, '❌ 错误');
+    return;
   }
 
   try {
@@ -808,6 +824,60 @@ ipcMain.handle('coding:send', async (event, { question, sessionId, projectDir, a
     sendToRenderer('coding:error', { sessionId: sid, text: err.message });
   }
 });
+
+// --- 编程变更审查（worktree 隔离） ---
+ipcMain.handle('coding:changes', async (_, { sessionId, projectId }) => {
+  try {
+    const project = db.project.get(projectId);
+    if (!project) return { ok: false, error: '项目不存在' };
+    const changes = await collectSessionChanges(sessionId, project);
+    return { ok: true, changes };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('coding:changes:apply', async (_, { sessionId, projectId }) => {
+  try {
+    const project = db.project.get(projectId);
+    if (!project) return { ok: false, error: '项目不存在' };
+    const result = await applySessionChanges(sessionId, project);
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('coding:changes:commit', async (_, { sessionId, projectId, message, push }) => {
+  try {
+    const project = db.project.get(projectId);
+    if (!project) return { ok: false, error: '项目不存在' };
+    const result = await commitSessionChanges(sessionId, project, message, push);
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('coding:changes:abort', async (_, { sessionId, projectId }) => {
+  try {
+    const project = db.project.get(projectId);
+    if (!project) return { ok: false, error: '项目不存在' };
+    const result = await abortSessionChanges(sessionId, project);
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('coding:changes:discard', async (_, { sessionId, projectId }) => {
+  try {
+    const project = db.project.get(projectId);
+    if (!project) return { ok: false, error: '项目不存在' };
+    const result = await discardSessionChanges(sessionId, project);
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('coding:projects', () => listCodingProjects(db));
+ipcMain.handle('coding:sessions', (_, { limit } = {}) => latestCodingSessions(db, limit));
 
 // 模型映射：pi 原生 pattern 直传，其余用 pi 默认模型
 function piModelPattern(modelName) {
@@ -1479,6 +1549,7 @@ app.whenReady().then(async () => {
 
   const savedAppId = appConfig.getConfig('feishuAppId');
   const savedAppSecret = appConfig.getConfig('feishuAppSecret');
+  initCodingTasks();
   if (savedAppId && savedAppSecret) {
     logger.info('Auto-starting Feishu bot from saved config...');
     startFeishu({ app_id: savedAppId, app_secret: savedAppSecret });
