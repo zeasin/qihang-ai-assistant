@@ -286,6 +286,45 @@ async function listDatasetsTool() {
   return all.length ? all.map(d => `- ${d.name} (${d.id}): ${d.schema_json}`).join('\n') : '暂无数据集';
 }
 
+function resolveDataset(datasetName) {
+  const all = db.ds.list();
+  return all.find(d => d.name === datasetName || d.id === datasetName) || null;
+}
+
+function parseJsonArg(raw, label) {
+  try { return JSON.parse(raw); } catch { return { error: `${label} 不是合法 JSON 对象` }; }
+}
+
+async function createDatasetTool({ name, description, schemaJson }) {
+  if (!name || !name.trim()) return '请提供数据集名称（name）';
+  db.ds.add({ name: name.trim(), description: description || '', schemaJson: schemaJson || '{}' });
+  const ds = resolveDataset(name.trim());
+  return `已创建数据集 "${name.trim()}" (id: ${ds ? ds.id : '?'})。可用 insert_dataset_record 写入记录。`;
+}
+
+async function insertDatasetRecordTool({ datasetName, data }) {
+  const ds = resolveDataset(datasetName);
+  if (!ds) {
+    const names = db.ds.list().map(d => d.name).join(', ');
+    return `数据集 "${datasetName}" 不存在。可用数据集: ${names || '无'}。`;
+  }
+  const obj = parseJsonArg(data, 'data');
+  if (obj.error) return obj.error;
+  db.ds.insert(ds.id, obj);
+  const r = db.qOne("SELECT id FROM data_center_records WHERE dataset_id = ? ORDER BY id DESC LIMIT 1", ds.id);
+  logger.info('[Tools] insert_dataset_record: %s → id %s', datasetName, r ? r.id : '?');
+  return `已向数据集 "${ds.name}" 插入一条记录 (id: ${r ? r.id : '?'})`;
+}
+
+async function updateDatasetRecordTool({ id, data }) {
+  const exists = db.qOne("SELECT id FROM data_center_records WHERE id = ?", id);
+  if (!exists) return `记录 id=${id} 不存在。可先用 query_dataset 查询记录 id。`;
+  const obj = parseJsonArg(data, 'data');
+  if (obj.error) return obj.error;
+  db.ds.updateRecord(id, obj);
+  return `已更新数据集记录 id=${id}`;
+}
+
 async function readProjectFileTool({ filePath }, projectDir) {
   const root = projectRoot(projectDir);
   const fullPath = path.isAbsolute(filePath) ? filePath : path.join(root, filePath);
@@ -410,6 +449,65 @@ function getChinaDate(offsetDays = 0) {
   return china.toISOString().slice(0, 10);
 }
 
+async function addTodoTool({ title, description, priority, due_date, status }) {
+  if (!title || !title.trim()) return '请提供待办标题（title）';
+  const r = db.todo.add({
+    title: title.trim(),
+    description: description || '',
+    priority: priority || 'mid',
+    due_date: due_date || '',
+    status: status || 'pending',
+  });
+  logger.info('[Tools] add_todo: %s → id %s', title, r.id);
+  return `已创建待办 "${title}" (id: ${r.id}, 优先级: ${priority || 'mid'}, 状态: ${status || 'pending'})`;
+}
+
+async function updateTodoTool({ id, title, description, priority, due_date, status }) {
+  const exists = db.todo.get(id);
+  if (!exists) return `待办 id=${id} 不存在。可先用 query_todos 查询待办 id。`;
+  const patch: any = {};
+  if (title !== undefined && title !== null) patch.title = title;
+  if (description !== undefined && description !== null) patch.description = description;
+  if (priority !== undefined && priority !== null) patch.priority = priority;
+  if (due_date !== undefined && due_date !== null) patch.due_date = due_date;
+  if (status !== undefined && status !== null) patch.status = status;
+  if (!Object.keys(patch).length) return '没有需要更新的字段';
+  db.todo.update(id, patch);
+  return `已更新待办 id=${id}：${Object.keys(patch).join(', ')}`;
+}
+
+async function addReminderTool({ name, message, type, time, day_of_week, day_of_month, date }) {
+  if (!name || !name.trim()) return '请提供提醒名称（name）';
+  const r = db.reminder.add({
+    name: name.trim(),
+    message: message || '',
+    type: type || 'daily',
+    time: time || '09:00',
+    day_of_week: day_of_week || 0,
+    day_of_month: day_of_month || 1,
+    date: date || '',
+  });
+  logger.info('[Tools] add_reminder: %s → id %s', name, r.id);
+  return `已创建提醒 "${name}" (id: ${r.id}, 类型: ${type || 'daily'}, 时间: ${time || '09:00'})`;
+}
+
+async function updateReminderTool({ id, name, message, time, enabled, type, day_of_week, day_of_month, date }) {
+  const exists = db.reminder.get(id);
+  if (!exists) return `提醒 id=${id} 不存在。可先用 query_reminders 查询提醒 id。`;
+  const patch: any = {};
+  if (name !== undefined && name !== null) patch.name = name;
+  if (message !== undefined && message !== null) patch.message = message;
+  if (time !== undefined && time !== null) patch.time = time;
+  if (enabled !== undefined && enabled !== null) patch.enabled = enabled === 'true' || enabled === true;
+  if (type !== undefined && type !== null) patch.type = type;
+  if (day_of_week !== undefined && day_of_week !== null) patch.day_of_week = Number(day_of_week);
+  if (day_of_month !== undefined && day_of_month !== null) patch.day_of_month = Number(day_of_month);
+  if (date !== undefined && date !== null) patch.date = date;
+  if (!Object.keys(patch).length) return '没有需要更新的字段';
+  db.reminder.update(id, patch);
+  return `已更新提醒 id=${id}：${Object.keys(patch).join(', ')}`;
+}
+
 async function queryTodosTool({ status, priority, date_from, date_to, limit }) {
   let sql = 'SELECT * FROM plan_todos WHERE 1=1';
   const p: any[] = [];
@@ -503,6 +601,9 @@ async function buildDataToolDefs(projectDir) {
   return [
     { name: 'query_dataset', label: 'query_dataset', description: '查询本地数据集中的记录。数据集用于存储结构化信息，如代办事项、客户信息、项目、Bug等。', parameters: Type.Object({ datasetName: Type.String({ description: '数据集名称，如 todos, customers, projects, bugs' }), conditions: optStr('查询条件关键字'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryDatasetTool({ ...args, limit: toNumber(args.limit, 20) }, projectDir)) },
     { name: 'list_datasets', label: 'list_datasets', description: '列出所有可用的数据集及其结构。', parameters: Type.Object({}), execute: exec(() => listDatasetsTool()) },
+    { name: 'create_dataset', label: 'create_dataset', description: '创建一个新的数据集，用于存储结构化信息（如待办、客户、项目、Bug 等）。创建后可用 insert_dataset_record 写入记录。', parameters: Type.Object({ name: Type.String({ description: '数据集名称，如 todos, customers' }), description: Type.Optional(Type.String({ description: '数据集说明' })), schemaJson: Type.Optional(Type.String({ description: '可选的 Schema JSON 字符串，如 {"fields":[{"name":"title"}]}' })) }), execute: exec(createDatasetTool) },
+    { name: 'insert_dataset_record', label: 'insert_dataset_record', description: '向数据集插入一条记录。data 参数为 JSON 对象字符串，字段须与数据集 schema 匹配。', parameters: Type.Object({ datasetName: Type.String({ description: '数据集名称或 id' }), data: Type.String({ description: '记录内容 JSON 对象，如 {"title":"季度总结","status":"进行中"}' }) }), execute: exec(insertDatasetRecordTool) },
+    { name: 'update_dataset_record', label: 'update_dataset_record', description: '更新数据集中的一条记录（整体替换 data_json）。先调用 query_dataset 获取记录 id。', parameters: Type.Object({ id: Type.Number({ description: '记录 id（query_dataset 返回结果中的 id 字段）' }), data: Type.String({ description: '更新后的完整记录 JSON 对象' }) }), execute: exec(updateDatasetRecordTool) },
     { name: 'read_project_file', label: 'read_project_file', description: '读取项目目录下的文件内容。若文件不存在会返回相似文件名建议，可据此用 list_directory 确认准确路径。', parameters: Type.Object({ filePath: Type.String({ description: '相对于项目根目录的文件路径，或绝对路径' }) }), execute: exec(bind(readProjectFileTool)) },
     { name: 'web_search', label: 'web_search', description: '搜索外网资料，通过搜索引擎获取与查询词相关的网页标题、链接和摘要。适合查询最新资讯、技术文档、百科知识等。', parameters: Type.Object({ query: Type.String({ description: '搜索关键词，尽量精确' }), maxResults: optNum('返回结果条数上限，默认8，最大15') }), execute: exec((args) => webSearchTool({ ...args, maxResults: toNumber(args.maxResults, 8) })) },
     { name: 'web_fetch', label: 'web_fetch', description: '读取外部 URL 的文本内容，自动去除 HTML 标签和脚本，返回纯文本。适合阅读网页文章、API 文档、新闻等。', parameters: Type.Object({ url: Type.String({ description: '要读取的完整 URL（须以 http:// 或 https:// 开头）' }), maxLength: optNum('返回内容最大字符数，默认8000，最大50000') }), execute: exec((args) => webFetchTool({ ...args, maxLength: toNumber(args.maxLength, 8000) })) },
@@ -531,10 +632,14 @@ async function buildReportToolDefs(kbId) {
   const optNum = (description?: string) => Type.Optional(Type.Union([Type.Number({ description }), Type.String(), Type.Null()]));
   return [
     { name: 'query_todos', label: 'query_todos', description: '查询待办事项（plan_todos），可按状态( done / in_progress / pending )、优先级、日期范围过滤。不传参数则返回最近的待办。', parameters: Type.Object({ status: optStr('过滤状态: done / in_progress / pending'), priority: optStr('过滤优先级: high / mid / low'), date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), limit: optNum('返回条数上限，默认30') }), execute: exec((args) => queryTodosTool({ ...args, limit: toNumber(args.limit, 30) })) },
+    { name: 'add_todo', label: 'add_todo', description: '创建一条待办事项。AI 从对话中识别出用户要执行的事项时应调用本工具落成待办。', parameters: Type.Object({ title: Type.String({ description: '待办标题' }), description: optStr('详细说明'), priority: optStr('优先级: high / mid / low，默认 mid'), due_date: optStr('截止日期 YYYY-MM-DD，可选'), status: optStr('状态: pending / in_progress / done，默认 pending') }), execute: exec(addTodoTool) },
+    { name: 'update_todo', label: 'update_todo', description: '更新待办事项（标题、描述、优先级、截止日期、状态）。先调用 query_todos 获取待办 id。', parameters: Type.Object({ id: Type.Number({ description: '待办 id' }), title: optStr('新标题'), description: optStr('新描述'), priority: optStr('优先级: high / mid / low'), due_date: optStr('截止日期 YYYY-MM-DD'), status: optStr('状态: pending / in_progress / done') }), execute: exec(updateTodoTool) },
     { name: 'query_messages', label: 'query_messages', description: '查询聊天/对话记录（prj_messages）。可过滤日期范围、角色( user / assistant )。', parameters: Type.Object({ date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), role: optStr('角色: user / assistant'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryMessagesTool({ ...args, limit: toNumber(args.limit, 20) })) },
     { name: 'query_documents', label: 'query_documents', description: '查询知识库中文档更新记录（kb_documents）。可过滤日期范围。', parameters: Type.Object({ date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryDocumentsTool({ ...args, limit: toNumber(args.limit, 20) })) },
     { name: 'query_data_records', label: 'query_data_records', description: '查询数据中心记录（data_center_records）。可过滤数据集名称、日期范围。', parameters: Type.Object({ dataset_name: optStr('数据集名称关键词（模糊匹配）'), date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryDataRecordsTool({ ...args, limit: toNumber(args.limit, 20) })) },
     { name: 'query_reminders', label: 'query_reminders', description: '查询已启用的提醒事项（plan_reminders）。', parameters: Type.Object({}), execute: exec(() => queryRemindersTool()) },
+    { name: 'add_reminder', label: 'add_reminder', description: '创建一条定时提醒。类型: daily(每天)/weekly(每周，需 day_of_week 0=周日)/monthly(每月，需 day_of_month)/once(一次性，需 date YYYY-MM-DD)。', parameters: Type.Object({ name: Type.String({ description: '提醒名称，如 "喝水"' }), message: optStr('提醒内容'), type: optStr('类型: daily / weekly / monthly / once，默认 daily'), time: optStr('时间 HH:MM，默认 09:00'), day_of_week: optNum('weekly 用: 0-6，0=周日'), day_of_month: optNum('monthly 用: 1-31'), date: optStr('once 用: 日期 YYYY-MM-DD') }), execute: exec(addReminderTool) },
+    { name: 'update_reminder', label: 'update_reminder', description: '更新提醒（名称、内容、时间、启用状态等）。先调用 query_reminders 获取提醒 id。', parameters: Type.Object({ id: Type.String({ description: '提醒 id（如 R1712345678901）' }), name: optStr('新名称'), message: optStr('新内容'), time: optStr('时间 HH:MM'), enabled: optStr('是否启用: true / false'), type: optStr('类型: daily / weekly / monthly / once'), day_of_week: optNum('weekly 用: 0-6'), day_of_month: optNum('monthly 用: 1-31'), date: optStr('once 用: YYYY-MM-DD') }), execute: exec(updateReminderTool) },
     { name: 'get_today_info', label: 'get_today_info', description: '获取当前日期信息（今天的中国日期、项目/知识库名称等）。', parameters: Type.Object({}), execute: exec((args) => getTodayInfoTool(args, kbId)) },
   ];
 }
