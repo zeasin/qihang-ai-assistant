@@ -496,13 +496,24 @@ function installedSuiteIds() {
 
 async function applySelectedSuites() {
   if (!API || selectedSuiteIds.value.length === 0) return;
+  showSuitesModalFlag.value = false;
   try {
-    const res = await API.suites.apply(selectedSuiteIds.value);
-    showSuitesModalFlag.value = false;
+    // 注意：不要直接传 selectedSuiteIds.value（Vue reactive Proxy），
+    // Electron IPC 用 structured clone 序列化参数，无法克隆 Proxy，
+    // 会报 "An object could not be cloned"，且主进程根本收不到请求。
+    const res = await API.suites.apply([...selectedSuiteIds.value]);
     selectedSuiteIds.value = [];
     await loadAll();
+    if (res.error) {
+      alert('初始化失败：' + res.error);
+      return;
+    }
     alert(`初始化完成：${res.applied?.length || 0} 个模块已创建${res.skipped?.length ? `，${res.skipped.length} 个已存在已跳过` : ''}${res.failed?.length ? `，${res.failed.length} 个失败` : ''}`);
-  } catch (e) { console.error('初始化内置模板失败:', e); alert('初始化失败: ' + e); }
+  } catch (e) {
+    console.error('初始化内置模板失败:', e);
+    alert('初始化失败: ' + e);
+    await loadAll();
+  }
 }
 
 // ========== 模块管理 ==========

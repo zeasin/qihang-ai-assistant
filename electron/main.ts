@@ -673,7 +673,13 @@ ipcMain.handle('ds:updateRecord', (_, { id, data }) => db.ds.updateRecord(id, da
 ipcMain.handle('ds:deleteRecord', (_, { id }) => db.ds.deleteRecord(id));
 ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
 ipcMain.handle('ds:suites:list', () => listBuiltinSuites());
-ipcMain.handle('ds:suites:apply', (_, { ids }) => applyBuiltinSuites(ids || []));
+ipcMain.handle('ds:suites:apply', (_, { ids }) => {
+  try {
+    return applyBuiltinSuites(ids || []);
+  } catch (e: any) {
+    return { applied: [], skipped: [], failed: [], error: (e && e.message) || String(e) };
+  }
+});
 
 // --- Backup / Restore ---
 ipcMain.handle('backup:create', async (_, { dir }) => {
