@@ -502,18 +502,25 @@ const chat = {
 };
 
 // ========== Modules ==========
+
+/** id 可能是自增数字 id，也可能是 module_id UUID 字符串；按类型生成 WHERE 子句 */
+function dmWhere(id: any): { where: string; params: any[] } {
+  const s = String(id == null ? '' : id).trim();
+  const isNumeric = /^\d+$/.test(s);
+  return isNumeric
+    ? { where: 'id = ? OR module_id = ?', params: [s, s] }
+    : { where: 'module_id = ?', params: [s] };
+}
+
 const dm = {
   list: () => q('SELECT * FROM data_center_modules ORDER BY sort_order ASC, created_at DESC'),
   get: (id) => {
-    const s = String(id == null ? '' : id).trim();
-    const isNumeric = /^\d+$/.test(s);
-    return isNumeric
-      ? qOne('SELECT * FROM data_center_modules WHERE id = ? OR module_id = ?', s, s)
-      : qOne('SELECT * FROM data_center_modules WHERE module_id = ?', s);
+    const w = dmWhere(id);
+    return qOne(`SELECT * FROM data_center_modules WHERE ${w.where}`, ...w.params);
   },
   add: (name, description, icon) => {
     const id = 'm_' + Date.now();
-    run('INSERT INTO data_center_modules (module_id, name, description, icon) VALUES (?, ?, ?, ?)', id, name, description || '', icon || '📁');
+    run('INSERT INTO data_center_modules (module_id, name, description, icon) VALUES (?, ?, ?, ?, ?)', id, name, description || '', icon || '📁');
     return { id };
   },
   update: (id, data) => {
@@ -522,13 +529,21 @@ const dm = {
     if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
     if (data.icon !== undefined) { fields.push('icon = ?'); params.push(data.icon); }
     if (data.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(data.sort_order); }
-    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE data_center_modules SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+    if (fields.length) {
+      const w = dmWhere(id);
+      fields.push("updated_at = datetime('now', '+8 hours')");
+      params.push(...w.params);
+      run(`UPDATE data_center_modules SET ${fields.join(', ')} WHERE ${w.where}`, ...params);
+    }
   },
   remove: (id) => {
-    const dsList = q<{dataset_id: string}>('SELECT dataset_id FROM data_center_datasets WHERE module_id = ?', id);
+    const mod = dm.get(id);
+    const moduleId = mod && mod.module_id ? String(mod.module_id) : String(id);
+    const dsList = q<{dataset_id: string}>('SELECT dataset_id FROM data_center_datasets WHERE module_id = ?', moduleId);
     for (const d of dsList) { run('DELETE FROM data_center_records WHERE dataset_id = ?', d.dataset_id); }
-    run('DELETE FROM data_center_datasets WHERE module_id = ?', id);
-    run('DELETE FROM data_center_modules WHERE id = ?', id);
+    run('DELETE FROM data_center_datasets WHERE module_id = ?', moduleId);
+    const w = dmWhere(id);
+    run(`DELETE FROM data_center_modules WHERE ${w.where}`, ...w.params);
   },
 };
 

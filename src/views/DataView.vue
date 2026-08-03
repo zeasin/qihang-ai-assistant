@@ -91,7 +91,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="rec in ds.recentRecords" :key="rec.id" class="pv-row" @click="viewRecordPortal(rec)">
+                  <tr v-for="rec in ds.recentRecords" :key="rec.id" class="pv-row" @click="viewRecordPortal(rec, ds)">
                     <td v-for="col in getPreviewColumns(ds)" :key="col" :title="rec[col] || ''">{{ truncateText(rec[col], 24) }}</td>
                   </tr>
                 </tbody>
@@ -202,7 +202,7 @@
               </tr>
             </thead>
 <tbody>
-                <tr v-for="rec in fullViewRecords" :key="rec.id" class="fv-row" @click="viewRecordPortal(rec)">
+                <tr v-for="rec in fullViewRecords" :key="rec.id" class="fv-row" @click="viewRecordPortal(rec, fullViewDs)">
                   <td class="td-status" @click.stop><span class="badge badge-gray">{{ rec.status || '无' }}</span></td>
                   <td v-for="col in fullViewColumns" :key="col" class="td-data" :title="rec[col] || ''">{{ truncateText(rec[col], 30) || '' }}</td>
                 </tr>
@@ -734,6 +734,7 @@ const recordTypeOptions = ref<string[]>([]);
 
 const showDetailModal = ref(false);
 const viewingRecord = ref<any>(null);
+const viewingRecordDs = ref<any>(null);
 const viewingRecordFields = ref<string[]>([]);
 
 const showImportModalFlag = ref(false);
@@ -772,7 +773,7 @@ function showAddRecord(dsArg?: any) {
   showRecordModal.value = true;
 }
 
-function editRecordPortal(mod: ModuleData, ds: DatasetData, rec: any) {
+function editRecordPortal(mod: ModuleData | null, ds: DatasetData, rec: any) {
   currentRecordDs = ds;
   editingRecordId.value = rec.id;
   const schemaFields = getSchemaFields(ds);
@@ -817,19 +818,17 @@ async function deleteRecordPortal(rec: any) {
   } catch (e) { console.error('删除记录失败:', e); }
 }
 
-function viewRecordPortal(rec: any) {
+function viewRecordPortal(rec: any, dsArg?: any) {
   viewingRecord.value = rec;
+  viewingRecordDs.value = dsArg || null;
   viewingRecordFields.value = Object.keys(rec).filter(k => k !== 'id' && !k.startsWith('_'));
   showDetailModal.value = true;
 }
 
 function editFromDetail() {
-  if (viewingRecord.value) {
-    const ds = fullViewDs.value;
-    if (ds) {
-      showDetailModal.value = false;
-      editRecordPortal(fullViewMod.value!, ds, viewingRecord.value);
-    }
+  if (viewingRecord.value && viewingRecordDs.value) {
+    showDetailModal.value = false;
+    editRecordPortal(null, viewingRecordDs.value, viewingRecord.value);
   }
 }
 
