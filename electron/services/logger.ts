@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 
-const LOG_DIR = path.join(require('os').homedir(), '.qihang-work-ai', 'logs');
+const LOG_DIR = path.join(require('os').homedir(), '.qihang-ai-desktop', 'logs');
 
 const MAX_SIZE = 5 * 1024 * 1024;
 const MAX_FILES = 5;

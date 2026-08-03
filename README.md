@@ -1,4 +1,4 @@
-# 启航AI工作台（Qihang AI Workbench）
+# 启航AI工作台（Qihang AI Desktop）
 
 > 一款以**数据流为核心**的个人 AI 助手桌面应用——**本地优先、模型自由、数据流转起来**。你的笔记、待办、工作数据都留在本机，AI 融入数据的采集、检索、执行与复盘全流程，而不只是一个聊天窗口。
 
@@ -144,7 +144,7 @@ npm run electron:build   # vite build + tsc 编译 + electron-builder 打包
 
 ## 数据与隐私
 
-- 所有数据保存在本机数据库（`~/.qihang-work-ai/qihang-work-ai.db`）与你的笔记文件夹中。
+- 所有数据保存在本机数据库（`~/.qihang-ai-desktop/qihang-ai-desktop.db`）与你的笔记文件夹中。
 - 对话内容默认会发送给你配置的模型服务商（DeepSeek 等）用于生成回复。
 - 如需**完全离线**：使用 Ollama 作为对话模型与嵌入模型即可（除软件自动更新外无任何网络请求）。
 - 飞书凭据等敏感配置保存在本机 `config.json`（已加入 `.gitignore`，不会进入仓库）。

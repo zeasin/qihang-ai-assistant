@@ -190,7 +190,7 @@
       <div class="card">
         <h2>🔒 数据与隐私</h2>
         <ul>
-          <li>数据保存在本机数据库（<code>~/.qihang-work-ai/qihang-work-ai.db</code>）与你的笔记文件夹中，不上传任何云端</li>
+          <li>数据保存在本机数据库（<code>~/.qihang-ai-desktop/qihang-ai-desktop.db</code>）与你的笔记文件夹中，不上传任何云端</li>
           <li>对话内容默认会发送给你配置的模型服务商（DeepSeek 等）用于生成回复</li>
           <li>如需<strong>完全离线</strong>：使用 Ollama 作为对话模型与嵌入模型即可（除软件自动更新外无任何网络请求）</li>
           <li>「设置 → 数据备份与恢复」支持一键备份、每日自动备份（保留 N 份）与一键恢复</li>

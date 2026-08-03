@@ -1,7 +1,7 @@
 /**
  * 应用级配置（config.json）
  * 开发模式保存在项目根目录 config.json；打包版保存在用户主目录
- * .qihang-work-ai 下（与数据库、日志同一目录），避免写入安装目录
+ * .qihang-ai-desktop 下（与数据库、日志同一目录），避免写入安装目录
  * /asar 内部导致无法保存。
  */
 import * as fs from 'fs';
@@ -13,8 +13,8 @@ import logger from './logger';
 function resolveConfigPath(): string {
   if (process.env.QIHANG_CONFIG_PATH) return process.env.QIHANG_CONFIG_PATH;
   if (app.isPackaged) {
-    // 与数据库（qihang-work-ai.db）、日志同一目录
-    return path.join(os.homedir(), '.qihang-work-ai', 'config.json');
+    // 与数据库（qihang-ai-desktop.db）、日志同一目录
+    return path.join(os.homedir(), '.qihang-ai-desktop', 'config.json');
   }
   // 开发模式沿用项目根目录 config.json
   return path.join(__dirname, '..', '..', '..', 'config.json');

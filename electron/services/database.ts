@@ -16,8 +16,8 @@ import { Worker } from 'worker_threads';
 import logger from './logger';
 import { getCloudDbConfig, CloudDbConfig, isCloudEnabled, hasCloudCredentials } from './cloud-db';
 
-const DB_DIR = path.join(require('os').homedir(), '.qihang-work-ai');
-const DB_PATH = path.join(DB_DIR, 'qihang-work-ai.db');
+const DB_DIR = path.join(require('os').homedir(), '.qihang-ai-desktop');
+const DB_PATH = path.join(DB_DIR, 'qihang-ai-desktop.db');
 
 let db: Database.Database | null = null;
 

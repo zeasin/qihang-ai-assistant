@@ -1,6 +1,6 @@
 {
-  "name": "qihang-work-ai",
-  "version": "0.1.0",
+  "name": "qihang-ai-desktop",
+  "version": "0.3.0",
   "description": "启航AI工作台",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -41,14 +41,16 @@
     "vue-tsc": "^2.2.0"
   },
   "build": {
-    "appId": "com.qihang.qihang-ai-workbench",
+    "appId": "com.qihang.qihang-ai-desktop",
     "productName": "启航AI工作台",
+    "icon": "build/icon",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "resources/**/*",
       "package.json",
       "LICENSE",
       "!config.json",

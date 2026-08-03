@@ -10,7 +10,7 @@ import * as os from 'os';
 import { getDb, close } from './database';
 import logger from './logger';
 
-const BACKUP_DIR = path.join(os.homedir(), '.qihang-work-ai', 'backups');
+const BACKUP_DIR = path.join(os.homedir(), '.qihang-ai-desktop', 'backups');
 const DEFAULT_RETENTION = 30; // 默认保留最近 30 份
 const AUTO_BACKUP_INTERVAL_MS = 24 * 3600 * 1000; // 距上次备份超过 24 小时则补一次
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 运行期间每 1 小时检查一次（仅读目录 mtime，开销极小）
@@ -18,7 +18,7 @@ const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 运行期间每 1 小时检查一�
 let autoTimer: NodeJS.Timeout | null = null;
 let autoEnabled = true;
 
-/** 备份目录：优先读 config.json 的 backupDir，否则默认 ~/.qihang-work-ai/backups */
+/** 备份目录：优先读 config.json 的 backupDir，否则默认 ~/.qihang-ai-desktop/backups */
 export function getBackupDir(): string {
   try {
     const cfg = require('./app-config');
@@ -40,18 +40,18 @@ export function setBackupDir(dir: string): void {
 function dbPath(): string {
   const db = getDb();
   const name = db.name;
-  return name && name !== ':memory:' ? name : path.join(os.homedir(), '.qihang-work-ai', 'qihang-work-ai.db');
+  return name && name !== ':memory:' ? name : path.join(os.homedir(), '.qihang-ai-desktop', 'qihang-ai-desktop.db');
 }
 
-/** 备份文件名：qihang-work-ai-backup-YYYYMMDD-HHmmss-fff.db（毫秒级，避免快速连续备份覆盖） */
+/** 备份文件名：qihang-ai-desktop-backup-YYYYMMDD-HHmmss-fff.db（毫秒级，避免快速连续备份覆盖） */
 export function backupFileName(d = new Date()): string {
   const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-  return `qihang-work-ai-backup-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${pad(d.getMilliseconds(), 3)}.db`;
+  return `qihang-ai-desktop-backup-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${pad(d.getMilliseconds(), 3)}.db`;
 }
 
 /**
  * 生成一致性备份快照，返回备份文件路径。
- * @param targetDir 备份目录，默认 ~/.qihang-work-ai/backups
+ * @param targetDir 备份目录，默认 ~/.qihang-ai-desktop/backups
  */
 export async function createBackup(targetDir?: string): Promise<{ path: string; size: number }> {
   const dir = targetDir || getBackupDir();
@@ -70,7 +70,7 @@ export function listBackups(dir?: string): { path: string; name: string; size: n
   if (!fs.existsSync(d)) return [];
   try {
     return fs.readdirSync(d)
-      .filter(f => f.endsWith('.db') && f.startsWith('qihang-work-ai-backup'))
+      .filter(f => f.endsWith('.db') && f.startsWith('qihang-ai-desktop-backup'))
       .map(f => {
         const p = path.join(d, f);
         const st = fs.statSync(p);

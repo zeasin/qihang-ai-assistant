@@ -150,7 +150,7 @@
           <div class="form-group" style="flex:1;min-width:300px;margin:0;">
             <label style="font-size:12px;">备份目录（建议选择其他盘符）</label>
             <div class="input-with-btn">
-              <input v-model="backupDir" type="text" class="form-control" placeholder="默认 ~/.qihang-work-ai/backups" readonly>
+              <input v-model="backupDir" type="text" class="form-control" placeholder="默认 ~/.qihang-ai-desktop/backups" readonly>
               <button class="btn btn-secondary" @click="pickBackupDir">选择</button>
             </div>
           </div>

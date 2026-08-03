@@ -1,10 +1,26 @@
 ﻿import * as fs from 'fs';
 import * as path from 'path';
 import * as zlib from 'zlib';
-import * as os from 'os';
-import { nativeImage } from 'electron';
+import { app, nativeImage } from 'electron';
 
-let cachedIcon: Electron.NativeImage | null = null;
+let cachedTray: Electron.NativeImage | null = null;
+let cachedWindowIcon: Electron.NativeImage | null = null;
+
+/** 定位打包/开发环境下的 resources 资源文件 */
+function resourcesPath(file: string): string {
+  const candidates = [
+    path.join(app.getAppPath(), 'resources', file),
+    path.join(__dirname, '..', '..', 'resources', file),
+  ];
+  return candidates.find(p => fs.existsSync(p)) || candidates[0];
+}
+
+function loadFromFile(file: string): Electron.NativeImage | null {
+  try {
+    const img = nativeImage.createFromPath(resourcesPath(file));
+    return img.isEmpty() ? null : img;
+  } catch { return null; }
+}
 
 function createPngBuffer(width: number, height: number, pixels: Uint8Array): Buffer {
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -48,26 +64,32 @@ function crc32(buf: Buffer): number {
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
-function createTrayIcon(): Electron.NativeImage {
-  if (cachedIcon) return cachedIcon;
-  const s = 16;
-  const pixels = new Uint8Array(s * s * 4);
-  for (let y = 0; y < s; y++) {
-    for (let x = 0; x < s; x++) {
-      const i = (y * s + x) * 4;
-      const dist = Math.sqrt((x - 7.5) ** 2 + (y - 7.5) ** 2);
-      if (dist <= 6) { pixels[i] = 99; pixels[i+1] = 102; pixels[i+2] = 241; pixels[i+3] = 255; }
-      else if (dist <= 6.8) { pixels[i] = 99; pixels[i+1] = 102; pixels[i+2] = 241; pixels[i+3] = 120; }
+/** 兜底：资源缺失时生成蓝色圆点图标 */
+function fallbackIcon(size: number): Electron.NativeImage {
+  const pixels = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const c = (size - 1) / 2;
+      const dist = Math.sqrt((x - c) ** 2 + (y - c) ** 2);
+      if (dist <= c * 0.75) { pixels[i] = 99; pixels[i+1] = 102; pixels[i+2] = 241; pixels[i+3] = 255; }
+      else if (dist <= c * 0.85) { pixels[i] = 99; pixels[i+1] = 102; pixels[i+2] = 241; pixels[i+3] = 120; }
     }
   }
-  const pngBuf = createPngBuffer(s, s, pixels);
-  const iconPath = path.join(os.homedir(), '.qihang-work-ai', 'tray-icon.png');
-  try {
-    if (!fs.existsSync(path.dirname(iconPath))) fs.mkdirSync(path.dirname(iconPath), { recursive: true });
-    fs.writeFileSync(iconPath, pngBuf);
-    cachedIcon = nativeImage.createFromPath(iconPath);
-  } catch { cachedIcon = nativeImage.createFromBuffer(pngBuf, { width: s, height: s }); }
-  return cachedIcon;
+  return nativeImage.createFromBuffer(createPngBuffer(size, size, pixels), { width: size, height: size });
 }
 
-export { createTrayIcon };
+/** 主窗口图标（256x256） */
+export function getWindowIcon(): Electron.NativeImage {
+  if (cachedWindowIcon) return cachedWindowIcon;
+  cachedWindowIcon = loadFromFile('icon.png') || fallbackIcon(256);
+  return cachedWindowIcon;
+}
+
+/** 系统托盘图标（macOS 16x16，其余 32x32） */
+export function createTrayIcon(): Electron.NativeImage {
+  if (cachedTray) return cachedTray;
+  const file = process.platform === 'darwin' ? 'tray-16.png' : 'tray-32.png';
+  cachedTray = loadFromFile(file) || fallbackIcon(32);
+  return cachedTray;
+}

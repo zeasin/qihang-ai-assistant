@@ -26,7 +26,7 @@ export interface CodingTaskResult {
   reply?: string;
 }
 
-const WORKTREE_BASE = () => path.join(os.homedir(), '.qihang-work-ai', 'worktrees');
+const WORKTREE_BASE = () => path.join(os.homedir(), '.qihang-ai-desktop', 'worktrees');
 
 let worktreeService: WorktreeService | null = null;
 

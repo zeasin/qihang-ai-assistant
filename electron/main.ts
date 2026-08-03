@@ -45,7 +45,7 @@ import * as feishu from './services/feishu';
 import * as scheduler from './services/scheduler';
 import * as indexer from './services/indexer';
 import logger from './services/logger';
-import { createTrayIcon } from './icon';
+import { createTrayIcon, getWindowIcon } from './icon';
 import * as rag from './services/rag';
 
 const START_UPTIME = process.uptime();
@@ -154,6 +154,7 @@ function createWindow() {
     minWidth: 1000,
     minHeight: 700,
     title: '启航AI工作台',
+    icon: getWindowIcon(),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
