@@ -7,7 +7,7 @@
         <button class="btn btn-sm btn-primary" @click="newSession">+ 新对话</button>
       </div>
 
-      <div class="conversation-list" v-if="sessions.length">
+      <div class="conversation-list" v-if="sessions.length" ref="conversationListRef">
         <div
           v-for="session in sessions"
           :key="session.id"
@@ -70,18 +70,20 @@
               <span v-else>🤖</span>
             </div>
             <div class="message-content-wrapper">
-              <div class="message-header">
-                <span class="message-author">
-                  {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : msg.role === 'system' ? '系统' : 'AI 助理' }}
-                </span>
-                <span class="message-status" v-if="msg.status">{{ msg.status }}</span>
-              </div>
-              <div class="message-content" :class="{ 'markdown-body': msg.role === 'assistant' }">
-                <div v-if="thinkingText && idx === messages.length - 1" class="thinking-status">{{ thinkingText }}</div>
-                <div v-if="msg.images?.length" class="message-images">
-                  <img v-for="(img, i) in msg.images" :key="i" :src="`data:${img.mimeType};base64,${img.data}`" class="chat-image" />
+              <div class="message-bubble">
+                <div class="message-header">
+                  <span class="message-author">
+                    {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : msg.role === 'system' ? '系统' : 'AI 助理' }}
+                  </span>
+                  <span class="message-status" v-if="msg.status">{{ msg.status }}</span>
                 </div>
-                <div v-html="msg.role === 'user' ? escHtml(msg.content) : renderMarkdown(msg.content)"></div>
+                <div class="message-content" :class="{ 'markdown-body': msg.role === 'assistant' }">
+                  <div v-if="thinkingText && idx === messages.length - 1" class="thinking-status">{{ thinkingText }}</div>
+                  <div v-if="msg.images?.length" class="message-images">
+                    <img v-for="(img, i) in msg.images" :key="i" :src="`data:${img.mimeType};base64,${img.data}`" class="chat-image" />
+                  </div>
+                  <div v-html="msg.role === 'user' ? formatUserMessage(msg.content) : renderMarkdown(msg.content)"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -151,6 +153,12 @@ import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import { marked } from 'marked';
 
+// 配置 marked 以启用换行和 GFM
+marked.setOptions({
+  breaks: true,
+  gfm: true
+});
+
 const API = window.electronAPI;
 const route = useRoute();
 
@@ -168,6 +176,7 @@ const kbDir = ref('');
 const kbLoaded = ref(false);
 const inputRef = ref<HTMLTextAreaElement>();
 const messagesContainer = ref<HTMLElement>();
+const conversationListRef = ref<HTMLElement>();
 const pendingImages = ref<{ data: string; mimeType: string }[]>([]);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const piModels = ref<{ provider: string; providerLabel: string; id: string; name: string; pattern: string; configured: boolean }[]>([]);
@@ -253,6 +262,7 @@ async function newSession() {
     inputText.value = '';
     await loadSessions();
     saveState();
+    scrollToActiveConversation();
     nextTick(() => inputRef.value?.focus());
   } catch (e: any) {
     console.error('创建对话失败:', e);
@@ -462,10 +472,25 @@ const escHtml = (text: string) => {
   return div.innerHTML;
 };
 
+const formatUserMessage = (text: string) => {
+  return escHtml(text).replace(/\n/g, '<br>');
+};
+
 const scrollToBottom = () => {
   nextTick(() => {
     if (messagesContainer.value) {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+    }
+  });
+};
+
+const scrollToActiveConversation = () => {
+  nextTick(() => {
+    if (conversationListRef.value && currentSessionId.value) {
+      const activeItem = conversationListRef.value.querySelector('.conversation-item.active');
+      if (activeItem) {
+        activeItem.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
     }
   });
 };
@@ -480,7 +505,19 @@ const autoResizeTextarea = () => {
 // ========== 生命周期 ==========
 onMounted(async () => {
   await Promise.all([loadKbLibraries(), loadSessions(), loadPiModels()]);
-  await restoreState();
+  
+  // 尝试恢复上次的会话状态
+  const restored = await restoreState();
+  
+  if (restored) {
+    // 恢复成功，滚动到已恢复的会话
+    scrollToActiveConversation();
+  } else if (sessions.value.length > 0) {
+    // 如果没有恢复到上次状态，但有会话存在，自动选择最新的会话（最后一条）
+    await selectSession(sessions.value[sessions.value.length - 1]);
+    scrollToActiveConversation();
+  }
+  
   // 工具箱跳转：?prompt= 预填输入框
   const qp = route.query.prompt;
   if (typeof qp === 'string' && qp.trim()) {
@@ -510,24 +547,25 @@ onBeforeUnmount(() => {
 .chat-sidebar {
   width: 280px;
   min-width: 280px;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
+  background: #f8fafc;
+  border-right: 1px solid #e8ecf1;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
 }
 
 .sidebar-header {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 16px;
+  border-bottom: 1px solid #e8ecf1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
+  background: white;
 }
 
 .sidebar-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -536,32 +574,42 @@ onBeforeUnmount(() => {
 .conversation-list {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 0;
+  padding: 8px;
 }
 
 .conversation-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 12px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.2s ease;
+  border-radius: 10px;
+  margin-bottom: 4px;
 }
 
 .conversation-item:hover {
-  background: var(--hover);
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transform: translateX(2px);
 }
 
 .conversation-item.active {
-  background: rgba(99, 102, 241, 0.1);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(139, 92, 246, 0.08));
   border-left: 3px solid var(--primary);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.1);
 }
 
 .conv-icon {
-  font-size: 13px;
+  font-size: 14px;
   flex-shrink: 0;
-  width: 18px;
-  text-align: center;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99, 102, 241, 0.1);
+  border-radius: 6px;
 }
 
 .conv-info {
@@ -585,19 +633,24 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 .conv-delete {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text-muted);
   cursor: pointer;
   visibility: hidden;
-  width: 16px;
+  width: 24px;
+  height: 24px;
   text-align: center;
-  border-radius: 4px;
+  border-radius: 6px;
   flex-shrink: 0;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
 }
 
 .conversation-item:hover .conv-delete {
@@ -607,6 +660,7 @@ onBeforeUnmount(() => {
 .conv-delete:hover {
   color: var(--danger);
   background: rgba(239, 68, 68, 0.1);
+  transform: scale(1.1);
 }
 
 .sidebar-empty {
@@ -636,6 +690,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: #ffffff;
 }
 
 .chat-empty {
@@ -646,101 +701,185 @@ onBeforeUnmount(() => {
   justify-content: center;
   text-align: center;
   padding: 60px 20px;
-  gap: 12px;
+  gap: 16px;
+  background: linear-gradient(135deg, #fafbfc 0%, #ffffff 50%, #f8fafc 100%);
 }
 
 .chat-empty .empty-icon {
-  font-size: 64px;
-  opacity: 0.3;
+  font-size: 72px;
+  opacity: 0.4;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.1));
 }
 
 .chat-empty .empty-title {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 600;
   color: var(--text-primary);
+  margin-top: 8px;
 }
 
 .chat-empty .empty-desc {
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.7;
   color: var(--text-secondary);
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .btn-lg {
-  padding: 10px 24px;
-  font-size: 14px;
+  padding: 12px 28px;
+  font-size: 15px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  transition: all 0.2s;
+}
+
+.btn-lg:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
 }
 
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-sidebar);
+  padding: 16px 24px;
+  border-bottom: 1px solid #e8ecf1;
+  background: white;
   flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 
 .chat-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
 }
 
-.model-selector {
-  font-size: 12px;
-  padding: 3px 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  max-width: 180px;
-  outline: none;
-}
-
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
+  scroll-behavior: smooth;
 }
 
+/* ========== 消息样式 ========== */
 .message {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   max-width: 100%;
+  animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message.assistant {
+  align-items: flex-start;
+}
+
+.message.user {
+  flex-direction: row-reverse;
+}
+
+.message.user .message-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
 }
 
 .message-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
   background: var(--hover);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 18px;
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .message.user .message-avatar {
-  background: rgba(99, 102, 241, 0.1);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.1));
+}
+
+.message.assistant .message-avatar {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(99, 102, 241, 0.08));
 }
 
 .message-content-wrapper {
   flex: 1;
   min-width: 0;
+  max-width: 85%;
+}
+
+.message.user .message-content-wrapper {
+  max-width: 70%;
+}
+
+.message-bubble {
+  position: relative;
+}
+
+.message.assistant .message-bubble {
+  background: white;
+  border: 1px solid #e8ecf1;
+  border-radius: 16px;
+  padding: 16px 20px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+}
+
+.message.user .message-bubble {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-radius: 16px;
+  padding: 12px 18px;
+  color: white;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.2);
+}
+
+.message.tool .message-bubble,
+.message.system .message-bubble {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+.message.user .message-bubble .message-content {
+  color: white;
+}
+
+.message.user .message-bubble .message-header {
+  justify-content: flex-end;
+}
+
+.message.user .message-bubble .message-author {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.message.user .message-bubble .message-status {
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .message-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 10px;
 }
 
 .message-author {
@@ -764,45 +903,56 @@ onBeforeUnmount(() => {
 .thinking-status {
   font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  background: rgba(99, 102, 241, 0.06);
+  border-radius: 8px;
+  display: inline-block;
 }
 
 .message-images {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .chat-image {
   max-width: 300px;
   max-height: 300px;
-  border-radius: 8px;
+  border-radius: 12px;
   border: 1px solid var(--border);
   object-fit: contain;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s;
+}
+
+.chat-image:hover {
+  transform: scale(1.02);
 }
 
 /* ========== 输入区 ========== */
 .chat-input-area {
-  padding: 12px 20px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-sidebar);
+  padding: 16px 24px 20px;
+  border-top: 1px solid #e8ecf1;
+  background: linear-gradient(to top, #ffffff, #fafbfc);
   flex-shrink: 0;
 }
 
 .input-wrapper {
   max-width: 900px;
   margin: 0 auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border: 2px solid transparent;
+  border-radius: 18px;
   background: white;
-  padding: 10px 14px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  padding: 14px 18px;
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04), 0 0 0 1px #e8ecf1;
 }
 
 .input-wrapper:focus-within {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.12), 0 0 0 4px rgba(99, 102, 241, 0.08);
 }
 
 .chat-input {
@@ -810,11 +960,11 @@ onBeforeUnmount(() => {
   border: none;
   outline: none;
   resize: none;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
   color: var(--text-primary);
   background: transparent;
-  max-height: 120px;
+  max-height: 150px;
   font-family: inherit;
 }
 
@@ -825,8 +975,8 @@ onBeforeUnmount(() => {
 .image-preview-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 8px;
+  gap: 10px;
+  padding-top: 10px;
 }
 
 .image-preview-item {
@@ -837,7 +987,7 @@ onBeforeUnmount(() => {
   width: 64px;
   height: 64px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 10px;
   border: 1px solid var(--border);
 }
 
@@ -845,31 +995,38 @@ onBeforeUnmount(() => {
   position: absolute;
   top: -6px;
   right: -6px;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  border: none;
+  border: 2px solid white;
   background: var(--danger);
   color: white;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform 0.15s;
+}
+
+.image-preview-remove:hover {
+  transform: scale(1.1);
 }
 
 .input-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+  margin-top: 4px;
 }
 
 .input-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .toolbar-btn {
@@ -877,43 +1034,69 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
+  padding: 6px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
-  transition: all 0.15s;
+  transition: all 0.2s;
 }
 
 .toolbar-btn:hover {
   color: var(--primary);
-  background: var(--hover);
+  background: rgba(99, 102, 241, 0.08);
+  transform: scale(1.05);
+}
+
+.model-selector {
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--text-primary);
+  max-width: 180px;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.model-selector:hover {
+  border-color: var(--primary);
+  background: white;
 }
 
 .input-hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
 .send-btn {
   border: none;
-  background: var(--primary);
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
   color: white;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }
 
 .send-btn:hover:not(:disabled) {
-  background: var(--primary-dark);
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
+}
+
+.send-btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .send-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 </style>
