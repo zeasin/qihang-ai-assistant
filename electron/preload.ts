@@ -8,6 +8,9 @@ const VALID_CHANNELS = [
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  app: {
+    version: () => ipcRenderer.invoke('app:version'),
+  },
   dialog: {
     openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   },

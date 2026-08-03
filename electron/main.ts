@@ -1357,6 +1357,9 @@ ipcMain.handle('dialog:openDirectory', async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+// --- App ---
+ipcMain.handle('app:version', () => app.getVersion());
+
 // --- Feishu ---
 ipcMain.handle('feishu:testBot', async (_, { app_id, app_secret }) => {
   try {

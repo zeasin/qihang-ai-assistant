@@ -8,6 +8,7 @@
       <div style="margin-bottom:24px;">
         <h2 style="font-size:22px;font-weight:600;margin-bottom:4px;">帮助中心</h2>
         <p class="text-muted">启航AI工作台 — 功能指南与常见问题</p>
+        <span class="version-badge" v-if="appVersion">v{{ appVersion }}</span>
       </div>
 
       <div class="card">
@@ -201,6 +202,16 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue';
+
+const API = (window as any).electronAPI;
+const appVersion = ref('');
+
+onMounted(async () => {
+  try {
+    if (API?.app?.version) appVersion.value = await API.app.version();
+  } catch { /* ignore */ }
+});
 </script>
 
 <style scoped>
@@ -230,6 +241,18 @@
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+}
+
+.version-badge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
 }
 
 .card {
