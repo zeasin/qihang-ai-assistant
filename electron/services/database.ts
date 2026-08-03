@@ -504,7 +504,13 @@ const chat = {
 // ========== Modules ==========
 const dm = {
   list: () => q('SELECT * FROM data_center_modules ORDER BY sort_order ASC, created_at DESC'),
-  get: (id) => qOne('SELECT * FROM data_center_modules WHERE id = ? OR module_id = ?', id, id),
+  get: (id) => {
+    const s = String(id == null ? '' : id).trim();
+    const isNumeric = /^\d+$/.test(s);
+    return isNumeric
+      ? qOne('SELECT * FROM data_center_modules WHERE id = ? OR module_id = ?', s, s)
+      : qOne('SELECT * FROM data_center_modules WHERE module_id = ?', s);
+  },
   add: (name, description, icon) => {
     const id = 'm_' + Date.now();
     run('INSERT INTO data_center_modules (module_id, name, description, icon) VALUES (?, ?, ?, ?)', id, name, description || '', icon || '📁');
@@ -527,13 +533,24 @@ const dm = {
 };
 
 // ========== Datasets ==========
+
+/** id 可能是自增数字 id，也可能是 dataset_id UUID 字符串；按类型生成 WHERE 子句 */
+function dsWhere(id: any): { where: string; params: any[] } {
+  const s = String(id == null ? '' : id).trim();
+  const isNumeric = /^\d+$/.test(s);
+  return isNumeric
+    ? { where: 'id = ? OR dataset_id = ?', params: [s, s] }
+    : { where: 'dataset_id = ?', params: [s] };
+}
+
 const ds = {
   list: () => {
     const rows = q('SELECT d.*, (SELECT COUNT(*) FROM data_center_records WHERE dataset_id = d.dataset_id) as record_count FROM data_center_datasets d ORDER BY d.created_at DESC');
     return rows.map(r => ({ ...r, recordCount: r.record_count, schema: r.schema_json ? JSON.parse(r.schema_json) : null }));
   },
   get: (id) => {
-    const r = qOne('SELECT d.*, (SELECT COUNT(*) FROM data_center_records WHERE dataset_id = d.dataset_id) as record_count FROM data_center_datasets d WHERE d.id = ? OR d.dataset_id = ?', id, id);
+    const w = dsWhere(id);
+    const r = qOne(`SELECT d.*, (SELECT COUNT(*) FROM data_center_records WHERE dataset_id = d.dataset_id) as record_count FROM data_center_datasets d WHERE ${w.where}`, ...w.params);
     return r ? { ...r, recordCount: r.record_count, schema: r.schema_json ? JSON.parse(r.schema_json) : null } : null;
   },
   add: (params) => {
@@ -550,12 +567,18 @@ const ds = {
     if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
     if (data.schema_json !== undefined) { fields.push('schema_json = ?'); params.push(data.schema_json); }
     if (data.module_id !== undefined) { fields.push('module_id = ?'); params.push(data.module_id); }
-    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE data_center_datasets SET ${fields.join(', ')} WHERE id = ? OR dataset_id = ?`, ...params, id); }
+    if (fields.length) {
+      const w = dsWhere(id);
+      fields.push("updated_at = datetime('now', '+8 hours')");
+      params.push(...w.params);
+      run(`UPDATE data_center_datasets SET ${fields.join(', ')} WHERE ${w.where}`, ...params);
+    }
   },
   remove: (id) => {
-    const dsRow = qOne<{dataset_id: string}>('SELECT dataset_id FROM data_center_datasets WHERE id = ? OR dataset_id = ?', id, id);
+    const w = dsWhere(id);
+    const dsRow = qOne<{dataset_id: string}>(`SELECT dataset_id FROM data_center_datasets WHERE ${w.where}`, ...w.params);
     if (dsRow) { run('DELETE FROM data_center_records WHERE dataset_id = ?', dsRow.dataset_id); }
-    run('DELETE FROM data_center_datasets WHERE id = ? OR dataset_id = ?', id, id);
+    run(`DELETE FROM data_center_datasets WHERE ${w.where}`, ...w.params);
   },
   query: (datasetId, conditions) => {
     let sql = "SELECT * FROM data_center_records WHERE dataset_id = ?";
