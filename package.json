@@ -89,7 +89,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "启航AI工作台",
-      "artifactName": "${productName}-${version}-setup.${ext}"
+      "artifactName": "qihang-ai-desktop-${version}-setup.${ext}"
     },
     "mac": {
       "target": "dmg"
