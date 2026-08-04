@@ -36,6 +36,11 @@ const routes = [
     component: () => import('@/views/RemindersView.vue')
   },
   {
+    path: '/task/:id',
+    name: 'TaskDetail',
+    component: () => import('@/views/TaskDetailView.vue')
+  },
+  {
     path: '/tools',
     name: 'Tools',
     component: () => import('@/views/ToolsView.vue')

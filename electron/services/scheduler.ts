@@ -380,7 +380,7 @@ function buildReportSections(data) {
 const SYSTEM_PROMPT = `你是一位日报生成助手。请使用提供的工具查询今日数据，然后生成一份完整的综合日报。
 
 ## 可用工具
-- query_todos — 查询待办事项（plan_todos，按状态、优先级、日期）
+- query_tasks — 查询任务（plan_tasks，按状态、优先级过滤）
 - query_messages — 查询今日对话记录
 - query_documents — 查询今日更新的文档/笔记
 - query_data_records — 查询数据中心记录
@@ -870,7 +870,7 @@ function triggerTypeLabel(task: any): string {
     return `每天 ${task.cycle_time}`;
   }
   if (task.trigger_type === 'once') return `一次性 ${task.scheduled_start}`;
-  return '手动';
+  return '立即执行';
 }
 
 async function runTask(task: any, triggerType: string) {
@@ -882,20 +882,40 @@ async function runTask(task: any, triggerType: string) {
   db.task.update(task.id, { status: 'in_progress', last_run_at: start, last_status: 'RUNNING' });
   notifyUI();
   try {
-    const { buildReportToolDefs, buildDataToolDefs, buildNoteToolDefs } = require('./tools');
-    const notesDir = appConfig.getConfig('notesDir') || '';
+    const { buildReportToolDefs, buildDataToolDefs, buildNoteToolDefs, buildCodingToolDefs } = require('./tools');
     const customTools: any[] = [];
-    customTools.push(...(await buildReportToolDefs(undefined)));
-    if (notesDir) customTools.push(...(await buildDataToolDefs(notesDir)));
-    const noteProj: any = db.qOne("SELECT id FROM prj_projects WHERE type = 'note' ORDER BY is_default DESC, id ASC LIMIT 1");
-    if (noteProj) customTools.push(...(await buildNoteToolDefs(noteProj.id)));
+    let cwd = '';
+    const project: any = task.project_id ? db.project.get(task.project_id) : null;
+
+    if (task.task_type === 'coding' && project) {
+      // 代码任务：直接在项目目录上执行（代码工具的写操作）
+      cwd = project.dir || '';
+      customTools.push(...(await buildReportToolDefs(undefined)));
+      customTools.push(...(await buildCodingToolDefs(cwd || undefined)));
+    } else {
+      // 笔记/知识任务：笔记库目录 + 笔记工具集
+      const notesDir = appConfig.getConfig('notesDir') || (project ? project.dir : '') || '';
+      cwd = notesDir;
+      customTools.push(...(await buildReportToolDefs(undefined)));
+      if (notesDir) customTools.push(...(await buildDataToolDefs(notesDir)));
+      const noteProj: any = task.project_id && project ? project : db.qOne("SELECT * FROM prj_projects WHERE type = 'note' ORDER BY is_default DESC, id ASC LIMIT 1");
+      if (noteProj) customTools.push(...(await buildNoteToolDefs(noteProj.id)));
+    }
 
     const piAgent = require('./pi-agent');
-    const prompt = `你正在执行一个 AI 任务「${task.title}」。\n\n${task.prompt || '请根据任务标题自主完成并直接输出结果。'}\n\n执行要求：\n1. 先用可用工具查询所需数据（对话记录、待办、文档、数据集、笔记、外网资料等），再完成任务\n2. 直接输出最终成果（Markdown 格式），不要输出过程说明、思考过程或"数据来源"等前缀`;
-    const result = (await piAgent.generateDailyReport('task_' + task.id + '_' + Date.now(), prompt)).trim();
+    const sessionId = 'task_' + task.id;
+    if (!task.session_id) {
+      try {
+        db.chat.createSession(sessionId, task.project_id && Number.isFinite(Number(task.project_id)) ? Number(task.project_id) : null, task.title.slice(0, 30), 'kb', 'pi', 'ui');
+        db.task.update(task.id, { session_id: sessionId });
+      } catch {}
+    }
+    const contextLine = project ? `\n执行项目：${project.name}（${project.dir}）` : '';
+    const prompt = `你正在执行一个 AI 任务「${task.title}」。${contextLine}\n\n${task.prompt || '请根据任务标题自主完成并直接输出结果。'}\n\n执行要求：\n1. 先用可用工具查询所需数据（任务、对话记录、文档、数据集、笔记、外网资料等），再完成任务\n2. 若任务涉及修改文件/代码，直接在目标目录中完成\n3. 直接输出最终成果（Markdown 格式），不要输出过程说明、思考过程或"数据来源"等前缀`;
+    const result = (await piAgent.generateDailyReport(sessionId, prompt)).trim();
     const end = nowString();
 
-    const savedNote = saveTaskResultToNote(task, result);
+    const savedNote = task.task_type === 'coding' ? '' : saveTaskResultToNote(task, result);
     const nextStatus = task.trigger_type === 'cycle' ? 'pending' : 'done';
     if (execId != null) db.taskExecution.update(execId, { status: 'SUCCESS', end_time: end, result_text: result, log_text: savedNote ? `已保存笔记：${savedNote}` : '' });
     db.task.update(task.id, { last_result: result.slice(0, 3000), last_status: 'SUCCESS', last_run_at: end, status: nextStatus });
@@ -922,7 +942,7 @@ async function runTask(task: any, triggerType: string) {
   }
 }
 
-/** 手动立即执行任务 */
+/** 立即执行任务（手动触发 / 新建即执行） */
 function executeTaskNow(id: number) {
   const t = db.task.get(id);
   if (!t) return false;

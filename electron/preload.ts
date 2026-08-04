@@ -5,6 +5,7 @@ const VALID_CHANNELS = [
   'coding:delta', 'coding:status', 'coding:tool', 'coding:done', 'coding:error',
   'kb:scan-progress', 'service:status', 'service:toggle', 'feishu:message',
   'indexer:progress', 'report:generated', 'aitool:delta', 'task:changed',
+  'task:followup:delta', 'task:followup:done', 'task:followup:error',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -178,6 +179,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (id: number, data: unknown) => ipcRenderer.invoke('task:update', id, data),
     remove: (id: number) => ipcRenderer.invoke('task:remove', id),
     execute: (id: number) => ipcRenderer.invoke('task:execute', id),
+    followup: (taskId: number, question: string) => ipcRenderer.invoke('task:followup', { taskId, question }),
     executions: (taskId: number) => ipcRenderer.invoke('task:executions', taskId),
     executionList: (page: number, pageSize: number) => ipcRenderer.invoke('task:execution:list', page, pageSize),
     executionGet: (id: number) => ipcRenderer.invoke('task:execution:get', id),

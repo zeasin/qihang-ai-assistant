@@ -31,7 +31,8 @@ export const TS_DEFAULT = "DEFAULT (DATE_FORMAT(CONVERT_TZ(UTC_TIMESTAMP(), '+00
 /** 云端 MySQL 表结构（与本地 SQLite 的表结构/字段名保持一致，方便迁移与回退） */
 export const MYSQL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS prj_sessions (
-  id VARCHAR(64) PRIMARY KEY,
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  session_id VARCHAR(64) NOT NULL DEFAULT '',
   source VARCHAR(32) DEFAULT 'ui',
   title VARCHAR(512),
   chat_id VARCHAR(64),
@@ -40,7 +41,8 @@ CREATE TABLE IF NOT EXISTS prj_sessions (
   project_id INT NULL,
   active_agent VARCHAR(64) DEFAULT 'pi',
   created_at VARCHAR(32) ${TS_DEFAULT},
-  updated_at VARCHAR(32) ${TS_DEFAULT}
+  updated_at VARCHAR(32) ${TS_DEFAULT},
+  KEY idx_sessions_session_id (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS prj_messages (
@@ -144,18 +146,6 @@ CREATE TABLE IF NOT EXISTS plan_reminders (
   project_id INT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS plan_todos (
-  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  title VARCHAR(512) NOT NULL,
-  description TEXT,
-  priority VARCHAR(16) DEFAULT 'mid',
-  due_date VARCHAR(32) DEFAULT '',
-  status VARCHAR(32) DEFAULT 'pending',
-  sort_order INT DEFAULT 0,
-  created_at VARCHAR(32) ${TS_DEFAULT},
-  updated_at VARCHAR(32) ${TS_DEFAULT}
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 CREATE TABLE IF NOT EXISTS plan_tasks (
   id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   title VARCHAR(512) NOT NULL,
@@ -163,6 +153,8 @@ CREATE TABLE IF NOT EXISTS plan_tasks (
   description TEXT,
   priority VARCHAR(16) DEFAULT 'mid',
   status VARCHAR(32) DEFAULT 'pending',
+  task_type VARCHAR(32) DEFAULT '',
+  project_id INT NULL,
   trigger_type VARCHAR(32) DEFAULT '',
   scheduled_start VARCHAR(32) DEFAULT '',
   cycle_type VARCHAR(32) DEFAULT '',
@@ -173,9 +165,10 @@ CREATE TABLE IF NOT EXISTS plan_tasks (
   output_type VARCHAR(32) DEFAULT '',
   output_target VARCHAR(512) DEFAULT '',
   notify_feishu INT DEFAULT 0,
+  session_id VARCHAR(128) DEFAULT '',
+  source VARCHAR(32) DEFAULT '',
   dataset_id VARCHAR(64) DEFAULT '',
   record_id VARCHAR(64) DEFAULT '',
-  project_id INT NULL,
   last_result LONGTEXT,
   last_run_at VARCHAR(32) DEFAULT '',
   last_status VARCHAR(32) DEFAULT '',
@@ -280,23 +273,75 @@ function schemaStatements(ddl: string): string[] {
   return ddl.split(';').map(s => s.trim()).filter(s => s.length > 0);
 }
 
+/** 云端存量表的幂等迁移（老库补新列，重复执行安全） */
+const CLOUD_ALTER_MIGRATIONS: string[] = [
+  "ALTER TABLE plan_tasks ADD COLUMN task_type VARCHAR(32) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN output_type VARCHAR(32) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN dataset_id VARCHAR(64) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN record_id VARCHAR(64) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN project_id INT NULL",
+  "ALTER TABLE plan_tasks ADD COLUMN scheduled_start VARCHAR(32) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN cycle_type VARCHAR(32) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN cycle_value VARCHAR(100) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN cycle_time VARCHAR(16) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN cycle_end VARCHAR(32) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN last_cycle_run VARCHAR(32) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN output_target VARCHAR(512) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN notify_feishu INT DEFAULT 0",
+  "ALTER TABLE plan_tasks ADD COLUMN session_id VARCHAR(128) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN source VARCHAR(32) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN last_result LONGTEXT",
+  "ALTER TABLE plan_tasks ADD COLUMN last_run_at VARCHAR(32) DEFAULT ''",
+  "ALTER TABLE plan_tasks ADD COLUMN last_status VARCHAR(32) DEFAULT ''",
+  "ALTER TABLE prj_sessions ADD COLUMN session_id VARCHAR(64) DEFAULT ''",
+];
+
 /** 创建表结构（8.0 表达式默认值失败时自动降级到 5.7 兼容版本） */
 export async function ensureCloudSchema(pool: mysql.Pool): Promise<void> {
   try {
     for (const stmt of schemaStatements(MYSQL_SCHEMA)) {
       await pool.query(stmt);
     }
-    return;
   } catch (e: any) {
     logger.warn('[CloudDB] 8.0 表达式默认值不受支持，尝试兼容模式: %s', e && e.message);
-  }
-  try {
     for (const stmt of schemaStatements(MYSQL_SCHEMA_FALLBACK)) {
       await pool.query(stmt);
     }
+  }
+  for (const stmt of CLOUD_ALTER_MIGRATIONS) {
+    try {
+      await pool.query(stmt);
+    } catch (e: any) {
+      logger.info('[CloudDB] 迁移跳过（可能已存在）: %s', e && e.message);
+    }
+  }
+// prj_sessions 旧版迁移：id VARCHAR → id INT AUTO_INCREMENT + session_id
+  try {
+    const [colInfo]: any = await pool.query("SHOW COLUMNS FROM prj_sessions WHERE Field = 'id' AND Type LIKE '%int%'");
+    if (colInfo.length > 0) throw new Error('skip'); // 已经是新 schema
+    await pool.query("UPDATE prj_sessions SET session_id = id WHERE session_id = '' OR session_id IS NULL");
+    await pool.query("DROP TABLE IF EXISTS prj_sessions_old");
+    await pool.query("RENAME TABLE prj_sessions TO prj_sessions_old");
+    for (const stmt of schemaStatements(`CREATE TABLE IF NOT EXISTS prj_sessions (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      session_id VARCHAR(64) NOT NULL DEFAULT '',
+      source VARCHAR(32) DEFAULT 'ui',
+      title VARCHAR(512),
+      chat_id VARCHAR(64),
+      chat_type VARCHAR(32),
+      mode VARCHAR(32) DEFAULT 'general',
+      project_id INT NULL,
+      active_agent VARCHAR(64) DEFAULT 'pi',
+      created_at VARCHAR(32) ${TS_DEFAULT},
+      updated_at VARCHAR(32) ${TS_DEFAULT},
+      KEY idx_sessions_session_id (session_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)) {
+      await pool.query(stmt);
+    }
+    await pool.query("INSERT INTO prj_sessions (session_id, source, title, chat_id, chat_type, mode, project_id, active_agent, created_at, updated_at) SELECT session_id, source, title, chat_id, chat_type, mode, project_id, active_agent, created_at, updated_at FROM prj_sessions_old");
+    await pool.query("DROP TABLE prj_sessions_old");
   } catch (e: any) {
-    logger.error('[CloudDB] 创建表结构失败: %s', e && e.message);
-    throw e;
+    logger.info('[CloudDB] prj_sessions 迁移跳过（可能已执行）: %s', e && e.message);
   }
 }
 

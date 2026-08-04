@@ -39,7 +39,8 @@ function initSchema() {
   getDb().exec(`
 
     CREATE TABLE IF NOT EXISTS prj_sessions (
-      id TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
       source TEXT DEFAULT 'ui',
       title TEXT,
       chat_id TEXT,
@@ -53,7 +54,7 @@ function initSchema() {
 
     CREATE TABLE IF NOT EXISTS prj_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES prj_sessions(id),
+      session_id TEXT NOT NULL,
       source TEXT DEFAULT 'ui',
       role TEXT NOT NULL,
       content TEXT NOT NULL,
@@ -165,18 +166,6 @@ function initSchema() {
       project_id INTEGER DEFAULT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS plan_todos (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      priority TEXT DEFAULT 'mid',
-      due_date TEXT DEFAULT '',
-      status TEXT DEFAULT 'pending',
-      sort_order INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
-      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
-    );
-
     CREATE TABLE IF NOT EXISTS plan_tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -184,6 +173,8 @@ function initSchema() {
       description TEXT DEFAULT '',
       priority TEXT DEFAULT 'mid',
       status TEXT DEFAULT 'pending',
+      task_type TEXT DEFAULT '',
+      project_id INTEGER DEFAULT NULL,
       trigger_type TEXT DEFAULT '',
       scheduled_start TEXT DEFAULT '',
       cycle_type TEXT DEFAULT '',
@@ -194,9 +185,10 @@ function initSchema() {
       output_type TEXT DEFAULT '',
       output_target TEXT DEFAULT '',
       notify_feishu INTEGER DEFAULT 0,
+      session_id TEXT DEFAULT '',
+      source TEXT DEFAULT '',
       dataset_id TEXT DEFAULT '',
       record_id TEXT DEFAULT '',
-      project_id INTEGER DEFAULT NULL,
       last_result TEXT DEFAULT '',
       last_run_at TEXT DEFAULT '',
       last_status TEXT DEFAULT '',
@@ -230,6 +222,51 @@ function initSchema() {
 
   `);
   try { getDb().exec("ALTER TABLE ai_analysis ADD COLUMN module_id TEXT"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN task_type TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN output_type TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN dataset_id TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN record_id TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN project_id INTEGER DEFAULT NULL"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN scheduled_start TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN cycle_type TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN cycle_value TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN cycle_time TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN cycle_end TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN last_cycle_run TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN output_target TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN notify_feishu INTEGER DEFAULT 0"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN last_result TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN last_run_at TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN last_status TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN session_id TEXT DEFAULT ''"); } catch (e) {}
+  try { getDb().exec("ALTER TABLE plan_tasks ADD COLUMN source TEXT DEFAULT ''"); } catch (e) {}
+  // prj_sessions 旧版迁移：id TEXT → id INTEGER AUTOINCREMENT + session_id TEXT
+  try {
+    const cols = getDb().prepare("PRAGMA table_info(prj_sessions)").all() as any[];
+    if (!cols.some((c: any) => c.name === 'session_id')) {
+      getDb().exec("ALTER TABLE prj_sessions ADD COLUMN session_id TEXT");
+      getDb().exec("UPDATE prj_sessions SET session_id = id");
+      getDb().exec(`
+        CREATE TABLE prj_sessions_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          source TEXT DEFAULT 'ui',
+          title TEXT,
+          chat_id TEXT,
+          chat_type TEXT,
+          mode TEXT DEFAULT 'general',
+          project_id INTEGER,
+          active_agent TEXT DEFAULT 'pi',
+          created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+          updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
+        );
+        INSERT INTO prj_sessions_new (session_id, source, title, chat_id, chat_type, mode, project_id, active_agent, created_at, updated_at)
+        SELECT session_id, source, title, chat_id, chat_type, mode, project_id, active_agent, created_at, updated_at FROM prj_sessions;
+        DROP TABLE prj_sessions;
+        ALTER TABLE prj_sessions_new RENAME TO prj_sessions;
+      `);
+    }
+  } catch (e) {}
 }
 
 // ==================== 云端 MySQL 同步桥 ====================
@@ -474,9 +511,9 @@ const project = {
   remove: (id) => {
     run('DELETE FROM ai_analysis WHERE project_id = ?', id);
     let sessions: any[] = [];
-    try { sessions = q('SELECT id FROM prj_sessions WHERE project_id = ?', id); } catch {}
+    try { sessions = q('SELECT session_id FROM prj_sessions WHERE project_id = ?', id); } catch {}
     for (const s of sessions) {
-      run('DELETE FROM prj_messages WHERE session_id = ?', s.id);
+      run('DELETE FROM prj_messages WHERE session_id = ?', s.session_id);
     }
     run('DELETE FROM prj_sessions WHERE project_id = ?', id);
     run('DELETE FROM prj_projects WHERE id = ?', id);
@@ -507,34 +544,36 @@ const project = {
 const chat = {
   sessions: (projectId) => {
     try {
-      if (projectId) return q("SELECT s.*, (SELECT content FROM prj_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId);
-      return q("SELECT s.*, (SELECT content FROM prj_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s ORDER BY s.updated_at DESC");
+      if (projectId) return q("SELECT s.*, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId);
+      return q("SELECT s.*, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s ORDER BY s.updated_at DESC");
     } catch { return []; }
   },
   sessionsBySource: (source, projectId) => {
     try {
-      if (projectId) return q(`SELECT s.*, (SELECT COUNT(*) FROM prj_messages WHERE session_id = s.id) as msg_count, (SELECT content FROM prj_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.source = ? AND s.project_id = ? ORDER BY updated_at DESC`, source, projectId);
-      return q(`SELECT s.*, (SELECT COUNT(*) FROM prj_messages WHERE session_id = s.id) as msg_count, (SELECT content FROM prj_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.source = ? ORDER BY updated_at DESC`, source);
+      if (projectId) return q(`SELECT s.*, (SELECT COUNT(*) FROM prj_messages WHERE session_id = s.session_id) as msg_count, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.source = ? AND s.project_id = ? ORDER BY updated_at DESC`, source, projectId);
+      return q(`SELECT s.*, (SELECT COUNT(*) FROM prj_messages WHERE session_id = s.session_id) as msg_count, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.source = ? ORDER BY updated_at DESC`, source);
     } catch { return []; }
   },
   createSession: (id, projectId, title, mode, agent, source) => {
     // project_id 可能传入 'notesdir' 等字符串哨兵值（飞书场景），INT 列只存合法数字
     const n = Number(projectId);
     const pid = Number.isFinite(n) ? Math.trunc(n) : null;
-    run("INSERT OR IGNORE INTO prj_sessions (id, source, title, mode, project_id, active_agent) VALUES (?, ?, ?, ?, ?, ?)",
+    const existing = qOne('SELECT * FROM prj_sessions WHERE session_id = ?', id);
+    if (existing) return existing;
+    run("INSERT INTO prj_sessions (session_id, source, title, mode, project_id, active_agent) VALUES (?, ?, ?, ?, ?, ?)",
       id, source || 'ui', title || '新对话', mode || 'general', pid, agent || 'pi');
-    return qOne('SELECT * FROM prj_sessions WHERE id = ?', id);
+    return qOne('SELECT * FROM prj_sessions WHERE session_id = ?', id);
   },
-  getSession: (id) => qOne('SELECT * FROM prj_sessions WHERE id = ?', id),
+  getSession: (id) => qOne('SELECT * FROM prj_sessions WHERE session_id = ?', id),
   deleteSession: (sessionId) => {
     run('DELETE FROM prj_messages WHERE session_id = ?', sessionId);
-    run('DELETE FROM prj_sessions WHERE id = ?', sessionId);
+    run('DELETE FROM prj_sessions WHERE session_id = ?', sessionId);
   },
   updateSessionTitle: (id, title) => {
-    run("UPDATE prj_sessions SET title = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", title, id);
+    run("UPDATE prj_sessions SET title = ?, updated_at = datetime('now', '+8 hours') WHERE session_id = ?", title, id);
   },
   updateSessionAgent: (id, agent) => {
-    run("UPDATE prj_sessions SET active_agent = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", agent, id);
+    run("UPDATE prj_sessions SET active_agent = ?, updated_at = datetime('now', '+8 hours') WHERE session_id = ?", agent, id);
   },
   messages: (sessionId) => {
     const rows = q("SELECT * FROM prj_messages WHERE session_id = ? ORDER BY id", sessionId);
@@ -543,7 +582,7 @@ const chat = {
   addMessage: (sessionId, role, content, mode?, images?) => {
     const imagesJson = images?.length ? JSON.stringify(images) : null;
     run("INSERT INTO prj_messages (session_id, role, content, mode, images) VALUES (?, ?, ?, ?, ?)", sessionId, role, content, mode || 'general', imagesJson);
-    run("UPDATE prj_sessions SET updated_at = datetime('now', '+8 hours') WHERE id = ?", sessionId);
+    run("UPDATE prj_sessions SET updated_at = datetime('now', '+8 hours') WHERE session_id = ?", sessionId);
   },
 };
 
@@ -695,30 +734,7 @@ const reminder = {
   getActive: () => q("SELECT * FROM plan_reminders WHERE enabled = 1"),
 };
 
-// ========== Todos ==========
-const todo = {
-  list: () => q('SELECT * FROM plan_todos ORDER BY sort_order ASC, created_at DESC'),
-  get: (id) => qOne('SELECT * FROM plan_todos WHERE id = ?', id),
-  add: (data) => {
-    run('INSERT INTO plan_todos (title, description, priority, due_date, status) VALUES (?, ?, ?, ?, ?)',
-      data.title, data.description || '', data.priority || 'mid', data.due_date || '', data.status || 'pending');
-    const r = qOne<{id: number}>('SELECT id FROM plan_todos WHERE title = ? ORDER BY id DESC', data.title);
-    return { id: r!.id };
-  },
-  update: (id, data) => {
-    const fields: any[] = []; const params: any[] = [];
-    if (data.title !== undefined) { fields.push('title = ?'); params.push(data.title); }
-    if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
-    if (data.priority !== undefined) { fields.push('priority = ?'); params.push(data.priority); }
-    if (data.due_date !== undefined) { fields.push('due_date = ?'); params.push(data.due_date); }
-    if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
-    if (data.sort_order !== undefined) { fields.push('sort_order = ?'); params.push(data.sort_order); }
-    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE plan_todos SET ${fields.join(', ')} WHERE id = ?`, ...params); }
-  },
-  remove: (id) => run('DELETE FROM plan_todos WHERE id = ?', id),
-};
-
-// ========== AI 自执行任务 ==========
+// ========== AI 任务（挂在项目下：代码项目 / 笔记库） ==========
 const task = {
   list: (status?: string) => {
     if (status) return q('SELECT * FROM plan_tasks WHERE status = ? ORDER BY created_at DESC', status);
@@ -726,11 +742,12 @@ const task = {
   },
   get: (id: number) => qOne('SELECT * FROM plan_tasks WHERE id = ?', id),
   add: (data: any) => {
-    run('INSERT INTO plan_tasks (title, prompt, description, priority, status, trigger_type, scheduled_start, cycle_type, cycle_value, cycle_time, cycle_end, output_type, output_target, notify_feishu, dataset_id, record_id, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    run('INSERT INTO plan_tasks (title, prompt, description, priority, status, task_type, project_id, trigger_type, scheduled_start, cycle_type, cycle_value, cycle_time, cycle_end, output_type, output_target, notify_feishu, session_id, source, dataset_id, record_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       data.title, data.prompt || '', data.description || '', data.priority || 'mid', data.status || 'pending',
+      data.task_type || '', data.project_id || null,
       data.trigger_type || '', data.scheduled_start || '', data.cycle_type || '', data.cycle_value || '',
       data.cycle_time || '', data.cycle_end || '', data.output_type || '', data.output_target || '',
-      data.notify_feishu ? 1 : 0, data.dataset_id || '', data.record_id || '', data.project_id || null);
+      data.notify_feishu ? 1 : 0, data.session_id || '', data.source || '', data.dataset_id || '', data.record_id || '');
     const r = qOne<{id: number}>('SELECT id FROM plan_tasks ORDER BY id DESC LIMIT 1');
     return { id: r!.id };
   },
@@ -741,6 +758,8 @@ const task = {
     if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
     if (data.priority !== undefined) { fields.push('priority = ?'); params.push(data.priority); }
     if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
+    if (data.task_type !== undefined) { fields.push('task_type = ?'); params.push(data.task_type); }
+    if (data.project_id !== undefined) { fields.push('project_id = ?'); params.push(data.project_id); }
     if (data.trigger_type !== undefined) { fields.push('trigger_type = ?'); params.push(data.trigger_type); }
     if (data.scheduled_start !== undefined) { fields.push('scheduled_start = ?'); params.push(data.scheduled_start); }
     if (data.cycle_type !== undefined) { fields.push('cycle_type = ?'); params.push(data.cycle_type); }
@@ -750,6 +769,8 @@ const task = {
     if (data.output_type !== undefined) { fields.push('output_type = ?'); params.push(data.output_type); }
     if (data.output_target !== undefined) { fields.push('output_target = ?'); params.push(data.output_target); }
     if (data.notify_feishu !== undefined) { fields.push('notify_feishu = ?'); params.push(data.notify_feishu ? 1 : 0); }
+    if (data.session_id !== undefined) { fields.push('session_id = ?'); params.push(data.session_id); }
+    if (data.source !== undefined) { fields.push('source = ?'); params.push(data.source); }
     if (data.dataset_id !== undefined) { fields.push('dataset_id = ?'); params.push(data.dataset_id); }
     if (data.record_id !== undefined) { fields.push('record_id = ?'); params.push(data.record_id); }
     if (data.last_result !== undefined) { fields.push('last_result = ?'); params.push(data.last_result); }
@@ -759,11 +780,17 @@ const task = {
     if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE plan_tasks SET ${fields.join(', ')} WHERE id = ?`, ...params); }
   },
   remove: (id: number) => {
+    const t = qOne<{session_id: string}>('SELECT session_id FROM plan_tasks WHERE id = ?', id);
+    if (t && t.session_id) {
+      run('DELETE FROM prj_messages WHERE session_id = ?', t.session_id);
+      run('DELETE FROM prj_sessions WHERE session_id = ?', t.session_id);
+    }
     run('DELETE FROM task_executions WHERE task_id = ?', id);
     run('DELETE FROM plan_tasks WHERE id = ?', id);
   },
-  // 可调度的任务（手动 + 定时 + 循环），用于恢复调度
+  // 可调度的任务（定时 + 循环），用于恢复调度
   schedulable: () => q("SELECT * FROM plan_tasks WHERE status IN ('pending', 'in_progress')"),
+  listByProject: (projectId: number) => q('SELECT * FROM plan_tasks WHERE project_id = ? ORDER BY created_at DESC', projectId),
 };
 
 const taskExecution = {
@@ -815,4 +842,4 @@ const aitoolHistory = {
   },
 };
 
-export { getDb, close, q, qOne, run, runRaw, save, project, chat, dm, ds, aa, reminder, todo, task, taskExecution, aitoolHistory };
+export { getDb, close, q, qOne, run, runRaw, save, project, chat, dm, ds, aa, reminder, task, taskExecution, aitoolHistory };

@@ -96,10 +96,6 @@ function buildProjectListMessage(projects: any[]): string {
 
 // ========== 任务执行 ==========
 
-function sessionIdFor(project: any, sender: string): string {
-  return `coding_feishu_${project.id}_${sender.slice(-12)}`;
-}
-
 /** worktree 任务上下文：路径确定性派生（baseDir/项目id/sessionId），重启可复用 */
 function taskRuntime(sessionId: string, project: any, text: string) {
   let hash = 0;
@@ -187,7 +183,10 @@ export async function handleFeishuCodingMessage(
   }
   await feishu.replyMessage(msg, `🔧 正在项目 **${project.name}** 中处理，请稍后...`);
 
-  const sessionId = sessionIdFor(project, msg.sender);
+  // 先落任务记录，再按任务 id 创建独立 session
+  const { taskId, execId } = recordFeishuTask(db, project, cleanText, '', 'coding');
+  const sessionId = 'task_' + taskId;
+  if (taskId != null) db.task.update(taskId, { session_id: sessionId });
   db.chat.createSession(sessionId, project.id, cleanText.slice(0, 30), 'coding', 'pi', 'feishu');
   db.chat.addMessage(sessionId, 'user', cleanText, 'general');
 
@@ -217,9 +216,23 @@ export async function handleFeishuCodingMessage(
       onDone: (finalText) => {
         if (finalText) reply = finalText;
         db.chat.addMessage(sessionId, 'assistant', reply, 'general');
+        if (execId != null) {
+          db.taskExecution.update(execId, { status: 'SUCCESS', end_time: nowString(), result_text: reply });
+        }
+        if (taskId != null) {
+          db.task.update(taskId, { last_result: reply.slice(0, 3000), last_status: 'SUCCESS', last_run_at: nowString(), status: 'done' });
+        }
+        notifyTaskChanged();
       },
       onError: (err) => {
         db.chat.addMessage(sessionId, 'assistant', `❌ ${err}`, 'general');
+        if (execId != null) {
+          db.taskExecution.update(execId, { status: 'FAILED', end_time: nowString(), error_message: String(err) });
+        }
+        if (taskId != null) {
+          db.task.update(taskId, { last_status: 'FAILED', last_run_at: nowString(), status: 'pending' });
+        }
+        notifyTaskChanged();
       },
     });
 
@@ -229,8 +242,162 @@ export async function handleFeishuCodingMessage(
     return { handled: true, reply: (reply || '✅ 处理完成。') + footer };
   } catch (e: any) {
     logger.error('[CodingTask] execution failed: %s', e?.message);
+    if (execId != null) {
+      db.taskExecution.update(execId, { status: 'FAILED', end_time: nowString(), error_message: (e && e.message) || String(e) });
+    }
+    if (taskId != null) {
+      db.task.update(taskId, { last_status: 'FAILED', last_run_at: nowString(), status: 'pending' });
+      notifyTaskChanged();
+    }
     return { handled: true, reply: `❌ 处理出错: ${e?.message}` };
   }
+}
+
+function nowString(): string {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+function notifyTaskChanged() {
+  try {
+    const { BrowserWindow } = require('electron') as typeof import('electron');
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send('task:changed');
+    }
+  } catch {}
+}
+
+/** 创建任务记录（挂到项目下），返回 { 任务id, 执行记录id } */
+export function recordFeishuTask(db: any, project: any, text: string, sessionId?: string, taskType = 'coding'): { taskId: number | null; execId: number | null } {
+  try {
+    const r = db.task.add({
+      title: text.slice(0, 100),
+      prompt: text,
+      task_type: taskType,
+      project_id: project && project.id && Number.isFinite(Number(project.id)) ? Number(project.id) : null,
+      source: 'feishu',
+      trigger_type: 'now',
+      status: 'in_progress',
+      session_id: sessionId || '',
+    });
+    const execId = db.taskExecution.add({
+      task_id: r.id, task_title: r.title, status: 'RUNNING',
+      trigger_type: 'manual', start_time: nowString(),
+    });
+    notifyTaskChanged();
+    return { taskId: r.id, execId };
+  } catch (e) {
+    logger.error('[CodingTask] record task failed: %s', e.message);
+    return { taskId: null, execId: null };
+  }
+}
+
+// ========== 任务追问（复用原 session，流式回传） ==========
+
+function emitFollowup(type: string, payload: any) {
+  try {
+    const { BrowserWindow } = require('electron') as typeof import('electron');
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send('task:followup:' + type, payload);
+    }
+  } catch {}
+}
+
+/**
+ * 任务追问：复用任务的原始会话继续对话（coding → worktree 中继续；note → 笔记库中继续）。
+ * 结果以 task:followup:delta / done / error 事件流式回传。
+ */
+export async function followUpTask(taskId: number, question: string, db: any): Promise<boolean> {
+  const task = db.task.get(taskId);
+  if (!task) return false;
+  if (task.status === 'in_progress') return false;
+  const project: any = task.project_id && Number.isFinite(Number(task.project_id)) ? db.project.get(Number(task.project_id)) : null;
+
+  let sessionId = task.session_id || '';
+  if (!sessionId) {
+    sessionId = 'task_' + taskId;
+    db.chat.createSession(sessionId, project ? project.id : null, (task.title || '').slice(0, 30), task.task_type === 'coding' ? 'coding' : 'kb', 'pi', 'ui');
+    db.task.update(taskId, { session_id: sessionId });
+  }
+  db.chat.addMessage(sessionId, 'user', question, 'general');
+  db.task.update(taskId, { status: 'in_progress' });
+  const execId = db.taskExecution.add({
+    task_id: taskId, task_title: task.title, status: 'RUNNING',
+    trigger_type: 'followup', start_time: nowString(),
+  });
+  notifyTaskChanged();
+
+  const finish = (status: string, extra: { error?: string; result?: string } = {}) => {
+    const end = nowString();
+    if (execId != null) db.taskExecution.update(execId, { status, end_time: end, ...(extra.error ? { error_message: extra.error } : {}), ...(extra.result ? { result_text: extra.result } : {}) });
+    db.task.update(taskId, {
+      last_status: status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
+      last_run_at: end,
+      status: status === 'SUCCESS' ? 'done' : 'pending',
+      ...(extra.result ? { last_result: extra.result.slice(0, 3000) } : {}),
+    });
+    notifyTaskChanged();
+  };
+
+  (async () => {
+    try {
+      const { buildReportToolDefs, buildDataToolDefs, buildNoteToolDefs, buildCodingToolDefs } = require('./tools');
+      const customTools: any[] = [];
+      let cwd = '';
+      let prompt = '';
+
+      if (task.task_type === 'coding' && project && project.dir) {
+        const runtime = taskRuntime(sessionId, project, task.prompt || task.title || 'coding task');
+        const ws = await ensureWorkspace(runtime, project);
+        cwd = ws.path;
+        customTools.push(...(await buildReportToolDefs(undefined)));
+        customTools.push(...(await buildCodingToolDefs(ws.path)));
+        prompt = `以下是代码项目 ${project.name} 的任务「${task.title}」的后续工作，项目工作目录：${ws.path}（若需修改代码，直接在此目录修改）。
+原始任务：${task.prompt || ''}
+用户追问：${question}
+请继续完成，直接输出结果。`;
+      } else {
+        const notesDir = appConfig.getConfig('notesDir') || (project ? project.dir : '') || '';
+        cwd = notesDir;
+        customTools.push(...(await buildReportToolDefs(undefined)));
+        if (notesDir) customTools.push(...(await buildDataToolDefs(notesDir)));
+        const noteProj: any = project || db.qOne("SELECT * FROM prj_projects WHERE type = 'note' ORDER BY is_default DESC, id ASC LIMIT 1");
+        if (noteProj) customTools.push(...(await buildNoteToolDefs(noteProj.id)));
+        prompt = `以下是笔记库目录，请用 grep/find 等工具自行搜索相关文件后回答：\n笔记库路径：${notesDir || '（未配置）'}\n\n原始任务：${task.prompt || task.title || ''}\n用户追问：${question}`;
+      }
+
+      let reply = '';
+      await runPi({
+        prompt,
+        sessionId,
+        cwd: cwd || undefined,
+        customTools,
+        onDelta: (delta) => {
+          reply += delta;
+          emitFollowup('delta', { taskId, delta });
+        },
+        onTool: (t: any) => logger.info('[Followup] tool %s %s', t.name, t.type),
+        onDone: (finalText) => {
+          if (finalText) reply = finalText;
+          db.chat.addMessage(sessionId, 'assistant', reply, 'general');
+          finish('SUCCESS', { result: reply });
+          emitFollowup('done', { taskId, text: reply });
+        },
+        onError: (err) => {
+          db.chat.addMessage(sessionId, 'assistant', `❌ ${err}`, 'general');
+          finish('FAILED', { error: String(err) });
+          emitFollowup('error', { taskId, error: String(err) });
+        },
+      });
+    } catch (e: any) {
+      logger.error('[Followup] execution failed: %s', e?.message);
+      finish('FAILED', { error: (e && e.message) || String(e) });
+      emitFollowup('error', { taskId, error: (e && e.message) || String(e) });
+    }
+  })();
+
+  return true;
 }
 
 // ========== 变更审查（供「编程」页 IPC） ==========

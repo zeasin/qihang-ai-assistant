@@ -1,7 +1,7 @@
 /**
  * 本地 SQLite → 云端 MySQL 数据迁移
  *
- * 仅迁移业务数据表（会话、项目、待办、提醒、数据中心、AI 分析、工具历史）。
+ * 仅迁移业务数据表（会话、项目、任务、提醒、数据中心、AI 分析、工具历史）。
  * 知识库索引（kb_documents / kb_chunks，含向量）体积大且机器相关，留在本地。
  *
  * 迁移方式：读取本地 SQLite（与运行中的应用共用连接），逐表清空云端后重新导入，
@@ -20,7 +20,8 @@ const MIGRATE_TABLES = [
   'data_center_records',
   'ai_analysis',
   'plan_reminders',
-  'plan_todos',
+  'plan_tasks',
+  'task_executions',
   'ai_tools_history',
 ];
 

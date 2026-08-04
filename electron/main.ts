@@ -36,7 +36,7 @@ import * as db from './services/database';
 import * as appConfig from './services/app-config';
 import { runPi, listPiModels, generateDailyReport as piGenerateDailyReport } from './services/pi-agent';
 import { buildNoteToolDefs, buildDataToolDefs, buildCodingToolDefs } from './services/tools';
-import { initCodingTasks, isCodingMessage, handleFeishuCodingMessage, getWorktreeService, listCodingProjects, collectSessionChanges, applySessionChanges, commitSessionChanges, abortSessionChanges, discardSessionChanges, latestCodingSessions } from './services/coding-task';
+import { initCodingTasks, isCodingMessage, handleFeishuCodingMessage, getWorktreeService, listCodingProjects, collectSessionChanges, applySessionChanges, commitSessionChanges, abortSessionChanges, discardSessionChanges, latestCodingSessions, recordFeishuTask, followUpTask } from './services/coding-task';
 import * as aitool from './services/ai-tools';
 import { listBuiltinSuites, applyBuiltinSuites } from './services/builtin-datasets';
 import * as backup from './services/backup';
@@ -315,6 +315,12 @@ const feishuMessageHandler = async (msg) => {
     return;
   }
 
+  const fTs = () => { const d = new Date(Date.now() + 8 * 3600 * 1000); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`; };
+  const fNotifyUI = () => { try { for (const w of BrowserWindow.getAllWindows()) w.webContents.send('task:changed'); } catch {} };
+
+  let feishuTaskId: any = null;
+  let feishuExecId: any = null;
+
   try {
     const context = parseFeishuContext(msg.text, db);
 
@@ -356,13 +362,24 @@ const feishuMessageHandler = async (msg) => {
 
     feishu.replyMessage(msg, '🤔 AI 正在思考，请稍后...');
 
-    const sessionId = 'feishu_' + feishuProjectId + '_' + msg.sender;
-    logger.info(' SessionId: %s', sessionId);
+    // 先落任务记录，再按任务 id 创建独立 session
+    const feishuProject = feishuProjectId !== 'notesdir' && Number.isFinite(Number(feishuProjectId))
+      ? db.project.get(Number(feishuProjectId)) : null;
+    const r = recordFeishuTask(db, feishuProject, msg.text, '', 'note');
+    feishuTaskId = r.taskId;
+    feishuExecId = r.execId;
 
+    const sessionId = 'task_' + feishuTaskId;
+    if (feishuTaskId != null) db.task.update(feishuTaskId, { session_id: sessionId });
     db.chat.createSession(sessionId, feishuProjectId, msg.text.slice(0, 30), 'feishu', 'pi', 'feishu');
     db.chat.addMessage(sessionId, 'user', msg.text, 'general');
+    logger.info(' SessionId: %s', sessionId);
 
-    const setMode = (mode) => { try { db.run("UPDATE prj_sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", mode,sessionId); } catch {} };
+    const setMode = (mode) => { try { db.run("UPDATE prj_sessions SET mode = ?, updated_at = datetime('now', '+8 hours') WHERE session_id = ?", mode,sessionId); } catch {} };
+    const updateTaskFailed = (err: string) => {
+      if (feishuExecId != null) db.taskExecution.update(feishuExecId, { status: 'FAILED', end_time: fTs(), error_message: err });
+      if (feishuTaskId != null) db.task.update(feishuTaskId, { last_status: 'FAILED', last_run_at: fTs(), status: 'pending' });
+    };
 
     const notesDir = appConfig.getConfig('notesDir') || context.projectDir || '';
     const prompt = notesDir
@@ -386,15 +403,24 @@ const feishuMessageHandler = async (msg) => {
           db.chat.addMessage(sessionId, 'assistant', text, 'general');
           feishu.replyCard(msg, text, '🤖 启航AI');
         }
+        const end = fTs();
+        if (feishuExecId != null) db.taskExecution.update(feishuExecId, { status: 'SUCCESS', end_time: end, result_text: text || '' });
+        if (feishuTaskId != null) db.task.update(feishuTaskId, { last_result: (text || '').slice(0, 3000), last_status: 'SUCCESS', last_run_at: end, status: 'done' });
+        fNotifyUI();
       },
       onError: (e) => {
         logger.error('[Feishu] Chat error: %s', e);
         feishu.replyCard(msg, `处理出错: ${e}`, '❌ 错误');
+        updateTaskFailed(String(e));
+        fNotifyUI();
       },
     });
   } catch (e) {
     logger.error('[Feishu] Handler exception: %s', e.message);
     feishu.replyCard(msg, `处理出错: ${e.message}`, '❌ 错误');
+    if (feishuExecId != null) db.taskExecution.update(feishuExecId, { status: 'FAILED', end_time: fTs(), error_message: e.message });
+    if (feishuTaskId != null) db.task.update(feishuTaskId, { last_status: 'FAILED', last_run_at: fTs(), status: 'pending' });
+    fNotifyUI();
   }
 };
 
@@ -1035,15 +1061,15 @@ ipcMain.handle('reminder:setEnabled', (_, id, enabled) => {
   scheduler.reload();
   return true;
 });
-ipcMain.handle('todo:list', () => db.todo.list());
-ipcMain.handle('todo:add', (_, data) => db.todo.add(data));
-ipcMain.handle('todo:update', (_, id, data) => { db.todo.update(id, data); return true; });
-ipcMain.handle('todo:remove', (_, id) => { db.todo.remove(id); return true; });
+ipcMain.handle('todo:list', () => db.task.list());
+ipcMain.handle('todo:add', (_, data) => db.task.add({ ...data, trigger_type: 'manual', source: 'ui' }));
+ipcMain.handle('todo:update', (_, id, data) => { db.task.update(id, data); return true; });
+ipcMain.handle('todo:remove', (_, id) => { db.task.remove(id); return true; });
 
 // --- AI 自执行任务 ---
 ipcMain.handle('task:list', () => db.task.list());
 ipcMain.handle('task:add', (_, data) => {
-  const r = db.task.add(data);
+  const r = db.task.add({ ...data, source: data.source || 'ui' });
   scheduler.reloadTasks();
   return r;
 });
@@ -1058,6 +1084,7 @@ ipcMain.handle('task:remove', (_, id) => {
   return true;
 });
 ipcMain.handle('task:execute', (_, id) => scheduler.executeTaskNow(id));
+ipcMain.handle('task:followup', (_, { taskId, question }) => followUpTask(taskId, question, db));
 ipcMain.handle('task:executions', (_, taskId) => db.taskExecution.listByTask(taskId));
 ipcMain.handle('task:execution:list', (_, page, pageSize) => db.taskExecution.list(page, pageSize));
 ipcMain.handle('task:execution:get', (_, id) => db.taskExecution.get(id));
@@ -1237,8 +1264,8 @@ ipcMain.handle('insights:stats', () => {
   const todayModified = (db.qOne("SELECT COUNT(*) as c FROM kb_documents WHERE indexed_at >= date('now')") || {}).c || 0;
   const projectCount = (db.qOne("SELECT COUNT(*) as c FROM prj_projects WHERE type = 'note'") || {}).c || 0;
   const codeProjectCount = (db.qOne("SELECT COUNT(*) as c FROM prj_projects WHERE type = 'code'") || {}).c || 0;
-  const todoPending = (db.qOne("SELECT COUNT(*) as c FROM plan_todos WHERE status IN ('pending','in_progress')") || {}).c || 0;
-  const todoOverdue = (db.qOne("SELECT COUNT(*) as c FROM plan_todos WHERE due_date != '' AND due_date < date('now','+8 hours') AND status IN ('pending','in_progress')") || {}).c || 0;
+  const todoPending = (db.qOne("SELECT COUNT(*) as c FROM plan_tasks WHERE status IN ('pending','in_progress')") || {}).c || 0;
+  const todoOverdue = (db.qOne("SELECT COUNT(*) as c FROM plan_tasks WHERE scheduled_start != '' AND scheduled_start < datetime('now', '+8 hours') AND status IN ('pending','in_progress')") || {}).c || 0;
   const remindersActive = (db.qOne("SELECT COUNT(*) as c FROM plan_reminders WHERE enabled = 1") || {}).c || 0;
   const todayDataRecords = (db.qOne("SELECT COUNT(*) as c FROM data_center_records WHERE created_at >= datetime('now', '+8 hours', 'start of day')") || {}).c || 0;
   return { fileCount, chunkCount, totalChats, todayModified, projectCount, codeProjectCount, todoPending, todoOverdue, remindersActive, todayDataRecords };

@@ -79,6 +79,7 @@ const navItems = [
 ];
 
 const isActive = (path: string) => {
+  if (path === '/planner' && route.path.startsWith('/task/')) return true;
   return route.path === path || route.path.startsWith(path + '/');
 };
 </script>

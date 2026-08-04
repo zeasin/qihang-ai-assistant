@@ -449,33 +449,6 @@ function getChinaDate(offsetDays = 0) {
   return china.toISOString().slice(0, 10);
 }
 
-async function addTodoTool({ title, description, priority, due_date, status }) {
-  if (!title || !title.trim()) return '请提供待办标题（title）';
-  const r = db.todo.add({
-    title: title.trim(),
-    description: description || '',
-    priority: priority || 'mid',
-    due_date: due_date || '',
-    status: status || 'pending',
-  });
-  logger.info('[Tools] add_todo: %s → id %s', title, r.id);
-  return `已创建待办 "${title}" (id: ${r.id}, 优先级: ${priority || 'mid'}, 状态: ${status || 'pending'})`;
-}
-
-async function updateTodoTool({ id, title, description, priority, due_date, status }) {
-  const exists = db.todo.get(id);
-  if (!exists) return `待办 id=${id} 不存在。可先用 query_todos 查询待办 id。`;
-  const patch: any = {};
-  if (title !== undefined && title !== null) patch.title = title;
-  if (description !== undefined && description !== null) patch.description = description;
-  if (priority !== undefined && priority !== null) patch.priority = priority;
-  if (due_date !== undefined && due_date !== null) patch.due_date = due_date;
-  if (status !== undefined && status !== null) patch.status = status;
-  if (!Object.keys(patch).length) return '没有需要更新的字段';
-  db.todo.update(id, patch);
-  return `已更新待办 id=${id}：${Object.keys(patch).join(', ')}`;
-}
-
 async function addReminderTool({ name, message, type, time, day_of_week, day_of_month, date }) {
   if (!name || !name.trim()) return '请提供提醒名称（name）';
   const r = db.reminder.add({
@@ -506,19 +479,6 @@ async function updateReminderTool({ id, name, message, time, enabled, type, day_
   if (!Object.keys(patch).length) return '没有需要更新的字段';
   db.reminder.update(id, patch);
   return `已更新提醒 id=${id}：${Object.keys(patch).join(', ')}`;
-}
-
-async function queryTodosTool({ status, priority, date_from, date_to, limit }) {
-  let sql = 'SELECT * FROM plan_todos WHERE 1=1';
-  const p: any[] = [];
-  if (status) { sql += ' AND status = ?'; p.push(status); }
-  if (priority) { sql += ' AND priority = ?'; p.push(priority); }
-  if (date_from) { sql += ' AND (created_at >= ? OR updated_at >= ?)'; p.push(date_from, date_from); }
-  if (date_to) { sql += ' AND (created_at <= ? OR updated_at <= ?)'; p.push(date_to, date_to); }
-  sql += ' ORDER BY created_at DESC LIMIT ?';
-  p.push(limit || 30);
-  const rows = db.q(sql, ...p);
-  return rows.length ? JSON.stringify(rows, null, 2) : '暂无待办数据';
 }
 
 async function queryMessagesTool({ date_from, date_to, role, limit }) {
@@ -569,26 +529,39 @@ async function getTodayInfoTool({}, kbId) {
   return JSON.stringify({ today: getChinaDate(), yesterday: getChinaDate(-1), weekAgo: getChinaDate(-7), projectId: kbId || null, projectName }, null, 2);
 }
 
-// ========== AI 自执行任务工具 ==========
+// ========== AI 任务工具 ==========
+
+function resolveProjectId(project_name?: string): { id: number | null; type: string; name: string } | string {
+  const projects = db.project.list();
+  if (!project_name) return { id: null, type: '', name: '' };
+  const match = projects.find((p: any) => p.name && (p.name.includes(project_name) || project_name.includes(p.name)));
+  if (!match) return `未找到项目"${project_name}"，可用项目：${projects.map((p: any) => p.name).join('、') || '（无）'}`;
+  return { id: match.id, type: match.type || '', name: match.name };
+}
 
 async function queryTasksTool({ status, limit }) {
   const rows = db.task.list(status || undefined).slice(0, limit || 20);
   return rows.length ? JSON.stringify(rows.map((r: any) => ({
-    id: r.id, title: r.title, status: r.status, priority: r.priority,
+    id: r.id, title: r.title, status: r.status, priority: r.priority, task_type: r.task_type, project_id: r.project_id,
     trigger_type: r.trigger_type, scheduled_start: r.scheduled_start,
     cycle_type: r.cycle_type, cycle_value: r.cycle_value, cycle_time: r.cycle_time,
     last_status: r.last_status, last_run_at: r.last_run_at, prompt: String(r.prompt || '').slice(0, 200),
-  })), null, 2) : '暂无 AI 任务';
+  })), null, 2) : '暂无任务';
 }
 
-async function createTaskTool({ title, prompt, trigger_type, scheduled_start, cycle_type, cycle_value, cycle_time, notify_feishu, output_target }) {
+async function createTaskTool({ title, prompt, project_name, trigger_type, scheduled_start, cycle_type, cycle_value, cycle_time, notify_feishu, output_target }) {
   if (!title || !title.trim()) return '请提供任务标题（title）';
+  const proj = resolveProjectId(project_name);
+  if (typeof proj === 'string') return proj;
   const r = db.task.add({
     title: title.trim(),
     prompt: prompt || '',
     priority: 'mid',
     status: 'pending',
-    trigger_type: trigger_type || 'manual',
+    task_type: proj.type === 'code' ? 'coding' : 'note',
+    project_id: proj.id,
+    source: 'ai',
+    trigger_type: trigger_type || 'now',
     scheduled_start: scheduled_start || '',
     cycle_type: cycle_type || '',
     cycle_value: cycle_value || '',
@@ -599,9 +572,11 @@ async function createTaskTool({ title, prompt, trigger_type, scheduled_start, cy
   try {
     const scheduler = require('./scheduler');
     if (scheduler.reloadTasks) scheduler.reloadTasks();
+    if ((trigger_type || 'now') === 'now' && scheduler.executeTaskNow) scheduler.executeTaskNow(r.id);
   } catch (e) { logger.warn('[Tools] create_task reload failed: ' + e.message); }
   logger.info('[Tools] create_task: %s → id %s', title, r.id);
-  return `已创建 AI 自执行任务 "${title}" (id: ${r.id}, 触发: ${trigger_type || 'manual'}${scheduled_start ? ' @ ' + scheduled_start : ''})。可手动立即执行，或等待调度器自动触发。`;
+  const where = proj.id ? `项目「${proj.name}」` : '（未指定项目，仅记录）';
+  return `已创建任务 "${title}" (id: ${r.id}, 归属: ${where}, 触发: ${trigger_type || 'now'}${scheduled_start ? ' @ ' + scheduled_start : ''})。${(trigger_type || 'now') === 'now' ? '已开始执行。' : '到点将自动执行。'}`;
 }
 
 async function updateTaskTool({ id, title, prompt, status, trigger_type, scheduled_start, cycle_type, cycle_value, cycle_time }) {
@@ -688,18 +663,15 @@ async function buildReportToolDefs(kbId) {
   const optStr = (description?: string) => Type.Optional(Type.Union([Type.String({ description }), Type.Null()]));
   const optNum = (description?: string) => Type.Optional(Type.Union([Type.Number({ description }), Type.String(), Type.Null()]));
   return [
-    { name: 'query_todos', label: 'query_todos', description: '查询待办事项（plan_todos），可按状态( done / in_progress / pending )、优先级、日期范围过滤。不传参数则返回最近的待办。', parameters: Type.Object({ status: optStr('过滤状态: done / in_progress / pending'), priority: optStr('过滤优先级: high / mid / low'), date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), limit: optNum('返回条数上限，默认30') }), execute: exec((args) => queryTodosTool({ ...args, limit: toNumber(args.limit, 30) })) },
-    { name: 'add_todo', label: 'add_todo', description: '创建一条待办事项。AI 从对话中识别出用户要执行的事项时应调用本工具落成待办。', parameters: Type.Object({ title: Type.String({ description: '待办标题' }), description: optStr('详细说明'), priority: optStr('优先级: high / mid / low，默认 mid'), due_date: optStr('截止日期 YYYY-MM-DD，可选'), status: optStr('状态: pending / in_progress / done，默认 pending') }), execute: exec(addTodoTool) },
-    { name: 'update_todo', label: 'update_todo', description: '更新待办事项（标题、描述、优先级、截止日期、状态）。先调用 query_todos 获取待办 id。', parameters: Type.Object({ id: Type.Number({ description: '待办 id' }), title: optStr('新标题'), description: optStr('新描述'), priority: optStr('优先级: high / mid / low'), due_date: optStr('截止日期 YYYY-MM-DD'), status: optStr('状态: pending / in_progress / done') }), execute: exec(updateTodoTool) },
     { name: 'query_messages', label: 'query_messages', description: '查询聊天/对话记录（prj_messages）。可过滤日期范围、角色( user / assistant )。', parameters: Type.Object({ date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), role: optStr('角色: user / assistant'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryMessagesTool({ ...args, limit: toNumber(args.limit, 20) })) },
     { name: 'query_documents', label: 'query_documents', description: '查询知识库中文档更新记录（kb_documents）。可过滤日期范围。', parameters: Type.Object({ date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryDocumentsTool({ ...args, limit: toNumber(args.limit, 20) })) },
     { name: 'query_data_records', label: 'query_data_records', description: '查询数据中心记录（data_center_records）。可过滤数据集名称、日期范围。', parameters: Type.Object({ dataset_name: optStr('数据集名称关键词（模糊匹配）'), date_from: optStr('起始日期 YYYY-MM-DD'), date_to: optStr('结束日期 YYYY-MM-DD'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryDataRecordsTool({ ...args, limit: toNumber(args.limit, 20) })) },
     { name: 'query_reminders', label: 'query_reminders', description: '查询已启用的提醒事项（plan_reminders）。', parameters: Type.Object({}), execute: exec(() => queryRemindersTool()) },
     { name: 'add_reminder', label: 'add_reminder', description: '创建一条定时提醒。类型: daily(每天)/weekly(每周，需 day_of_week 0=周日)/monthly(每月，需 day_of_month)/once(一次性，需 date YYYY-MM-DD)。', parameters: Type.Object({ name: Type.String({ description: '提醒名称，如 "喝水"' }), message: optStr('提醒内容'), type: optStr('类型: daily / weekly / monthly / once，默认 daily'), time: optStr('时间 HH:MM，默认 09:00'), day_of_week: optNum('weekly 用: 0-6，0=周日'), day_of_month: optNum('monthly 用: 1-31'), date: optStr('once 用: 日期 YYYY-MM-DD') }), execute: exec(addReminderTool) },
     { name: 'update_reminder', label: 'update_reminder', description: '更新提醒（名称、内容、时间、启用状态等）。先调用 query_reminders 获取提醒 id。', parameters: Type.Object({ id: Type.String({ description: '提醒 id（如 R1712345678901）' }), name: optStr('新名称'), message: optStr('新内容'), time: optStr('时间 HH:MM'), enabled: optStr('是否启用: true / false'), type: optStr('类型: daily / weekly / monthly / once'), day_of_week: optNum('weekly 用: 0-6'), day_of_month: optNum('monthly 用: 1-31'), date: optStr('once 用: YYYY-MM-DD') }), execute: exec(updateReminderTool) },
-    { name: 'query_tasks', label: 'query_tasks', description: '查询 AI 自执行任务（plan_tasks），可按状态过滤。', parameters: Type.Object({ status: optStr('过滤状态: pending / in_progress / done'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryTasksTool({ ...args, limit: toNumber(args.limit, 20) })) },
-    { name: 'create_task', label: 'create_task', description: '创建一条 AI 自执行任务。当用户要求"定时执行/自动执行某个任务"（如每天生成日报、每周总结、定时帮我整理数据等）时应调用本工具。执行时会用 AI 自动完成并通知用户。trigger_type: manual(手动)/once(一次性定时，需 scheduled_start YYYY-MM-DD HH:MM)/cycle(循环，需 cycle_type+cycle_time)。', parameters: Type.Object({ title: Type.String({ description: '任务标题' }), prompt: optStr('任务详细说明，AI 将据此自主执行'), trigger_type: optStr('触发类型: manual / once / cycle，默认 manual'), scheduled_start: optStr('once 用: 执行时间 YYYY-MM-DD HH:MM'), cycle_type: optStr('cycle 用: daily / weekly / monthly / cron'), cycle_value: optStr('cycle 用: weekly 为星期(逗号分隔)或 cron 表达式；daily 可为空'), cycle_time: optStr('cycle 用: 执行时间 HH:MM，如 09:00'), notify_feishu: optNum('是否推送飞书通知: 1 / 0'), output_target: optStr('结果保存路径（相对笔记库），默认存到 任务输出/ 目录') }), execute: exec(createTaskTool) },
-    { name: 'update_task', label: 'update_task', description: '更新 AI 自执行任务（标题、说明、触发配置、状态）。先调用 query_tasks 获取任务 id。', parameters: Type.Object({ id: Type.Number({ description: '任务 id' }), title: optStr('新标题'), prompt: optStr('新说明'), status: optStr('状态: pending / in_progress / done'), trigger_type: optStr('触发类型: manual / once / cycle'), scheduled_start: optStr('once 用: YYYY-MM-DD HH:MM'), cycle_type: optStr('cycle 用: daily / weekly / monthly / cron'), cycle_value: optStr('cycle 用'), cycle_time: optStr('cycle 用: HH:MM') }), execute: exec(updateTaskTool) },
+    { name: 'query_tasks', label: 'query_tasks', description: '查询任务（plan_tasks），可按状态( pending / in_progress / done )、优先级过滤。', parameters: Type.Object({ status: optStr('过滤状态: pending / in_progress / done'), priority: optStr('过滤优先级: high / mid / low'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryTasksTool({ ...args, limit: toNumber(args.limit, 20) })) },
+    { name: 'create_task', label: 'create_task', description: '创建一条任务（挂在代码项目或笔记库下）。当用户要求"定时执行/自动执行/记录一件事"（如每天生成日报、每周总结、定时整理数据、修复某个项目的问题）时应调用本工具。trigger_type: now(立即执行)/once(一次性定时，需 scheduled_start YYYY-MM-DD HH:MM)/cycle(循环，需 cycle_type+cycle_time)。', parameters: Type.Object({ title: Type.String({ description: '任务标题' }), prompt: optStr('任务详细说明，AI 将据此自主执行'), project_name: optStr('项目名称（代码项目或笔记库名），不传则用当前上下文'), trigger_type: optStr('触发类型: now / once / cycle，默认 now'), scheduled_start: optStr('once 用: 执行时间 YYYY-MM-DD HH:MM'), cycle_type: optStr('cycle 用: daily / weekly / monthly / cron'), cycle_value: optStr('cycle 用: weekly 为星期(逗号分隔)或 cron 表达式；daily 可为空'), cycle_time: optStr('cycle 用: 执行时间 HH:MM，如 09:00'), notify_feishu: optNum('是否推送飞书通知: 1 / 0'), output_target: optStr('结果保存路径（相对笔记库），默认存到 任务输出/ 目录') }), execute: exec(createTaskTool) },
+    { name: 'update_task', label: 'update_task', description: '更新任务（标题、说明、触发配置、状态）。先调用 query_tasks 获取任务 id。', parameters: Type.Object({ id: Type.Number({ description: '任务 id' }), title: optStr('新标题'), prompt: optStr('新说明'), status: optStr('状态: pending / in_progress / done'), trigger_type: optStr('触发类型: now / once / cycle'), scheduled_start: optStr('once 用: YYYY-MM-DD HH:MM'), cycle_type: optStr('cycle 用: daily / weekly / monthly / cron'), cycle_value: optStr('cycle 用'), cycle_time: optStr('cycle 用: HH:MM') }), execute: exec(updateTaskTool) },
     { name: 'get_today_info', label: 'get_today_info', description: '获取当前日期信息（今天的中国日期、项目/知识库名称等）。', parameters: Type.Object({}), execute: exec((args) => getTodayInfoTool(args, kbId)) },
   ];
 }

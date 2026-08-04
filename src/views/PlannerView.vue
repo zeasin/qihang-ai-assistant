@@ -1,230 +1,146 @@
 <template>
   <div class="planner-view">
     <div class="content-header">
-      <h1 class="content-title">任务</h1>
+      <h1 class="content-title">任务中心</h1>
       <div class="header-actions">
         <router-link to="/reminders" class="btn btn-secondary btn-sm">⏰ 提醒</router-link>
-        <button class="btn btn-primary btn-sm" @click="createTask">新建待办</button>
-        <button class="btn btn-primary btn-sm" @click="createAiTask">+ 新建 AI 任务</button>
+        <button class="btn btn-primary btn-sm" @click="createTask">+ 新建任务</button>
       </div>
     </div>
 
     <div class="content-body">
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">待办</h3>
-          <span class="card-subtitle">{{ doneTasks.length }}/{{ tasks.length }} 已完成</span>
-        </div>
-
-        <div class="task-board">
-          <div class="task-column column-pending">
-            <div class="column-header">
-              <span class="column-title">待处理</span>
-              <span class="column-count">{{ pendingTasks.length }}</span>
-            </div>
-            <div
-              v-for="task in pendingTasks"
-              :key="task.id"
-              class="task-card"
-              @click="editTask(task)"
-            >
-              <div class="task-title">{{ task.title }}</div>
-              <div class="task-meta">
-                <span :class="'priority-' + task.priority">{{ task.priority }}</span>
-                <span class="task-due">📅 {{ task.dueDate }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="task-column column-progress">
-            <div class="column-header">
-              <span class="column-title">进行中</span>
-              <span class="column-count">{{ progressTasks.length }}</span>
-            </div>
-            <div
-              v-for="task in progressTasks"
-              :key="task.id"
-              class="task-card"
-              @click="editTask(task)"
-            >
-              <div class="task-title">{{ task.title }}</div>
-              <div class="task-meta">
-                <span :class="'priority-' + task.priority">{{ task.priority }}</span>
-                <span class="task-due">📅 {{ task.dueDate }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="task-column column-done">
-            <div class="column-header">
-              <span class="column-title">已完成</span>
-              <span class="column-count">{{ doneTasks.length }}</span>
-            </div>
-            <div
-              v-for="task in doneTasks"
-              :key="task.id"
-              class="task-card"
-              @click="editTask(task)"
-            >
-              <div class="task-title">{{ task.title }}</div>
-              <div class="task-meta">
-                <span :class="'priority-' + task.priority">{{ task.priority }}</span>
-                <span class="task-due">📅 {{ task.dueDate }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
+      <div v-if="groups.length === 0" class="empty-state">
+        <div class="empty-icon">🗂️</div>
+        <div class="empty-text">还没有任务。点击「新建任务」挂到代码项目或笔记库下；飞书发来的编程请求也会自动记录在这里。</div>
       </div>
 
-      <!-- AI 自执行任务 -->
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">🤖 AI 自执行任务</h3>
-          <span class="card-subtitle">AI 按设定的触发条件自动执行，完成后通知你并保存结果</span>
+      <div v-for="group in groups" :key="group.key" class="project-section">
+        <div class="project-header">
+          <div class="project-info">
+            <span class="project-icon">{{ group.type === 'code' ? '💻' : '📚' }}</span>
+            <span class="project-name">{{ group.name }}</span>
+            <span class="project-type">{{ group.type === 'code' ? '代码项目' : '笔记库' }}</span>
+            <span class="project-count">{{ group.tasks.length }} 个任务</span>
+          </div>
         </div>
 
-        <div v-if="aiTasks.length === 0" class="empty-state">
-          <div class="empty-icon">🤖</div>
-          <div class="empty-text">还没有 AI 任务。例如：「每天早上 9 点帮我总结昨天的数据」「每周五生成周报并推送飞书」</div>
-        </div>
+        <div v-if="group.tasks.length === 0" class="project-empty">该项目下暂无任务</div>
 
-        <div v-else class="ai-task-list">
-          <div v-for="task in aiTasks" :key="task.id" class="ai-task-card">
-            <div class="ai-task-main">
-              <div class="ai-task-head">
-                <span class="ai-task-title">{{ task.title }}</span>
-                <span :class="['status-badge', 'status-' + task.status]">{{ statusText(task.status) }}</span>
-                <span v-if="task.last_status === 'FAILED'" class="status-badge status-FAILED">执行失败</span>
-              </div>
-              <div class="ai-task-desc">{{ getTriggerText(task) }}</div>
-              <div v-if="task.last_result" class="ai-task-result">
-                <span class="result-label">最近结果：</span>{{ truncate(task.last_result, 120) }}
-              </div>
-              <div v-if="task.last_run_at" class="ai-task-run">
-                最近执行：{{ task.last_run_at }}（{{ task.last_status === 'SUCCESS' ? '成功' : task.last_status === 'FAILED' ? '失败' : task.last_status || '未执行' }}）
-              </div>
+        <div v-for="task in group.tasks" :key="task.id" class="task-card" :class="{ running: task.status === 'in_progress' }">
+          <div class="task-main">
+            <div class="task-head">
+              <span class="task-title">{{ task.title }}</span>
+              <span class="task-type-badge">{{ task.task_type === 'coding' ? '💻' : '📚' }}</span>
+              <span :class="['status-badge', 'status-' + task.status]">{{ statusText(task.status) }}</span>
+              <span v-if="task.last_status === 'FAILED'" class="status-badge status-FAILED">执行失败</span>
+              <span v-if="task.status === 'in_progress'" class="running-dot"></span>
             </div>
-            <div class="ai-task-actions">
-              <button
-                class="btn btn-primary btn-xs"
-                :disabled="task.status === 'in_progress'"
-                @click="runAiTask(task)"
-              >{{ task.status === 'in_progress' ? '执行中…' : '▶ 立即执行' }}</button>
-              <button class="btn btn-secondary btn-xs" @click="toggleHistory(task)">{{ task.showHistory ? '收起记录' : '执行记录' }}</button>
-              <button class="btn btn-secondary btn-xs" @click="editAiTask(task)">编辑</button>
-              <button class="btn btn-danger btn-xs" @click="openDeleteModal(task.id, 'ai_task')">删除</button>
+            <div class="task-desc">{{ getTriggerText(task) }}</div>
+            <div v-if="task.last_run_at" class="task-run">
+              最近执行：{{ task.last_run_at }}（{{ task.last_status === 'SUCCESS' ? '成功' : task.last_status === 'FAILED' ? '失败' : task.last_status || '未执行' }}）
             </div>
-            <div v-if="task.showHistory" class="ai-task-history">
-              <div v-if="!task.executions || task.executions.length === 0" class="history-empty">暂无执行记录</div>
-              <div v-for="ex in task.executions" :key="ex.id" class="history-item">
-                <span :class="['status-badge', 'status-' + ex.status]">{{ ex.status }}</span>
-                <span class="history-trigger">{{ triggerLabel(ex.trigger_type) }}</span>
-                <span class="history-time">{{ ex.start_time }}</span>
-                <div v-if="ex.error_message" class="history-error">❌ {{ ex.error_message }}</div>
-                <div v-if="ex.result_text" class="history-result">{{ truncate(ex.result_text, 200) }}</div>
-              </div>
+          </div>
+          <div class="task-actions">
+            <button v-if="task.trigger_type !== 'now'"
+              class="btn btn-primary btn-xs"
+              :disabled="task.status === 'in_progress' || task.followupRunning"
+              @click="runTask(task)"
+            >{{ task.status === 'in_progress' ? '执行中…' : '▶ 立即执行' }}</button>
+            <button class="btn btn-secondary btn-xs" @click="toggleFollowup(task)">💬 追问</button>
+            <button v-if="task.trigger_type !== 'now'" class="btn btn-secondary btn-xs" @click="toggleHistory(task)">{{ task.showHistory ? '收起记录' : '执行记录' }}</button>
+            <router-link :to="'/task/' + task.id" class="btn btn-secondary btn-xs">详情</router-link>
+            <button v-if="task.trigger_type !== 'now'" class="btn btn-secondary btn-xs" :disabled="task.source === 'feishu' || !!task.last_run_at" @click="editTask(task)">编辑</button>
+            <button class="btn btn-danger btn-xs" @click="openDeleteModal(task)">删除</button>
+          </div>
+          <div v-if="task.showFollowup" class="task-followup">
+            <div v-if="task.followupDone" class="followup-reply">{{ task.followupReply }}</div>
+            <div v-if="task.followupRunning" class="followup-reply followup-streaming">{{ task.followupReply }}</div>
+            <div class="followup-input-row">
+              <textarea
+                v-model="task.followupText"
+                class="followup-input"
+                rows="2"
+                placeholder="输入追问内容，将沿用该任务的原对话上下文继续执行…"
+                @keydown.enter.exact.prevent="sendFollowup(task)"
+              ></textarea>
+              <button class="btn btn-primary btn-sm" :disabled="!(task.followupText || '').trim() || task.followupRunning" @click="sendFollowup(task)">{{ task.followupRunning ? '执行中…' : '发送' }}</button>
+            </div>
+          </div>
+          <div v-if="task.showHistory" class="task-history">
+            <div v-if="!task.executions || task.executions.length === 0" class="history-empty">暂无执行记录</div>
+            <div v-for="ex in task.executions" :key="ex.id" class="history-item">
+              <span :class="['status-badge', 'status-' + ex.status]">{{ ex.status }}</span>
+              <span class="history-trigger">{{ triggerLabel(ex.trigger_type) }}</span>
+              <span class="history-time">{{ ex.start_time }}</span>
+              <div v-if="ex.error_message" class="history-error">❌ {{ ex.error_message }}</div>
+              <div v-if="ex.result_text" class="history-result">{{ truncate(ex.result_text, 200) }}</div>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 待办编辑模态框 -->
+    <!-- 新建/编辑任务模态框 -->
     <div v-if="showTaskModal" class="modal-overlay" @click="showTaskModal = false">
-      <div class="modal-box" @click.stop>
+      <div class="modal-box modal-box-lg" @click.stop>
         <div class="modal-header">
-          <h3>{{ isEditingTask ? '编辑任务' : '新建任务' }}</h3>
+          <h3>{{ isEditing ? '编辑任务' : '新建任务' }}</h3>
           <button class="btn btn-secondary" @click="showTaskModal = false">✕</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
-            <label>标题 *</label>
-            <input type="text" class="form-control" v-model="editingTask.title" placeholder="任务标题">
-          </div>
-          <div class="form-group">
-            <label>描述</label>
-            <textarea class="form-control" v-model="editingTask.description" rows="3" placeholder="任务描述（可选）"></textarea>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>优先级</label>
-              <select class="form-control" v-model="editingTask.priority">
-                <option value="high">🔴 高优先级</option>
-                <option value="mid">🟡 中优先级</option>
-                <option value="low">🟢 低优先级</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>截止日期</label>
-              <input type="date" class="form-control" v-model="editingTask.dueDate">
-            </div>
-          </div>
-          <div class="form-group" v-if="isEditingTask">
-            <label>状态</label>
-            <select class="form-control" v-model="editingTask.status">
-              <option value="pending">📋 待办</option>
-              <option value="in_progress">🔄 进行中</option>
-              <option value="done">✅ 已完成</option>
+            <label>归属项目 *</label>
+            <select class="form-control" v-model="editing.project_id" :disabled="isEditing">
+              <option :value="null" disabled>请选择项目</option>
+              <optgroup label="💻 代码项目">
+                <option v-for="p in codeProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
+              </optgroup>
+              <optgroup label="📚 笔记库">
+                <option v-for="p in noteProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
+              </optgroup>
             </select>
           </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" @click="showTaskModal = false">取消</button>
-          <button class="btn btn-danger" v-if="isEditingTask" @click="openDeleteModal(editingTask.id, 'task')">🗑️ 删除</button>
-          <button class="btn btn-primary" @click="saveTask">保存</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- AI 任务编辑模态框 -->
-    <div v-if="showAiTaskModal" class="modal-overlay" @click="showAiTaskModal = false">
-      <div class="modal-box modal-box-lg" @click.stop>
-        <div class="modal-header">
-          <h3>{{ isEditingAiTask ? '编辑 AI 任务' : '新建 AI 任务' }}</h3>
-          <button class="btn btn-secondary" @click="showAiTaskModal = false">✕</button>
-        </div>
-        <div class="modal-body">
           <div class="form-group">
             <label>任务标题 *</label>
-            <input type="text" class="form-control" v-model="editingAiTask.title" placeholder="例如：每日数据总结">
+            <input type="text" class="form-control" v-model="editing.title" placeholder="例如：每日数据总结 / 修复登录超时">
           </div>
           <div class="form-group">
-            <label>任务指令（AI 将据此自主执行）</label>
-            <textarea class="form-control" v-model="editingAiTask.prompt" rows="5" placeholder="例如：查询今天的数据中心记录和待办，生成一份工作总结并保存到笔记"></textarea>
+            <label>任务诉求（AI 将据此执行）</label>
+            <textarea class="form-control" v-model="editing.prompt" rows="4" placeholder="描述要让 AI 做什么，例如：查询今天的任务和数据中心记录，生成工作总结保存到笔记"></textarea>
           </div>
           <div class="form-group">
-            <label>触发方式</label>
-            <select class="form-control" v-model="editingAiTask.trigger_type">
-              <option value="manual">👆 手动 - 只在我点击「立即执行」时运行</option>
-              <option value="once">⏰ 一次性 - 到指定时间执行一次</option>
-              <option value="cycle">🔁 循环 - 按周期自动执行</option>
+            <label>执行方式</label>
+            <select class="form-control" v-model="editing.trigger_type">
+              <option value="now">⚡ 立即执行 - 创建后马上运行</option>
+              <option value="once">⏰ 指定时间 - 到点执行一次</option>
+              <option value="cycle">🔁 定时循环 - 按周期自动执行</option>
             </select>
           </div>
 
-          <div class="form-row" v-if="editingAiTask.trigger_type === 'once'">
+          <div class="form-row" v-if="editing.trigger_type === 'once'">
             <div class="form-group">
               <label>执行时间 *</label>
-              <input type="datetime-local" class="form-control" v-model="editingAiTask.scheduled_start">
+              <input type="datetime-local" class="form-control" v-model="editing.scheduled_start">
             </div>
           </div>
 
-          <template v-if="editingAiTask.trigger_type === 'cycle'">
+          <template v-if="editing.trigger_type === 'cycle'">
             <div class="form-row">
               <div class="form-group">
                 <label>循环类型</label>
-                <select class="form-control" v-model="editingAiTask.cycle_type">
+                <select class="form-control" v-model="editing.cycle_type">
                   <option value="daily">📅 每天</option>
                   <option value="weekly">📆 每周</option>
                   <option value="monthly">🗓️ 每月</option>
                   <option value="cron">⚙️ Cron 表达式</option>
                 </select>
               </div>
-              <div class="form-group" v-if="editingAiTask.cycle_type !== 'cron'">
+              <div class="form-group" v-if="editing.cycle_type !== 'cron'">
                 <label>执行时间</label>
-                <input type="time" class="form-control" v-model="editingAiTask.cycle_time">
+                <input type="time" class="form-control" v-model="editing.cycle_time">
               </div>
             </div>
-            <div class="form-group" v-if="editingAiTask.cycle_type === 'weekly'">
+            <div class="form-group" v-if="editing.cycle_type === 'weekly'">
               <label>星期几（可多选）</label>
               <div class="week-select">
                 <label v-for="d in weekDays" :key="d.value" class="week-chip">
@@ -233,34 +149,34 @@
                 </label>
               </div>
             </div>
-            <div class="form-group" v-if="editingAiTask.cycle_type === 'monthly'">
+            <div class="form-group" v-if="editing.cycle_type === 'monthly'">
               <label>每月几号</label>
               <input type="number" class="form-control" v-model.number="editingMonthDays" min="1" max="31" placeholder="如 1 或 1,15">
             </div>
-            <div class="form-group" v-if="editingAiTask.cycle_type === 'cron'">
+            <div class="form-group" v-if="editing.cycle_type === 'cron'">
               <label>Cron 表达式</label>
-              <input type="text" class="form-control" v-model="editingAiTask.cycle_value" placeholder="如 0 9 * * *（每天早上 9 点）">
+              <input type="text" class="form-control" v-model="editing.cycle_value" placeholder="如 0 9 * * *（每天早上 9 点）">
             </div>
           </template>
 
           <div class="form-row">
             <div class="form-group">
               <label>结果保存位置（相对笔记库，留空自动保存）</label>
-              <input type="text" class="form-control" v-model="editingAiTask.output_target" placeholder="如 任务输出/日报.md">
+              <input type="text" class="form-control" v-model="editing.output_target" placeholder="如 任务输出/日报.md">
             </div>
             <div class="form-group">
               <label>&nbsp;</label>
               <label class="check-item">
-                <input type="checkbox" v-model="editingAiTask.notify_feishu">
+                <input type="checkbox" v-model="editing.notify_feishu">
                 完成后推送飞书
               </label>
             </div>
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary" @click="showAiTaskModal = false">取消</button>
-          <button class="btn btn-danger" v-if="isEditingAiTask" @click="openDeleteModal(editingAiTask.id, 'ai_task')">🗑️ 删除</button>
-          <button class="btn btn-primary" @click="saveAiTask">保存</button>
+          <button class="btn btn-secondary" @click="showTaskModal = false">取消</button>
+          <button class="btn btn-danger" v-if="isEditing" @click="openDeleteModal(editing)">🗑️ 删除</button>
+          <button class="btn btn-primary" @click="saveTask">保存</button>
         </div>
       </div>
     </div>
@@ -273,7 +189,7 @@
           <button class="btn btn-secondary" @click="showDeleteModal = false">✕</button>
         </div>
         <div class="modal-body">
-          <p style="color:#94a3b8;font-size:13px;">确定要删除吗？此操作不可撤销。</p>
+          <p style="color:#94a3b8;font-size:13px;">确定要删除任务「{{ deleting?.title }}」吗？此操作不可撤销。</p>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" @click="showDeleteModal = false">取消</button>
@@ -289,15 +205,6 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 
 const API = window.electronAPI;
 
-interface Task {
-  id: number;
-  title: string;
-  description: string;
-  priority: string;
-  dueDate: string;
-  status: string;
-}
-
 interface AiTask {
   id: number;
   title: string;
@@ -305,54 +212,56 @@ interface AiTask {
   description: string;
   priority: string;
   status: string;
+  task_type: string;
+  project_id: number | null;
+  source: string;
   trigger_type: string;
   scheduled_start: string;
   cycle_type: string;
   cycle_value: string;
   cycle_time: string;
-  cycle_end: string;
-  output_type: string;
   output_target: string;
   notify_feishu: boolean;
-  dataset_id: string;
-  record_id: string;
-  project_id: number | null;
   last_result: string;
   last_run_at: string;
   last_status: string;
   executions?: any[];
   showHistory?: boolean;
+  showFollowup?: boolean;
+  followupText?: string;
+  followupReply?: string;
+  followupRunning?: boolean;
+  followupDone?: boolean;
 }
 
-const tasks = ref<Task[]>([]);
-const aiTasks = ref<AiTask[]>([]);
+interface Project { id: number; name: string; type: string; dir: string; }
 
-const pendingTasks = computed(() => tasks.value.filter(t => t.status === 'pending'));
-const progressTasks = computed(() => tasks.value.filter(t => t.status === 'in_progress'));
-const doneTasks = computed(() => tasks.value.filter(t => t.status === 'done'));
+const tasks = ref<AiTask[]>([]);
+const projects = ref<Project[]>([]);
+
+const codeProjects = computed(() => projects.value.filter(p => p.type === 'code'));
+const noteProjects = computed(() => projects.value.filter(p => p.type === 'note'));
+
+const groups = computed(() => {
+  const unassigned = tasks.value.filter(t => !t.project_id);
+  const list: { key: string; name: string; type: string; tasks: AiTask[] }[] = [];
+  for (const p of projects.value) {
+    const ts = tasks.value.filter(t => Number(t.project_id) === Number(p.id));
+    if (ts.length) list.push({ key: 'p' + p.id, name: p.name, type: p.type, tasks: ts });
+  }
+  if (unassigned.length) list.push({ key: 'unassigned', name: '未关联项目', type: '', tasks: unassigned });
+  return list;
+});
 
 // ========== 模态框状态 ==========
 const showTaskModal = ref(false);
-const isEditingTask = ref(false);
-const editingTask = ref<Task>({
-  id: 0, title: '', description: '', priority: 'mid', dueDate: '', status: 'pending'
-});
-
-const showAiTaskModal = ref(false);
-const isEditingAiTask = ref(false);
-const editingAiTask = ref<AiTask>({
-  id: 0, title: '', prompt: '', description: '', priority: 'mid', status: 'pending',
-  trigger_type: 'manual', scheduled_start: '', cycle_type: 'daily', cycle_value: '',
-  cycle_time: '09:00', cycle_end: '', output_type: '', output_target: '',
-  notify_feishu: false, dataset_id: '', record_id: '', project_id: null,
-  last_result: '', last_run_at: '', last_status: ''
-});
+const isEditing = ref(false);
+const editing = ref<AiTask>(emptyTask());
 const editingWeekDays = ref<number[]>([]);
 const editingMonthDays = ref<number | string>(1);
 
 const showDeleteModal = ref(false);
-const deleteId = ref('');
-const deleteType = ref('');
+const deleting = ref<AiTask | null>(null);
 
 const weekDays = [
   { label: '周一', value: 1 }, { label: '周二', value: 2 }, { label: '周三', value: 3 },
@@ -360,107 +269,59 @@ const weekDays = [
   { label: '周日', value: 0 },
 ];
 
-// ========== 待办 CRUD ==========
-async function loadTodos() {
+function emptyTask(): AiTask {
+  return {
+    id: 0, title: '', prompt: '', description: '', priority: 'mid', status: 'pending',
+    task_type: 'note', project_id: null, source: '', trigger_type: 'now', scheduled_start: '',
+    cycle_type: 'daily', cycle_value: '', cycle_time: '09:00', output_target: '',
+    notify_feishu: false, last_result: '', last_run_at: '', last_status: ''
+  };
+}
+
+// ========== 数据加载 ==========
+async function loadTasks() {
   try {
-    const list = await API.todo.list();
-    tasks.value = list.map((t: any) => ({
-      id: t.id, title: t.title, description: t.description || '',
-      priority: t.priority || 'mid', dueDate: t.due_date || '', status: t.status || 'pending'
-    }));
+    tasks.value = (await API.task.list()).map((t: any) => ({ ...t, notify_feishu: !!t.notify_feishu, showHistory: false }));
   } catch { tasks.value = []; }
 }
 
+async function loadProjects() {
+  try {
+    projects.value = (await API.project.list()) || [];
+  } catch { projects.value = []; }
+}
+
+// ========== 任务 CRUD ==========
 function createTask() {
-  isEditingTask.value = false;
-  editingTask.value = { id: 0, title: '', description: '', priority: 'mid', dueDate: '', status: 'pending' };
+  isEditing.value = false;
+  editing.value = emptyTask();
+  editingWeekDays.value = [];
+  editingMonthDays.value = 1;
   showTaskModal.value = true;
 }
 
-function editTask(task: Task) {
-  isEditingTask.value = true;
-  editingTask.value = { ...task };
+function editTask(task: AiTask) {
+  isEditing.value = true;
+  editing.value = { ...task };
+  editingWeekDays.value = String(task.cycle_value || '').split(',').filter(Boolean).map(Number);
+  editingMonthDays.value = task.cycle_value || 1;
   showTaskModal.value = true;
 }
 
 async function saveTask() {
-  if (!editingTask.value.title.trim()) {
-    alert('请输入任务标题');
-    return;
-  }
-  const data = {
-    title: editingTask.value.title,
-    description: editingTask.value.description,
-    priority: editingTask.value.priority,
-    due_date: editingTask.value.dueDate,
-    status: editingTask.value.status,
-  };
-  try {
-    if (isEditingTask.value) {
-      await API.todo.update(editingTask.value.id, data);
-    } else {
-      await API.todo.add(data);
-    }
-    showTaskModal.value = false;
-    await loadTodos();
-  } catch (e: any) { alert('操作失败: ' + (e.message || e)); }
-}
-
-// ========== AI 任务 CRUD ==========
-async function loadAiTasks() {
-  try {
-    aiTasks.value = (await API.task.list()).map((t: any) => ({
-      ...t,
-      notify_feishu: !!t.notify_feishu,
-      showHistory: false,
-    }));
-  } catch { aiTasks.value = []; }
-}
-
-function emptyAiTask(): AiTask {
-  return {
-    id: 0, title: '', prompt: '', description: '', priority: 'mid', status: 'pending',
-    trigger_type: 'manual', scheduled_start: '', cycle_type: 'daily', cycle_value: '',
-    cycle_time: '09:00', cycle_end: '', output_type: '', output_target: '',
-    notify_feishu: false, dataset_id: '', record_id: '', project_id: null,
-    last_result: '', last_run_at: '', last_status: ''
-  };
-}
-
-function createAiTask() {
-  isEditingAiTask.value = false;
-  editingAiTask.value = emptyAiTask();
-  editingWeekDays.value = [];
-  editingMonthDays.value = 1;
-  showAiTaskModal.value = true;
-}
-
-function editAiTask(task: AiTask) {
-  isEditingAiTask.value = true;
-  editingAiTask.value = { ...task };
-  editingWeekDays.value = String(task.cycle_value || '').split(',').filter(Boolean).map(Number);
-  editingMonthDays.value = task.cycle_value || 1;
-  showAiTaskModal.value = true;
-}
-
-async function saveAiTask() {
-  if (!editingAiTask.value.title.trim()) {
-    alert('请输入任务标题');
-    return;
-  }
-  if (editingAiTask.value.trigger_type === 'once' && !editingAiTask.value.scheduled_start) {
-    alert('一次性任务请选择执行时间');
-    return;
-  }
-  const t = editingAiTask.value;
+  const t = editing.value;
+  if (!t.project_id) { alert('请选择归属项目'); return; }
+  if (!t.title.trim()) { alert('请输入任务标题'); return; }
+  if (t.trigger_type === 'once' && !t.scheduled_start) { alert('指定时间任务请选择执行时间'); return; }
+  const proj = projects.value.find(p => p.id === Number(t.project_id));
   let cycleValue = t.cycle_value || '';
   if (t.cycle_type === 'weekly') cycleValue = editingWeekDays.value.join(',');
   if (t.cycle_type === 'monthly') cycleValue = String(editingMonthDays.value || 1);
   const data = {
     title: t.title,
     prompt: t.prompt,
-    description: t.description,
-    priority: t.priority,
+    task_type: proj && proj.type === 'code' ? 'coding' : 'note',
+    project_id: t.project_id,
     trigger_type: t.trigger_type,
     scheduled_start: t.trigger_type === 'once' ? t.scheduled_start : '',
     cycle_type: t.trigger_type === 'cycle' ? t.cycle_type : '',
@@ -471,20 +332,21 @@ async function saveAiTask() {
     status: 'pending',
   };
   try {
-    if (isEditingAiTask.value) {
+    if (isEditing.value) {
       await API.task.update(t.id, data);
     } else {
-      await API.task.add(data);
+      const r = await API.task.add(data);
+      if (data.trigger_type === 'now') await API.task.execute(r.id);
     }
-    showAiTaskModal.value = false;
-    await loadAiTasks();
+    showTaskModal.value = false;
+    await loadTasks();
   } catch (e: any) { alert('操作失败: ' + (e.message || e)); }
 }
 
-async function runAiTask(task: AiTask) {
+async function runTask(task: AiTask) {
   try {
     await API.task.execute(task.id);
-    await loadAiTasks();
+    await loadTasks();
   } catch (e: any) { alert('执行失败: ' + (e.message || e)); }
 }
 
@@ -497,24 +359,72 @@ async function toggleHistory(task: AiTask) {
   }
 }
 
-// ========== 删除确认 ==========
-function openDeleteModal(id: string | number, type: string) {
-  deleteId.value = String(id);
-  deleteType.value = type;
+// ========== 追问（卡片内直接追问，复用任务原会话） ==========
+function toggleFollowup(task: AiTask) {
+  task.showFollowup = !task.showFollowup;
+  if (task.showFollowup && !task.followupReply) {
+    task.followupText = '';
+    task.followupReply = '';
+    task.followupRunning = false;
+    task.followupDone = false;
+  }
+}
+
+async function sendFollowup(task: AiTask) {
+  const q = (task.followupText || '').trim();
+  if (!q || task.followupRunning) return;
+  task.followupText = '';
+  task.followupRunning = true;
+  task.followupDone = false;
+  task.followupReply = '> ' + q + '\n\n';
+  try {
+    const ok = await API.task.followup(task.id, q);
+    if (!ok) {
+      task.followupRunning = false;
+      task.followupReply += '\n❌ 追问失败：任务不存在或正在执行中';
+    }
+  } catch (e: any) {
+    task.followupRunning = false;
+    task.followupDone = true;
+    task.followupReply += '\n❌ 追问失败：' + (e.message || e);
+  }
+}
+
+function handleFollowupDelta(payload: any) {
+  const t = tasks.value.find((x: any) => x.id === payload.taskId);
+  if (t && t.followupRunning) t.followupReply += payload.delta;
+}
+
+function handleFollowupDone(payload: any) {
+  const t = tasks.value.find((x: any) => x.id === payload.taskId);
+  if (t) {
+    t.followupRunning = false;
+    t.followupDone = true;
+    t.followupReply = payload.text || t.followupReply;
+  }
+  loadTasks();
+}
+
+function handleFollowupError(payload: any) {
+  const t = tasks.value.find((x: any) => x.id === payload.taskId);
+  if (t) {
+    t.followupRunning = false;
+    t.followupDone = true;
+    t.followupReply += '\n\n❌ ' + (payload.error || '执行出错');
+  }
+  loadTasks();
+}
+
+function openDeleteModal(task: AiTask) {
+  deleting.value = task;
   showDeleteModal.value = true;
 }
 
 async function confirmDelete() {
+  if (!deleting.value) return;
   try {
-    if (deleteType.value === 'reminder') {
-      await API.reminder.remove(deleteId.value);
-    } else if (deleteType.value === 'task') {
-      await API.todo.remove(parseInt(deleteId.value));
-      await loadTodos();
-    } else if (deleteType.value === 'ai_task') {
-      await API.task.remove(parseInt(deleteId.value));
-      await loadAiTasks();
-    }
+    await API.task.remove(deleting.value.id);
+    await loadTasks();
   } catch {}
   showDeleteModal.value = false;
 }
@@ -530,21 +440,22 @@ function statusText(status: string): string {
 }
 
 function getTriggerText(task: AiTask): string {
-  if (task.trigger_type === 'once') return '⏰ 一次性：' + (task.scheduled_start || '未设置');
+  const type = task.task_type === 'coding' ? '💻 编程' : '📚 知识';
+  if (task.trigger_type === 'once') return type + ' · 指定时间：' + (task.scheduled_start || '未设置');
   if (task.trigger_type === 'cycle') {
     switch (task.cycle_type) {
-      case 'weekly': return '🔁 每周' + (task.cycle_value || '') + ' ' + (task.cycle_time || '');
-      case 'monthly': return '🔁 每月' + (task.cycle_value || '') + '号 ' + (task.cycle_time || '');
-      case 'cron': return '🔁 Cron：' + (task.cycle_value || '');
-      default: return '🔁 每天 ' + (task.cycle_time || '');
+      case 'weekly': return type + ' · 每周' + (task.cycle_value || '') + ' ' + (task.cycle_time || '');
+      case 'monthly': return type + ' · 每月' + (task.cycle_value || '') + '号 ' + (task.cycle_time || '');
+      case 'cron': return type + ' · Cron：' + (task.cycle_value || '');
+      default: return type + ' · 每天 ' + (task.cycle_time || '');
     }
   }
-  return '👆 手动执行';
+  return type + ' · 立即执行';
 }
 
 function triggerLabel(type: string): string {
   switch (type) {
-    case 'manual': return '手动';
+    case 'manual': return '立即';
     case 'scheduled': return '定时';
     default: return type;
   }
@@ -556,17 +467,22 @@ function truncate(s: string, n: number): string {
 }
 
 function onTaskChanged() {
-  loadAiTasks();
+  loadTasks();
 }
 
 onMounted(async () => {
-  await loadTodos();
-  await loadAiTasks();
+  await Promise.all([loadProjects(), loadTasks()]);
   window.electronAPI?.on?.('task:changed', onTaskChanged);
+  window.electronAPI?.on?.('task:followup:delta', handleFollowupDelta);
+  window.electronAPI?.on?.('task:followup:done', handleFollowupDone);
+  window.electronAPI?.on?.('task:followup:error', handleFollowupError);
 });
 
 onBeforeUnmount(() => {
   window.electronAPI?.removeAllListeners?.('task:changed');
+  window.electronAPI?.removeAllListeners?.('task:followup:delta');
+  window.electronAPI?.removeAllListeners?.('task:followup:done');
+  window.electronAPI?.removeAllListeners?.('task:followup:error');
 });
 </script>
 
@@ -604,129 +520,9 @@ onBeforeUnmount(() => {
   padding: 24px;
 }
 
-.card {
-  background: white;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
-  padding: 24px;
-  margin-bottom: 24px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.card-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.card-subtitle {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.task-board {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-
-.task-column {
-  background: #f8fafc;
-  border-radius: var(--radius-md);
-  padding: 16px;
-}
-
-.column-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.column-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.column-count {
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.column-pending .column-count {
-  background: rgba(251, 146, 60, 0.1);
-  color: #fb923c;
-}
-
-.column-progress .column-count {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3b82f6;
-}
-
-.column-done .column-count {
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
-}
-
-.task-card {
-  background: white;
-  border-radius: var(--radius-sm);
-  padding: 14px;
-  margin-bottom: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: 1px solid var(--border);
-}
-
-.task-card:hover {
-  box-shadow: var(--shadow-md);
-}
-
-.task-title {
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 8px;
-}
-
-.task-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.priority-high {
-  color: #ef4444;
-}
-
-.priority-mid {
-  color: #fb923c;
-}
-
-.priority-low {
-  color: #22c55e;
-}
-
-.task-due {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-/* AI 任务 */
 .empty-state {
   text-align: center;
-  padding: 40px 0;
+  padding: 64px 0;
 }
 
 .empty-icon {
@@ -741,28 +537,73 @@ onBeforeUnmount(() => {
   margin: 0 auto;
 }
 
-.ai-task-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.project-section {
+  background: white;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  padding: 20px 24px;
+  margin-bottom: 24px;
 }
 
-.ai-task-card {
+.project-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.project-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-icon {
+  font-size: 18px;
+}
+
+.project-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.project-type {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary);
+}
+
+.project-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.project-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 12px 0;
+}
+
+.task-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 16px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
   transition: all 0.2s;
 }
 
-.ai-task-card:hover {
+.task-card:hover {
   box-shadow: var(--shadow-sm);
 }
 
-.ai-task-main {
-  flex: 1;
+.task-card.running {
+  border-color: var(--primary);
 }
 
-.ai-task-head {
+.task-head {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -770,9 +611,27 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
-.ai-task-title {
-  font-size: 15px;
+.task-title {
+  font-size: 14px;
   font-weight: 600;
+}
+
+.task-type-badge {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.running-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3b82f6;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .status-badge {
@@ -789,13 +648,13 @@ onBeforeUnmount(() => {
 .status-FAILED { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 .status-RUNNING { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 
-.ai-task-desc {
+.task-desc {
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 6px;
 }
 
-.ai-task-result {
+.task-result {
   font-size: 13px;
   color: var(--text-secondary);
   background: #f8fafc;
@@ -810,15 +669,16 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
-.ai-task-run {
+.task-run {
   font-size: 12px;
   color: var(--text-muted);
 }
 
-.ai-task-actions {
+.task-actions {
   display: flex;
   gap: 8px;
   margin-top: 12px;
+  flex-wrap: wrap;
 }
 
 .btn-xs {
@@ -826,13 +686,64 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.ai-task-history {
+.task-history {
   margin-top: 12px;
   border-top: 1px dashed var(--border);
   padding-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.task-followup {
+  margin-top: 12px;
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+
+.followup-reply {
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: #f8fafc;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.followup-streaming::after {
+  content: '▋';
+  color: var(--primary);
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+.followup-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.followup-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.followup-input:focus {
+  border-color: var(--primary);
 }
 
 .history-item {
