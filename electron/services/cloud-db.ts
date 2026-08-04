@@ -156,6 +156,50 @@ CREATE TABLE IF NOT EXISTS plan_todos (
   updated_at VARCHAR(32) ${TS_DEFAULT}
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS plan_tasks (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(512) NOT NULL,
+  prompt LONGTEXT,
+  description TEXT,
+  priority VARCHAR(16) DEFAULT 'mid',
+  status VARCHAR(32) DEFAULT 'pending',
+  trigger_type VARCHAR(32) DEFAULT '',
+  scheduled_start VARCHAR(32) DEFAULT '',
+  cycle_type VARCHAR(32) DEFAULT '',
+  cycle_value VARCHAR(100) DEFAULT '',
+  cycle_time VARCHAR(16) DEFAULT '',
+  cycle_end VARCHAR(32) DEFAULT '',
+  last_cycle_run VARCHAR(32) DEFAULT '',
+  output_type VARCHAR(32) DEFAULT '',
+  output_target VARCHAR(512) DEFAULT '',
+  notify_feishu INT DEFAULT 0,
+  dataset_id VARCHAR(64) DEFAULT '',
+  record_id VARCHAR(64) DEFAULT '',
+  project_id INT NULL,
+  last_result LONGTEXT,
+  last_run_at VARCHAR(32) DEFAULT '',
+  last_status VARCHAR(32) DEFAULT '',
+  created_at VARCHAR(32) ${TS_DEFAULT},
+  updated_at VARCHAR(32) ${TS_DEFAULT},
+  KEY idx_tasks_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS task_executions (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  task_id INT NULL,
+  task_title VARCHAR(512) DEFAULT '',
+  status VARCHAR(32) DEFAULT 'QUEUED',
+  trigger_type VARCHAR(32) DEFAULT '',
+  start_time VARCHAR(32) DEFAULT '',
+  end_time VARCHAR(32) DEFAULT '',
+  log_text LONGTEXT,
+  result_text LONGTEXT,
+  error_message TEXT,
+  created_at VARCHAR(32) ${TS_DEFAULT},
+  KEY idx_executions_task (task_id),
+  KEY idx_executions_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS ai_tools_history (
   id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   tool VARCHAR(128) NOT NULL,

@@ -4,7 +4,7 @@ const VALID_CHANNELS = [
   'chat:delta', 'chat:status', 'chat:tool', 'chat:done', 'chat:error',
   'coding:delta', 'coding:status', 'coding:tool', 'coding:done', 'coding:error',
   'kb:scan-progress', 'service:status', 'service:toggle', 'feishu:message',
-  'indexer:progress', 'report:generated', 'aitool:delta',
+  'indexer:progress', 'report:generated', 'aitool:delta', 'task:changed',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -160,6 +160,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (id: number, data: unknown) => ipcRenderer.invoke('reminder:update', id, data),
     remove: (id: number) => ipcRenderer.invoke('reminder:remove', id),
     setEnabled: (id: number, enabled: boolean) => ipcRenderer.invoke('reminder:setEnabled', id, enabled),
+    test: (id: string) => ipcRenderer.invoke('reminder:test', id),
   },
 
   // Todos
@@ -168,6 +169,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     add: (data: unknown) => ipcRenderer.invoke('todo:add', data),
     update: (id: number, data: unknown) => ipcRenderer.invoke('todo:update', id, data),
     remove: (id: number) => ipcRenderer.invoke('todo:remove', id),
+  },
+
+  // AI 自执行任务
+  task: {
+    list: () => ipcRenderer.invoke('task:list'),
+    add: (data: unknown) => ipcRenderer.invoke('task:add', data),
+    update: (id: number, data: unknown) => ipcRenderer.invoke('task:update', id, data),
+    remove: (id: number) => ipcRenderer.invoke('task:remove', id),
+    execute: (id: number) => ipcRenderer.invoke('task:execute', id),
+    executions: (taskId: number) => ipcRenderer.invoke('task:executions', taskId),
+    executionList: (page: number, pageSize: number) => ipcRenderer.invoke('task:execution:list', page, pageSize),
+    executionGet: (id: number) => ipcRenderer.invoke('task:execution:get', id),
   },
 
   // Insights

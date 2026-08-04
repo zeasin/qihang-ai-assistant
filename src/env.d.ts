@@ -95,6 +95,30 @@ interface ElectronAPI {
   archive: {
     report: (moduleId: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
   };
+  todo: {
+    list: () => Promise<any[]>;
+    add: (data: any) => Promise<{ id: number }>;
+    update: (id: number, data: any) => Promise<void>;
+    remove: (id: number) => Promise<void>;
+  };
+  reminder: {
+    list: () => Promise<any[]>;
+    add: (data: any) => Promise<{ id: string }>;
+    update: (id: string, data: any) => Promise<void>;
+    remove: (id: string) => Promise<void>;
+    setEnabled: (id: string, enabled: boolean) => Promise<void>;
+    test: (id: string) => Promise<boolean>;
+  };
+  task: {
+    list: () => Promise<any[]>;
+    add: (data: any) => Promise<{ id: number }>;
+    update: (id: number, data: any) => Promise<void>;
+    remove: (id: number) => Promise<void>;
+    execute: (id: number) => Promise<boolean>;
+    executions: (taskId: number) => Promise<any[]>;
+    executionList: (page: number, pageSize: number) => Promise<{ total: number; rows: any[] }>;
+    executionGet: (id: number) => Promise<any>;
+  };
   llm: {
     test: (opts: { provider?: string; model?: string; apiKey?: string; baseUrl?: string }) => Promise<{ ok: boolean; message: string; response?: string }>;
   };

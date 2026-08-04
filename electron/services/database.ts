@@ -177,6 +177,47 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
     );
 
+    CREATE TABLE IF NOT EXISTS plan_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      prompt TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      priority TEXT DEFAULT 'mid',
+      status TEXT DEFAULT 'pending',
+      trigger_type TEXT DEFAULT '',
+      scheduled_start TEXT DEFAULT '',
+      cycle_type TEXT DEFAULT '',
+      cycle_value TEXT DEFAULT '',
+      cycle_time TEXT DEFAULT '',
+      cycle_end TEXT DEFAULT '',
+      last_cycle_run TEXT DEFAULT '',
+      output_type TEXT DEFAULT '',
+      output_target TEXT DEFAULT '',
+      notify_feishu INTEGER DEFAULT 0,
+      dataset_id TEXT DEFAULT '',
+      record_id TEXT DEFAULT '',
+      project_id INTEGER DEFAULT NULL,
+      last_result TEXT DEFAULT '',
+      last_run_at TEXT DEFAULT '',
+      last_status TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now', '+8 hours')),
+      updated_at TEXT DEFAULT (datetime('now', '+8 hours'))
+    );
+
+    CREATE TABLE IF NOT EXISTS task_executions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER,
+      task_title TEXT DEFAULT '',
+      status TEXT DEFAULT 'QUEUED',
+      trigger_type TEXT DEFAULT '',
+      start_time TEXT DEFAULT '',
+      end_time TEXT DEFAULT '',
+      log_text TEXT DEFAULT '',
+      result_text TEXT DEFAULT '',
+      error_message TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now', '+8 hours'))
+    );
+
     CREATE TABLE IF NOT EXISTS ai_tools_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       tool TEXT NOT NULL,
@@ -677,6 +718,82 @@ const todo = {
   remove: (id) => run('DELETE FROM plan_todos WHERE id = ?', id),
 };
 
+// ========== AI 自执行任务 ==========
+const task = {
+  list: (status?: string) => {
+    if (status) return q('SELECT * FROM plan_tasks WHERE status = ? ORDER BY created_at DESC', status);
+    return q('SELECT * FROM plan_tasks ORDER BY created_at DESC');
+  },
+  get: (id: number) => qOne('SELECT * FROM plan_tasks WHERE id = ?', id),
+  add: (data: any) => {
+    run('INSERT INTO plan_tasks (title, prompt, description, priority, status, trigger_type, scheduled_start, cycle_type, cycle_value, cycle_time, cycle_end, output_type, output_target, notify_feishu, dataset_id, record_id, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      data.title, data.prompt || '', data.description || '', data.priority || 'mid', data.status || 'pending',
+      data.trigger_type || '', data.scheduled_start || '', data.cycle_type || '', data.cycle_value || '',
+      data.cycle_time || '', data.cycle_end || '', data.output_type || '', data.output_target || '',
+      data.notify_feishu ? 1 : 0, data.dataset_id || '', data.record_id || '', data.project_id || null);
+    const r = qOne<{id: number}>('SELECT id FROM plan_tasks ORDER BY id DESC LIMIT 1');
+    return { id: r!.id };
+  },
+  update: (id: number, data: any) => {
+    const fields: any[] = []; const params: any[] = [];
+    if (data.title !== undefined) { fields.push('title = ?'); params.push(data.title); }
+    if (data.prompt !== undefined) { fields.push('prompt = ?'); params.push(data.prompt); }
+    if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
+    if (data.priority !== undefined) { fields.push('priority = ?'); params.push(data.priority); }
+    if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
+    if (data.trigger_type !== undefined) { fields.push('trigger_type = ?'); params.push(data.trigger_type); }
+    if (data.scheduled_start !== undefined) { fields.push('scheduled_start = ?'); params.push(data.scheduled_start); }
+    if (data.cycle_type !== undefined) { fields.push('cycle_type = ?'); params.push(data.cycle_type); }
+    if (data.cycle_value !== undefined) { fields.push('cycle_value = ?'); params.push(data.cycle_value); }
+    if (data.cycle_time !== undefined) { fields.push('cycle_time = ?'); params.push(data.cycle_time); }
+    if (data.cycle_end !== undefined) { fields.push('cycle_end = ?'); params.push(data.cycle_end); }
+    if (data.output_type !== undefined) { fields.push('output_type = ?'); params.push(data.output_type); }
+    if (data.output_target !== undefined) { fields.push('output_target = ?'); params.push(data.output_target); }
+    if (data.notify_feishu !== undefined) { fields.push('notify_feishu = ?'); params.push(data.notify_feishu ? 1 : 0); }
+    if (data.dataset_id !== undefined) { fields.push('dataset_id = ?'); params.push(data.dataset_id); }
+    if (data.record_id !== undefined) { fields.push('record_id = ?'); params.push(data.record_id); }
+    if (data.last_result !== undefined) { fields.push('last_result = ?'); params.push(data.last_result); }
+    if (data.last_run_at !== undefined) { fields.push('last_run_at = ?'); params.push(data.last_run_at); }
+    if (data.last_status !== undefined) { fields.push('last_status = ?'); params.push(data.last_status); }
+    if (data.last_cycle_run !== undefined) { fields.push('last_cycle_run = ?'); params.push(data.last_cycle_run); }
+    if (fields.length) { fields.push("updated_at = datetime('now', '+8 hours')"); params.push(id); run(`UPDATE plan_tasks SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+  },
+  remove: (id: number) => {
+    run('DELETE FROM task_executions WHERE task_id = ?', id);
+    run('DELETE FROM plan_tasks WHERE id = ?', id);
+  },
+  // 可调度的任务（手动 + 定时 + 循环），用于恢复调度
+  schedulable: () => q("SELECT * FROM plan_tasks WHERE status IN ('pending', 'in_progress')"),
+};
+
+const taskExecution = {
+  add: (data: any) => {
+    run('INSERT INTO task_executions (task_id, task_title, status, trigger_type, start_time, end_time, log_text, result_text, error_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      data.task_id || null, data.task_title || '', data.status || 'QUEUED', data.trigger_type || '',
+      data.start_time || '', data.end_time || '', data.log_text || '', data.result_text || '', data.error_message || '');
+    const r = qOne<{id: number}>('SELECT id FROM task_executions ORDER BY id DESC LIMIT 1');
+    return r ? r.id : null;
+  },
+  update: (id: number, data: any) => {
+    const fields: any[] = []; const params: any[] = [];
+    if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
+    if (data.start_time !== undefined) { fields.push('start_time = ?'); params.push(data.start_time); }
+    if (data.end_time !== undefined) { fields.push('end_time = ?'); params.push(data.end_time); }
+    if (data.log_text !== undefined) { fields.push('log_text = ?'); params.push(data.log_text); }
+    if (data.result_text !== undefined) { fields.push('result_text = ?'); params.push(data.result_text); }
+    if (data.error_message !== undefined) { fields.push('error_message = ?'); params.push(data.error_message); }
+    if (fields.length) { params.push(id); run(`UPDATE task_executions SET ${fields.join(', ')} WHERE id = ?`, ...params); }
+  },
+  list: (page = 1, pageSize = 20) => {
+    const offset = Math.max(0, (page - 1) * pageSize);
+    const total = (qOne<{c: number}>('SELECT COUNT(*) as c FROM task_executions') || {}).c || 0;
+    const rows = q('SELECT * FROM task_executions ORDER BY id DESC LIMIT ? OFFSET ?', pageSize, offset);
+    return { total, rows };
+  },
+  listByTask: (taskId: number, limit = 20) => q('SELECT * FROM task_executions WHERE task_id = ? ORDER BY id DESC LIMIT ?', taskId, limit),
+  get: (id: number) => qOne('SELECT * FROM task_executions WHERE id = ?', id),
+};
+
 // ========== AI 工具箱历史 ==========
 const aitoolHistory = {
   add: (tool, name, params, result, resultType = 'text') => {
@@ -698,4 +815,4 @@ const aitoolHistory = {
   },
 };
 
-export { getDb, close, q, qOne, run, runRaw, save, project, chat, dm, ds, aa, reminder, todo, aitoolHistory };
+export { getDb, close, q, qOne, run, runRaw, save, project, chat, dm, ds, aa, reminder, todo, task, taskExecution, aitoolHistory };

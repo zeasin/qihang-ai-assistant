@@ -31,6 +31,11 @@ const routes = [
     component: () => import('@/views/PlannerView.vue')
   },
   {
+    path: '/reminders',
+    name: 'Reminders',
+    component: () => import('@/views/RemindersView.vue')
+  },
+  {
     path: '/tools',
     name: 'Tools',
     component: () => import('@/views/ToolsView.vue')

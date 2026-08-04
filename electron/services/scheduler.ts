@@ -1,4 +1,5 @@
 import * as cron from 'node-cron';
+import * as path from 'path';
 import * as db from './database';
 import * as appConfig from './app-config';
 import logger from './logger';
@@ -610,6 +611,11 @@ function getCronFromReminder(r) {
       const parts = (r.month_day || '1-1').split('-');
       return `${r.time.split(':')[1] || '0'} ${r.time.split(':')[0] || '9'} ${parts[1] || 1} ${parts[0] || 1} *`;
     }
+    case 'once': {
+      const d = String(r.date || '').split('-');
+      if (d.length !== 3) return null;
+      return `${r.time.split(':')[1] || '0'} ${r.time.split(':')[0] || '9'} ${d[2] || 1} ${d[1] || 1} *`;
+    }
     default: return null;
   }
 }
@@ -682,6 +688,8 @@ function start() {
     scheduleReminder(r);
   }
 
+  reloadTasks();
+
   logger.info(`[Scheduler] started with 0 tasks + ${reminders.length} reminders`);
 }
 
@@ -695,8 +703,12 @@ function scheduleReminder(r) {
       const msg = '⏰ ' + r.name + (r.message ? '\n' + r.message : '');
       sendNotification('⏰ ' + r.name, r.message || '');
       await sendFeishu(msg);
-      db.reminder.setEnabled(r.id, false);
       logger.info(`[Scheduler] reminder triggered: ${r.name}`);
+      if (r.type === 'once') {
+        // 一次性提醒：触发后自动禁用并停止调度
+        db.reminder.setEnabled(r.id, false);
+        removeReminder(r.id);
+      }
     } catch (e) {
       logger.error(`[Scheduler] reminder ${r.name} error:`, e.message);
     }
@@ -713,12 +725,229 @@ function removeReminder(id) {
   if (jobs.has(key)) { jobs.get(key).stop(); jobs.delete(key); }
 }
 
+// ==================== AI 自执行任务调度 ====================
+
+function nowString(): string {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+function notifyUI() {
+  try {
+    const { BrowserWindow } = require('electron') as typeof import('electron');
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send('task:changed');
+    }
+  } catch {}
+}
+
+/** 根据任务触发配置生成 cron 表达式（循环任务），无有效配置返回 null */
+function getTaskCron(t: any): string | null {
+  if (t.cycle_type === 'cron') return t.cycle_value || null;
+  if (!t.cycle_time) return null;
+  const parts = t.cycle_time.split(':');
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1] || '0', 10);
+  if (isNaN(h) || isNaN(m)) return null;
+  if (t.cycle_type === 'daily') return `${m} ${h} * * *`;
+  if (t.cycle_type === 'weekly') {
+    const days = String(t.cycle_value || '').split(',').filter(Boolean).join(',');
+    if (!days) return null;
+    return `${m} ${h} * * ${days}`;
+  }
+  if (t.cycle_type === 'monthly') {
+    const days = String(t.cycle_value || '').split(',').filter(Boolean).join(',');
+    if (!days) return null;
+    return `${m} ${h} ${days} * *`;
+  }
+  return null;
+}
+
+function scheduleTask(t: any) {
+  const key = 'task_' + t.id;
+  if (jobs.has(key)) { jobs.get(key).stop(); jobs.delete(key); }
+
+  // 一次性定时：setTimeout 到点触发一次
+  if (t.trigger_type === 'once' && t.scheduled_start) {
+    const target = new Date(String(t.scheduled_start).replace(' ', 'T') + '+08:00').getTime();
+    const delay = target - Date.now();
+    if (delay <= 0) return; // 已过期，不补跑
+    const timer = setTimeout(async () => {
+      jobs.delete(key);
+      const fresh = db.task.get(t.id);
+      if (fresh && fresh.status === 'pending') enqueueTask(fresh, 'scheduled');
+    }, delay);
+    jobs.set(key, { stop: () => clearTimeout(timer) });
+    return;
+  }
+
+  // 循环任务
+  const cronExpr = getTaskCron(t);
+  if (!cronExpr || !cron.validate(cronExpr)) return;
+  const job = cron.schedule(cronExpr, async () => {
+    const today = getChinaDate();
+    if (t.cycle_end && t.cycle_end < today) {
+      // 已到循环结束日期：转为已完成并停止调度
+      db.task.update(t.id, { status: 'done' });
+      removeTask(t.id);
+      notifyUI();
+      return;
+    }
+    const fresh = db.task.get(t.id);
+    if (fresh && fresh.status === 'pending') {
+      db.task.update(t.id, { last_cycle_run: nowString() });
+      enqueueTask(fresh, 'scheduled');
+    }
+  });
+  jobs.set(key, job);
+}
+
+function reloadTasks() {
+  for (const [id, job] of jobs) {
+    if (id.startsWith('task_')) { job.stop(); jobs.delete(id); }
+  }
+  const tasks = db.task.schedulable();
+  for (const t of tasks) scheduleTask(t);
+  logger.info(`[Scheduler] tasks scheduled: ${tasks.length}`);
+}
+
+function removeTask(id: number) {
+  const key = 'task_' + id;
+  if (jobs.has(key)) { jobs.get(key).stop(); jobs.delete(key); }
+}
+
+// ---- 串行执行队列 ----
+let execQueue: any[] = [];
+let execRunning = false;
+
+async function pumpQueue() {
+  if (execRunning) return;
+  const item = execQueue.shift();
+  if (!item) return;
+  execRunning = true;
+  try {
+    await runTask(item.task, item.triggerType);
+  } catch (e: any) {
+    logger.error(`[Scheduler] task execution error: ${e.message}`);
+  }
+  execRunning = false;
+  pumpQueue();
+}
+
+/** 将任务加入执行队列（手动/定时/到期共用） */
+function enqueueTask(task: any, triggerType: string) {
+  execQueue.push({ task, triggerType });
+  notifyUI();
+  pumpQueue();
+}
+
+/** 保存任务结果到笔记库 */
+function saveTaskResultToNote(task: any, result: string): string {
+  try {
+    const notesDir = appConfig.getConfig('notesDir') || '';
+    if (!notesDir) return '';
+    let relPath = task.output_target || '';
+    if (!relPath) {
+      const title = String(task.title).replace(/[\\/:*?"<>|]/g, '_').slice(0, 50);
+      relPath = `任务输出/${title}_${getChinaDate().replace(/-/g, '')}.md`;
+    }
+    const full = path.resolve(notesDir, relPath);
+    if (!full.startsWith(path.resolve(notesDir))) return '';
+    const fs = require('fs') as typeof import('fs');
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    const header = `# ${task.title}\n\n> 执行时间：${nowString()} · 触发方式：${triggerTypeLabel(task)}\n\n`;
+    fs.writeFileSync(full, header + result, 'utf-8');
+    return relPath;
+  } catch { return ''; }
+}
+
+function triggerTypeLabel(task: any): string {
+  if (task.trigger_type === 'cycle') {
+    if (task.cycle_type === 'cron') return '循环 Cron';
+    if (task.cycle_type === 'weekly') return `每周 ${task.cycle_value}`;
+    if (task.cycle_type === 'monthly') return `每月 ${task.cycle_value} 号`;
+    return `每天 ${task.cycle_time}`;
+  }
+  if (task.trigger_type === 'once') return `一次性 ${task.scheduled_start}`;
+  return '手动';
+}
+
+async function runTask(task: any, triggerType: string) {
+  const start = nowString();
+  const execId = db.taskExecution.add({
+    task_id: task.id, task_title: task.title, status: 'RUNNING',
+    trigger_type: triggerType, start_time: start,
+  }) as number | null;
+  db.task.update(task.id, { status: 'in_progress', last_run_at: start, last_status: 'RUNNING' });
+  notifyUI();
+  try {
+    const { buildReportToolDefs, buildDataToolDefs, buildNoteToolDefs } = require('./tools');
+    const notesDir = appConfig.getConfig('notesDir') || '';
+    const customTools: any[] = [];
+    customTools.push(...(await buildReportToolDefs(undefined)));
+    if (notesDir) customTools.push(...(await buildDataToolDefs(notesDir)));
+    const noteProj: any = db.qOne("SELECT id FROM prj_projects WHERE type = 'note' ORDER BY is_default DESC, id ASC LIMIT 1");
+    if (noteProj) customTools.push(...(await buildNoteToolDefs(noteProj.id)));
+
+    const piAgent = require('./pi-agent');
+    const prompt = `你正在执行一个 AI 任务「${task.title}」。\n\n${task.prompt || '请根据任务标题自主完成并直接输出结果。'}\n\n执行要求：\n1. 先用可用工具查询所需数据（对话记录、待办、文档、数据集、笔记、外网资料等），再完成任务\n2. 直接输出最终成果（Markdown 格式），不要输出过程说明、思考过程或"数据来源"等前缀`;
+    const result = (await piAgent.generateDailyReport('task_' + task.id + '_' + Date.now(), prompt)).trim();
+    const end = nowString();
+
+    const savedNote = saveTaskResultToNote(task, result);
+    const nextStatus = task.trigger_type === 'cycle' ? 'pending' : 'done';
+    if (execId != null) db.taskExecution.update(execId, { status: 'SUCCESS', end_time: end, result_text: result, log_text: savedNote ? `已保存笔记：${savedNote}` : '' });
+    db.task.update(task.id, { last_result: result.slice(0, 3000), last_status: 'SUCCESS', last_run_at: end, status: nextStatus });
+
+    sendNotification('✅ AI 任务完成', task.title);
+    if (task.notify_feishu) {
+      const feishuText = convertMarkdownForFeishu(result.slice(0, 1800));
+      await sendFeishu({
+        config: { wide_screen_mode: true },
+        header: { template: 'blue', title: { tag: 'plain_text', content: `✅ AI 任务完成：${task.title}` } },
+        elements: [
+          { tag: 'markdown', content: `${savedNote ? `📝 已保存笔记：\`${savedNote}\`\n\n` : ''}${feishuText}` },
+        ],
+      });
+    }
+    notifyUI();
+  } catch (e: any) {
+    const end = nowString();
+    if (execId != null) db.taskExecution.update(execId, { status: 'FAILED', end_time: end, error_message: (e && e.message) || String(e) });
+    db.task.update(task.id, { last_status: 'FAILED', last_run_at: end, status: 'pending' });
+    sendNotification('❌ AI 任务失败', task.title + '：' + ((e && e.message) || String(e)));
+    if (task.notify_feishu) await sendFeishu(`❌ AI 任务「${task.title}」执行失败：${(e && e.message) || String(e)}`);
+    notifyUI();
+  }
+}
+
+/** 手动立即执行任务 */
+function executeTaskNow(id: number) {
+  const t = db.task.get(id);
+  if (!t) return false;
+  if (t.status === 'in_progress') return false;
+  enqueueTask(t, 'manual');
+  return true;
+}
+
+/** 手动触发一次提醒（测试用） */
+function triggerReminderNow(id: string) {
+  const r = db.reminder.get(id);
+  if (!r) return false;
+  const msg = '⏰ ' + r.name + (r.message ? '\n' + r.message : '');
+  sendNotification('⏰ ' + r.name, r.message || '');
+  (async () => { await sendFeishu(msg); })();
+  return true;
+}
+
 function stop() {
   for (const [id, job] of jobs) {
     job.stop();
   }
   jobs.clear();
   running = false;
+  execQueue = [];
   logger.info('[Scheduler] stopped');
 }
 
@@ -729,4 +958,4 @@ function reload() {
 
 function isRunning() { return running; }
 
-export { start, stop, reload, isRunning, addReminder, removeReminder, DEFAULT_REPORT_TEMPLATE };
+export { start, stop, reload, isRunning, addReminder, removeReminder, reloadTasks, removeTask, executeTaskNow, triggerReminderNow, DEFAULT_REPORT_TEMPLATE };

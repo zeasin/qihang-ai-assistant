@@ -1040,6 +1040,29 @@ ipcMain.handle('todo:add', (_, data) => db.todo.add(data));
 ipcMain.handle('todo:update', (_, id, data) => { db.todo.update(id, data); return true; });
 ipcMain.handle('todo:remove', (_, id) => { db.todo.remove(id); return true; });
 
+// --- AI 自执行任务 ---
+ipcMain.handle('task:list', () => db.task.list());
+ipcMain.handle('task:add', (_, data) => {
+  const r = db.task.add(data);
+  scheduler.reloadTasks();
+  return r;
+});
+ipcMain.handle('task:update', (_, id, data) => {
+  db.task.update(id, data);
+  scheduler.reloadTasks();
+  return true;
+});
+ipcMain.handle('task:remove', (_, id) => {
+  db.task.remove(id);
+  scheduler.removeTask(id);
+  return true;
+});
+ipcMain.handle('task:execute', (_, id) => scheduler.executeTaskNow(id));
+ipcMain.handle('task:executions', (_, taskId) => db.taskExecution.listByTask(taskId));
+ipcMain.handle('task:execution:list', (_, page, pageSize) => db.taskExecution.list(page, pageSize));
+ipcMain.handle('task:execution:get', (_, id) => db.taskExecution.get(id));
+ipcMain.handle('reminder:test', (_, id) => scheduler.triggerReminderNow(id));
+
 // --- Archive ---
 
 // 生成模块级业务分析报告（基于模块下所有数据集的业务内容）— 保留旧接口兼容

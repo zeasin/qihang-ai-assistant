@@ -2,24 +2,29 @@
   <div class="planner-view">
     <div class="content-header">
       <h1 class="content-title">任务</h1>
+      <div class="header-actions">
+        <router-link to="/reminders" class="btn btn-secondary btn-sm">⏰ 提醒</router-link>
+        <button class="btn btn-primary btn-sm" @click="createTask">新建待办</button>
+        <button class="btn btn-primary btn-sm" @click="createAiTask">+ 新建 AI 任务</button>
+      </div>
     </div>
-    
+
     <div class="content-body">
       <div class="card">
         <div class="card-header">
           <h3 class="card-title">待办</h3>
-          <button class="btn btn-primary btn-sm" @click="createTask">新建待办</button>
+          <span class="card-subtitle">{{ doneTasks.length }}/{{ tasks.length }} 已完成</span>
         </div>
-        
+
         <div class="task-board">
           <div class="task-column column-pending">
             <div class="column-header">
               <span class="column-title">待处理</span>
               <span class="column-count">{{ pendingTasks.length }}</span>
             </div>
-            <div 
-              v-for="task in pendingTasks" 
-              :key="task.id" 
+            <div
+              v-for="task in pendingTasks"
+              :key="task.id"
               class="task-card"
               @click="editTask(task)"
             >
@@ -30,15 +35,15 @@
               </div>
             </div>
           </div>
-          
+
           <div class="task-column column-progress">
             <div class="column-header">
               <span class="column-title">进行中</span>
               <span class="column-count">{{ progressTasks.length }}</span>
             </div>
-            <div 
-              v-for="task in progressTasks" 
-              :key="task.id" 
+            <div
+              v-for="task in progressTasks"
+              :key="task.id"
               class="task-card"
               @click="editTask(task)"
             >
@@ -49,15 +54,15 @@
               </div>
             </div>
           </div>
-          
+
           <div class="task-column column-done">
             <div class="column-header">
               <span class="column-title">已完成</span>
               <span class="column-count">{{ doneTasks.length }}</span>
             </div>
-            <div 
-              v-for="task in doneTasks" 
-              :key="task.id" 
+            <div
+              v-for="task in doneTasks"
+              :key="task.id"
               class="task-card"
               @click="editTask(task)"
             >
@@ -70,36 +75,61 @@
           </div>
         </div>
       </div>
-      
+
+      <!-- AI 自执行任务 -->
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">提醒</h3>
-          <button class="btn btn-primary btn-sm" @click="createReminder">新建提醒</button>
+          <h3 class="card-title">🤖 AI 自执行任务</h3>
+          <span class="card-subtitle">AI 按设定的触发条件自动执行，完成后通知你并保存结果</span>
         </div>
-        
-        <div class="reminder-grid">
-          <div 
-            v-for="reminder in reminders" 
-            :key="reminder.id" 
-            class="reminder-card"
-            @click="editReminder(reminder)"
-          >
-            <div class="reminder-header">
-              <span class="reminder-name">{{ reminder.name }}</span>
-              <div 
-                class="reminder-toggle" 
-                :class="{ on: reminder.enabled }"
-                @click.stop="toggleReminder(reminder)"
-              ></div>
+
+        <div v-if="aiTasks.length === 0" class="empty-state">
+          <div class="empty-icon">🤖</div>
+          <div class="empty-text">还没有 AI 任务。例如：「每天早上 9 点帮我总结昨天的数据」「每周五生成周报并推送飞书」</div>
+        </div>
+
+        <div v-else class="ai-task-list">
+          <div v-for="task in aiTasks" :key="task.id" class="ai-task-card">
+            <div class="ai-task-main">
+              <div class="ai-task-head">
+                <span class="ai-task-title">{{ task.title }}</span>
+                <span :class="['status-badge', 'status-' + task.status]">{{ statusText(task.status) }}</span>
+                <span v-if="task.last_status === 'FAILED'" class="status-badge status-FAILED">执行失败</span>
+              </div>
+              <div class="ai-task-desc">{{ getTriggerText(task) }}</div>
+              <div v-if="task.last_result" class="ai-task-result">
+                <span class="result-label">最近结果：</span>{{ truncate(task.last_result, 120) }}
+              </div>
+              <div v-if="task.last_run_at" class="ai-task-run">
+                最近执行：{{ task.last_run_at }}（{{ task.last_status === 'SUCCESS' ? '成功' : task.last_status === 'FAILED' ? '失败' : task.last_status || '未执行' }}）
+              </div>
             </div>
-            <div class="reminder-message">{{ reminder.message }}</div>
-            <div class="reminder-schedule">⏰ {{ getScheduleText(reminder) }}</div>
+            <div class="ai-task-actions">
+              <button
+                class="btn btn-primary btn-xs"
+                :disabled="task.status === 'in_progress'"
+                @click="runAiTask(task)"
+              >{{ task.status === 'in_progress' ? '执行中…' : '▶ 立即执行' }}</button>
+              <button class="btn btn-secondary btn-xs" @click="toggleHistory(task)">{{ task.showHistory ? '收起记录' : '执行记录' }}</button>
+              <button class="btn btn-secondary btn-xs" @click="editAiTask(task)">编辑</button>
+              <button class="btn btn-danger btn-xs" @click="openDeleteModal(task.id, 'ai_task')">删除</button>
+            </div>
+            <div v-if="task.showHistory" class="ai-task-history">
+              <div v-if="!task.executions || task.executions.length === 0" class="history-empty">暂无执行记录</div>
+              <div v-for="ex in task.executions" :key="ex.id" class="history-item">
+                <span :class="['status-badge', 'status-' + ex.status]">{{ ex.status }}</span>
+                <span class="history-trigger">{{ triggerLabel(ex.trigger_type) }}</span>
+                <span class="history-time">{{ ex.start_time }}</span>
+                <div v-if="ex.error_message" class="history-error">❌ {{ ex.error_message }}</div>
+                <div v-if="ex.result_text" class="history-result">{{ truncate(ex.result_text, 200) }}</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 任务编辑模态框 -->
+    <!-- 待办编辑模态框 -->
     <div v-if="showTaskModal" class="modal-overlay" @click="showTaskModal = false">
       <div class="modal-box" @click.stop>
         <div class="modal-header">
@@ -146,63 +176,91 @@
       </div>
     </div>
 
-    <!-- 提醒编辑模态框 -->
-    <div v-if="showReminderModal" class="modal-overlay" @click="showReminderModal = false">
-      <div class="modal-box" @click.stop>
+    <!-- AI 任务编辑模态框 -->
+    <div v-if="showAiTaskModal" class="modal-overlay" @click="showAiTaskModal = false">
+      <div class="modal-box modal-box-lg" @click.stop>
         <div class="modal-header">
-          <h3>{{ isEditingReminder ? '编辑提醒' : '新建提醒' }}</h3>
-          <button class="btn btn-secondary" @click="showReminderModal = false">✕</button>
+          <h3>{{ isEditingAiTask ? '编辑 AI 任务' : '新建 AI 任务' }}</h3>
+          <button class="btn btn-secondary" @click="showAiTaskModal = false">✕</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
-            <label>提醒名称 *</label>
-            <input type="text" class="form-control" v-model="editingReminder.name" placeholder="例如：下班日报提醒">
+            <label>任务标题 *</label>
+            <input type="text" class="form-control" v-model="editingAiTask.title" placeholder="例如：每日数据总结">
           </div>
           <div class="form-group">
-            <label>提醒消息</label>
-            <textarea class="form-control" v-model="editingReminder.message" rows="3" placeholder="提醒内容（可选）"></textarea>
+            <label>任务指令（AI 将据此自主执行）</label>
+            <textarea class="form-control" v-model="editingAiTask.prompt" rows="5" placeholder="例如：查询今天的数据中心记录和待办，生成一份工作总结并保存到笔记"></textarea>
           </div>
           <div class="form-group">
-            <label>提醒类型 *</label>
-            <select class="form-control" v-model="editingReminder.type">
-              <option value="daily">📅 每天 - 每天定时提醒</option>
-              <option value="once">🔔 一次 - 指定日期提醒</option>
-              <option value="weekly">📆 每周 - 每周特定星期几提醒</option>
-              <option value="monthly">📅 每月 - 每月特定几号提醒</option>
-              <option value="yearly">🎂 每年 - 每年特定日期提醒</option>
+            <label>触发方式</label>
+            <select class="form-control" v-model="editingAiTask.trigger_type">
+              <option value="manual">👆 手动 - 只在我点击「立即执行」时运行</option>
+              <option value="once">⏰ 一次性 - 到指定时间执行一次</option>
+              <option value="cycle">🔁 循环 - 按周期自动执行</option>
             </select>
           </div>
+
+          <div class="form-row" v-if="editingAiTask.trigger_type === 'once'">
+            <div class="form-group">
+              <label>执行时间 *</label>
+              <input type="datetime-local" class="form-control" v-model="editingAiTask.scheduled_start">
+            </div>
+          </div>
+
+          <template v-if="editingAiTask.trigger_type === 'cycle'">
+            <div class="form-row">
+              <div class="form-group">
+                <label>循环类型</label>
+                <select class="form-control" v-model="editingAiTask.cycle_type">
+                  <option value="daily">📅 每天</option>
+                  <option value="weekly">📆 每周</option>
+                  <option value="monthly">🗓️ 每月</option>
+                  <option value="cron">⚙️ Cron 表达式</option>
+                </select>
+              </div>
+              <div class="form-group" v-if="editingAiTask.cycle_type !== 'cron'">
+                <label>执行时间</label>
+                <input type="time" class="form-control" v-model="editingAiTask.cycle_time">
+              </div>
+            </div>
+            <div class="form-group" v-if="editingAiTask.cycle_type === 'weekly'">
+              <label>星期几（可多选）</label>
+              <div class="week-select">
+                <label v-for="d in weekDays" :key="d.value" class="week-chip">
+                  <input type="checkbox" :value="d.value" v-model="editingWeekDays">
+                  {{ d.label }}
+                </label>
+              </div>
+            </div>
+            <div class="form-group" v-if="editingAiTask.cycle_type === 'monthly'">
+              <label>每月几号</label>
+              <input type="number" class="form-control" v-model.number="editingMonthDays" min="1" max="31" placeholder="如 1 或 1,15">
+            </div>
+            <div class="form-group" v-if="editingAiTask.cycle_type === 'cron'">
+              <label>Cron 表达式</label>
+              <input type="text" class="form-control" v-model="editingAiTask.cycle_value" placeholder="如 0 9 * * *（每天早上 9 点）">
+            </div>
+          </template>
+
           <div class="form-row">
             <div class="form-group">
-              <label>提醒时间 *</label>
-              <input type="time" class="form-control" v-model="editingReminder.time" value="09:00">
+              <label>结果保存位置（相对笔记库，留空自动保存）</label>
+              <input type="text" class="form-control" v-model="editingAiTask.output_target" placeholder="如 任务输出/日报.md">
             </div>
-            <div class="form-group" v-if="editingReminder.type === 'weekly'">
-              <label>星期几</label>
-              <select class="form-control" v-model.number="editingReminder.day_of_week">
-                <option :value="1">周一</option>
-                <option :value="2">周二</option>
-                <option :value="3">周三</option>
-                <option :value="4">周四</option>
-                <option :value="5">周五</option>
-                <option :value="6">周六</option>
-                <option :value="7">周日</option>
-              </select>
-            </div>
-            <div class="form-group" v-if="editingReminder.type === 'once'">
-              <label>日期</label>
-              <input type="date" class="form-control" v-model="editingReminder.date">
-            </div>
-            <div class="form-group" v-if="editingReminder.type === 'monthly'">
-              <label>几号</label>
-              <input type="number" class="form-control" v-model.number="editingReminder.day_of_month" min="1" max="31" placeholder="1-31">
+            <div class="form-group">
+              <label>&nbsp;</label>
+              <label class="check-item">
+                <input type="checkbox" v-model="editingAiTask.notify_feishu">
+                完成后推送飞书
+              </label>
             </div>
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary" @click="showReminderModal = false">取消</button>
-          <button class="btn btn-danger" v-if="isEditingReminder" @click="openDeleteModal(editingReminder.id, 'reminder')">🗑️ 删除</button>
-          <button class="btn btn-primary" @click="saveReminder">保存</button>
+          <button class="btn btn-secondary" @click="showAiTaskModal = false">取消</button>
+          <button class="btn btn-danger" v-if="isEditingAiTask" @click="openDeleteModal(editingAiTask.id, 'ai_task')">🗑️ 删除</button>
+          <button class="btn btn-primary" @click="saveAiTask">保存</button>
         </div>
       </div>
     </div>
@@ -227,7 +285,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 
 const API = window.electronAPI;
 
@@ -240,22 +298,34 @@ interface Task {
   status: string;
 }
 
-interface Reminder {
-  id: string;
-  name: string;
-  message: string;
-  type: string;
-  time: string;
-  date: string;
-  day_of_week: number;
-  day_of_month: number;
-  month_day: string;
-  enabled: boolean;
-  created_at: string;
+interface AiTask {
+  id: number;
+  title: string;
+  prompt: string;
+  description: string;
+  priority: string;
+  status: string;
+  trigger_type: string;
+  scheduled_start: string;
+  cycle_type: string;
+  cycle_value: string;
+  cycle_time: string;
+  cycle_end: string;
+  output_type: string;
+  output_target: string;
+  notify_feishu: boolean;
+  dataset_id: string;
+  record_id: string;
+  project_id: number | null;
+  last_result: string;
+  last_run_at: string;
+  last_status: string;
+  executions?: any[];
+  showHistory?: boolean;
 }
 
 const tasks = ref<Task[]>([]);
-const reminders = ref<Reminder[]>([]);
+const aiTasks = ref<AiTask[]>([]);
 
 const pendingTasks = computed(() => tasks.value.filter(t => t.status === 'pending'));
 const progressTasks = computed(() => tasks.value.filter(t => t.status === 'in_progress'));
@@ -268,17 +338,27 @@ const editingTask = ref<Task>({
   id: 0, title: '', description: '', priority: 'mid', dueDate: '', status: 'pending'
 });
 
-const showReminderModal = ref(false);
-const isEditingReminder = ref(false);
-const editingReminder = ref<Reminder>({
-  id: '', name: '', message: '', type: 'daily', time: '09:00',
-  date: '', day_of_week: 1, day_of_month: 1,
-  month_day: '', enabled: true, created_at: ''
+const showAiTaskModal = ref(false);
+const isEditingAiTask = ref(false);
+const editingAiTask = ref<AiTask>({
+  id: 0, title: '', prompt: '', description: '', priority: 'mid', status: 'pending',
+  trigger_type: 'manual', scheduled_start: '', cycle_type: 'daily', cycle_value: '',
+  cycle_time: '09:00', cycle_end: '', output_type: '', output_target: '',
+  notify_feishu: false, dataset_id: '', record_id: '', project_id: null,
+  last_result: '', last_run_at: '', last_status: ''
 });
+const editingWeekDays = ref<number[]>([]);
+const editingMonthDays = ref<number | string>(1);
 
 const showDeleteModal = ref(false);
 const deleteId = ref('');
 const deleteType = ref('');
+
+const weekDays = [
+  { label: '周一', value: 1 }, { label: '周二', value: 2 }, { label: '周三', value: 3 },
+  { label: '周四', value: 4 }, { label: '周五', value: 5 }, { label: '周六', value: 6 },
+  { label: '周日', value: 0 },
+];
 
 // ========== 待办 CRUD ==========
 async function loadTodos() {
@@ -326,61 +406,95 @@ async function saveTask() {
   } catch (e: any) { alert('操作失败: ' + (e.message || e)); }
 }
 
-async function deleteTodo(id: number) {
-  try { await API.todo.remove(id); await loadTodos(); } catch {}
+// ========== AI 任务 CRUD ==========
+async function loadAiTasks() {
+  try {
+    aiTasks.value = (await API.task.list()).map((t: any) => ({
+      ...t,
+      notify_feishu: !!t.notify_feishu,
+      showHistory: false,
+    }));
+  } catch { aiTasks.value = []; }
 }
 
-// ========== 提醒 CRUD ==========
-async function loadReminders() {
-  try { reminders.value = await API.reminder.list(); } catch { reminders.value = []; }
-}
-
-function createReminder() {
-  isEditingReminder.value = false;
-  editingReminder.value = {
-    id: '', name: '', message: '', type: 'daily', time: '09:00',
-    date: '', day_of_week: 1, day_of_month: 1,
-    month_day: '', enabled: true, created_at: ''
+function emptyAiTask(): AiTask {
+  return {
+    id: 0, title: '', prompt: '', description: '', priority: 'mid', status: 'pending',
+    trigger_type: 'manual', scheduled_start: '', cycle_type: 'daily', cycle_value: '',
+    cycle_time: '09:00', cycle_end: '', output_type: '', output_target: '',
+    notify_feishu: false, dataset_id: '', record_id: '', project_id: null,
+    last_result: '', last_run_at: '', last_status: ''
   };
-  showReminderModal.value = true;
 }
 
-function editReminder(reminder: Reminder) {
-  isEditingReminder.value = true;
-  editingReminder.value = { ...reminder };
-  showReminderModal.value = true;
+function createAiTask() {
+  isEditingAiTask.value = false;
+  editingAiTask.value = emptyAiTask();
+  editingWeekDays.value = [];
+  editingMonthDays.value = 1;
+  showAiTaskModal.value = true;
 }
 
-async function saveReminder() {
-  if (!editingReminder.value.name.trim()) {
-    alert('请输入提醒名称');
+function editAiTask(task: AiTask) {
+  isEditingAiTask.value = true;
+  editingAiTask.value = { ...task };
+  editingWeekDays.value = String(task.cycle_value || '').split(',').filter(Boolean).map(Number);
+  editingMonthDays.value = task.cycle_value || 1;
+  showAiTaskModal.value = true;
+}
+
+async function saveAiTask() {
+  if (!editingAiTask.value.title.trim()) {
+    alert('请输入任务标题');
     return;
   }
+  if (editingAiTask.value.trigger_type === 'once' && !editingAiTask.value.scheduled_start) {
+    alert('一次性任务请选择执行时间');
+    return;
+  }
+  const t = editingAiTask.value;
+  let cycleValue = t.cycle_value || '';
+  if (t.cycle_type === 'weekly') cycleValue = editingWeekDays.value.join(',');
+  if (t.cycle_type === 'monthly') cycleValue = String(editingMonthDays.value || 1);
   const data = {
-    name: editingReminder.value.name,
-    message: editingReminder.value.message,
-    type: editingReminder.value.type,
-    time: editingReminder.value.time,
-    day_of_week: editingReminder.value.type === 'weekly' ? editingReminder.value.day_of_week : 0,
-    day_of_month: editingReminder.value.type === 'monthly' ? editingReminder.value.day_of_month : 1,
-    month_day: editingReminder.value.type === 'yearly' ? editingReminder.value.month_day : '',
+    title: t.title,
+    prompt: t.prompt,
+    description: t.description,
+    priority: t.priority,
+    trigger_type: t.trigger_type,
+    scheduled_start: t.trigger_type === 'once' ? t.scheduled_start : '',
+    cycle_type: t.trigger_type === 'cycle' ? t.cycle_type : '',
+    cycle_value: t.trigger_type === 'cycle' ? cycleValue : '',
+    cycle_time: t.trigger_type === 'cycle' ? t.cycle_time : '',
+    output_target: t.output_target,
+    notify_feishu: t.notify_feishu ? 1 : 0,
+    status: 'pending',
   };
   try {
-    if (isEditingReminder.value) {
-      await API.reminder.update(editingReminder.value.id, data);
+    if (isEditingAiTask.value) {
+      await API.task.update(t.id, data);
     } else {
-      await API.reminder.add(data);
+      await API.task.add(data);
     }
-    showReminderModal.value = false;
-    await loadReminders();
+    showAiTaskModal.value = false;
+    await loadAiTasks();
   } catch (e: any) { alert('操作失败: ' + (e.message || e)); }
 }
 
-async function toggleReminder(reminder: Reminder) {
+async function runAiTask(task: AiTask) {
   try {
-    await API.reminder.setEnabled(reminder.id, !reminder.enabled);
-    reminder.enabled = !reminder.enabled;
-  } catch {}
+    await API.task.execute(task.id);
+    await loadAiTasks();
+  } catch (e: any) { alert('执行失败: ' + (e.message || e)); }
+}
+
+async function toggleHistory(task: AiTask) {
+  task.showHistory = !task.showHistory;
+  if (task.showHistory && !task.executions) {
+    try {
+      task.executions = await API.task.executions(task.id);
+    } catch { task.executions = []; }
+  }
 }
 
 // ========== 删除确认 ==========
@@ -394,33 +508,65 @@ async function confirmDelete() {
   try {
     if (deleteType.value === 'reminder') {
       await API.reminder.remove(deleteId.value);
-      await loadReminders();
     } else if (deleteType.value === 'task') {
       await API.todo.remove(parseInt(deleteId.value));
       await loadTodos();
+    } else if (deleteType.value === 'ai_task') {
+      await API.task.remove(parseInt(deleteId.value));
+      await loadAiTasks();
     }
   } catch {}
   showDeleteModal.value = false;
 }
 
 // ========== 工具函数 ==========
-function getScheduleText(reminder: Reminder): string {
-  const time = reminder.time || '09:00';
-  switch (reminder.type) {
-    case 'daily': return '每天 ' + time;
-    case 'once': return '一次 ' + (reminder.date || '') + ' ' + time;
-    case 'weekly':
-      const days = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-      return '每周' + (days[reminder.day_of_week] || '周一') + ' ' + time;
-    case 'monthly': return '每月' + (reminder.day_of_month || 1) + '号 ' + time;
-    case 'yearly': return '每年 ' + (reminder.month_day || '1月1日') + ' ' + time;
-    default: return time;
+function statusText(status: string): string {
+  switch (status) {
+    case 'pending': return '待执行';
+    case 'in_progress': return '执行中';
+    case 'done': return '已完成';
+    default: return status;
   }
+}
+
+function getTriggerText(task: AiTask): string {
+  if (task.trigger_type === 'once') return '⏰ 一次性：' + (task.scheduled_start || '未设置');
+  if (task.trigger_type === 'cycle') {
+    switch (task.cycle_type) {
+      case 'weekly': return '🔁 每周' + (task.cycle_value || '') + ' ' + (task.cycle_time || '');
+      case 'monthly': return '🔁 每月' + (task.cycle_value || '') + '号 ' + (task.cycle_time || '');
+      case 'cron': return '🔁 Cron：' + (task.cycle_value || '');
+      default: return '🔁 每天 ' + (task.cycle_time || '');
+    }
+  }
+  return '👆 手动执行';
+}
+
+function triggerLabel(type: string): string {
+  switch (type) {
+    case 'manual': return '手动';
+    case 'scheduled': return '定时';
+    default: return type;
+  }
+}
+
+function truncate(s: string, n: number): string {
+  if (!s) return '';
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+function onTaskChanged() {
+  loadAiTasks();
 }
 
 onMounted(async () => {
   await loadTodos();
-  await loadReminders();
+  await loadAiTasks();
+  window.electronAPI?.on?.('task:changed', onTaskChanged);
+});
+
+onBeforeUnmount(() => {
+  window.electronAPI?.removeAllListeners?.('task:changed');
 });
 </script>
 
@@ -445,6 +591,11 @@ onMounted(async () => {
   font-size: 18px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .content-body {
@@ -473,6 +624,11 @@ onMounted(async () => {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.card-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .task-board {
@@ -567,80 +723,149 @@ onMounted(async () => {
   gap: 2px;
 }
 
-.reminder-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+/* AI 任务 */
+.empty-state {
+  text-align: center;
+  padding: 40px 0;
 }
 
-.reminder-card {
-  background: white;
+.empty-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.empty-text {
+  font-size: 14px;
+  color: var(--text-muted);
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.ai-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-task-card {
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 16px;
-  border: 1px solid var(--border);
-  cursor: pointer;
   transition: all 0.2s;
 }
 
-.reminder-card:hover {
-  box-shadow: var(--shadow-md);
+.ai-task-card:hover {
+  box-shadow: var(--shadow-sm);
 }
 
-.reminder-header {
+.ai-task-main {
+  flex: 1;
+}
+
+.ai-task-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
 }
 
-.reminder-name {
-  font-size: 14px;
+.ai-task-title {
+  font-size: 15px;
   font-weight: 600;
 }
 
-.reminder-toggle {
-  width: 40px;
-  height: 22px;
-  border-radius: 11px;
-  background: #e2e8f0;
-  cursor: pointer;
-  position: relative;
-  transition: all 0.2s;
+.status-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
 }
 
-.reminder-toggle.on {
-  background: var(--primary);
-}
+.status-pending { background: rgba(251, 146, 60, 0.1); color: #fb923c; }
+.status-in_progress { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+.status-done { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
+.status-SUCCESS { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
+.status-FAILED { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+.status-RUNNING { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 
-.reminder-toggle::after {
-  content: '';
-  position: absolute;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: white;
-  top: 2px;
-  left: 2px;
-  transition: all 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-}
-
-.reminder-toggle.on::after {
-  left: 20px;
-}
-
-.reminder-message {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.reminder-schedule {
+.ai-task-desc {
   font-size: 12px;
   color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.ai-task-result {
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: #f8fafc;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.result-label {
+  font-weight: 500;
+}
+
+.ai-task-run {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ai-task-actions {
   display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.btn-xs {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.ai-task-history {
+  margin-top: 12px;
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-item {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: #f8fafc;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  display: flex;
+  gap: 8px;
   align-items: center;
-  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.history-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.history-trigger, .history-time {
+  color: var(--text-muted);
+}
+
+.history-error {
+  width: 100%;
+  color: #ef4444;
+}
+
+.history-result {
+  width: 100%;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
 }
 
 /* 模态框 */
@@ -665,6 +890,10 @@ onMounted(async () => {
   max-height: 90vh;
   overflow-y: auto;
   width: 520px;
+}
+
+.modal-box-lg {
+  width: 640px;
 }
 
 .modal-header {
@@ -736,5 +965,38 @@ textarea.form-control {
 
 select.form-control {
   cursor: pointer;
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 10px 0;
+  cursor: pointer;
+}
+
+.week-select {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.week-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.week-chip:hover {
+  border-color: var(--primary);
 }
 </style>

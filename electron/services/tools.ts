@@ -569,6 +569,62 @@ async function getTodayInfoTool({}, kbId) {
   return JSON.stringify({ today: getChinaDate(), yesterday: getChinaDate(-1), weekAgo: getChinaDate(-7), projectId: kbId || null, projectName }, null, 2);
 }
 
+// ========== AI 自执行任务工具 ==========
+
+async function queryTasksTool({ status, limit }) {
+  const rows = db.task.list(status || undefined).slice(0, limit || 20);
+  return rows.length ? JSON.stringify(rows.map((r: any) => ({
+    id: r.id, title: r.title, status: r.status, priority: r.priority,
+    trigger_type: r.trigger_type, scheduled_start: r.scheduled_start,
+    cycle_type: r.cycle_type, cycle_value: r.cycle_value, cycle_time: r.cycle_time,
+    last_status: r.last_status, last_run_at: r.last_run_at, prompt: String(r.prompt || '').slice(0, 200),
+  })), null, 2) : '暂无 AI 任务';
+}
+
+async function createTaskTool({ title, prompt, trigger_type, scheduled_start, cycle_type, cycle_value, cycle_time, notify_feishu, output_target }) {
+  if (!title || !title.trim()) return '请提供任务标题（title）';
+  const r = db.task.add({
+    title: title.trim(),
+    prompt: prompt || '',
+    priority: 'mid',
+    status: 'pending',
+    trigger_type: trigger_type || 'manual',
+    scheduled_start: scheduled_start || '',
+    cycle_type: cycle_type || '',
+    cycle_value: cycle_value || '',
+    cycle_time: cycle_time || '',
+    notify_feishu: notify_feishu ? 1 : 0,
+    output_target: output_target || '',
+  });
+  try {
+    const scheduler = require('./scheduler');
+    if (scheduler.reloadTasks) scheduler.reloadTasks();
+  } catch (e) { logger.warn('[Tools] create_task reload failed: ' + e.message); }
+  logger.info('[Tools] create_task: %s → id %s', title, r.id);
+  return `已创建 AI 自执行任务 "${title}" (id: ${r.id}, 触发: ${trigger_type || 'manual'}${scheduled_start ? ' @ ' + scheduled_start : ''})。可手动立即执行，或等待调度器自动触发。`;
+}
+
+async function updateTaskTool({ id, title, prompt, status, trigger_type, scheduled_start, cycle_type, cycle_value, cycle_time }) {
+  const exists = db.task.get(id);
+  if (!exists) return `任务 id=${id} 不存在。可先用 query_tasks 查询任务 id。`;
+  const patch: any = {};
+  if (title !== undefined && title !== null) patch.title = title;
+  if (prompt !== undefined && prompt !== null) patch.prompt = prompt;
+  if (status !== undefined && status !== null) patch.status = status;
+  if (trigger_type !== undefined && trigger_type !== null) patch.trigger_type = trigger_type;
+  if (scheduled_start !== undefined && scheduled_start !== null) patch.scheduled_start = scheduled_start;
+  if (cycle_type !== undefined && cycle_type !== null) patch.cycle_type = cycle_type;
+  if (cycle_value !== undefined && cycle_value !== null) patch.cycle_value = cycle_value;
+  if (cycle_time !== undefined && cycle_time !== null) patch.cycle_time = cycle_time;
+  if (!Object.keys(patch).length) return '没有需要更新的字段';
+  db.task.update(id, patch);
+  try {
+    const scheduler = require('./scheduler');
+    if (scheduler.reloadTasks) scheduler.reloadTasks();
+  } catch (e) { logger.warn('[Tools] update_task reload failed: ' + e.message); }
+  return `已更新任务 id=${id}：${Object.keys(patch).join(', ')}`;
+}
+
 // ========== 组装 ==========
 // 输出格式与 pi SDK 的 ToolDefinition 兼容：{ name, label, description, parameters, execute }
 // execute 返回 AgentToolResult：{ content: [{ type: 'text', text }], details: {} }
@@ -641,6 +697,9 @@ async function buildReportToolDefs(kbId) {
     { name: 'query_reminders', label: 'query_reminders', description: '查询已启用的提醒事项（plan_reminders）。', parameters: Type.Object({}), execute: exec(() => queryRemindersTool()) },
     { name: 'add_reminder', label: 'add_reminder', description: '创建一条定时提醒。类型: daily(每天)/weekly(每周，需 day_of_week 0=周日)/monthly(每月，需 day_of_month)/once(一次性，需 date YYYY-MM-DD)。', parameters: Type.Object({ name: Type.String({ description: '提醒名称，如 "喝水"' }), message: optStr('提醒内容'), type: optStr('类型: daily / weekly / monthly / once，默认 daily'), time: optStr('时间 HH:MM，默认 09:00'), day_of_week: optNum('weekly 用: 0-6，0=周日'), day_of_month: optNum('monthly 用: 1-31'), date: optStr('once 用: 日期 YYYY-MM-DD') }), execute: exec(addReminderTool) },
     { name: 'update_reminder', label: 'update_reminder', description: '更新提醒（名称、内容、时间、启用状态等）。先调用 query_reminders 获取提醒 id。', parameters: Type.Object({ id: Type.String({ description: '提醒 id（如 R1712345678901）' }), name: optStr('新名称'), message: optStr('新内容'), time: optStr('时间 HH:MM'), enabled: optStr('是否启用: true / false'), type: optStr('类型: daily / weekly / monthly / once'), day_of_week: optNum('weekly 用: 0-6'), day_of_month: optNum('monthly 用: 1-31'), date: optStr('once 用: YYYY-MM-DD') }), execute: exec(updateReminderTool) },
+    { name: 'query_tasks', label: 'query_tasks', description: '查询 AI 自执行任务（plan_tasks），可按状态过滤。', parameters: Type.Object({ status: optStr('过滤状态: pending / in_progress / done'), limit: optNum('返回条数上限，默认20') }), execute: exec((args) => queryTasksTool({ ...args, limit: toNumber(args.limit, 20) })) },
+    { name: 'create_task', label: 'create_task', description: '创建一条 AI 自执行任务。当用户要求"定时执行/自动执行某个任务"（如每天生成日报、每周总结、定时帮我整理数据等）时应调用本工具。执行时会用 AI 自动完成并通知用户。trigger_type: manual(手动)/once(一次性定时，需 scheduled_start YYYY-MM-DD HH:MM)/cycle(循环，需 cycle_type+cycle_time)。', parameters: Type.Object({ title: Type.String({ description: '任务标题' }), prompt: optStr('任务详细说明，AI 将据此自主执行'), trigger_type: optStr('触发类型: manual / once / cycle，默认 manual'), scheduled_start: optStr('once 用: 执行时间 YYYY-MM-DD HH:MM'), cycle_type: optStr('cycle 用: daily / weekly / monthly / cron'), cycle_value: optStr('cycle 用: weekly 为星期(逗号分隔)或 cron 表达式；daily 可为空'), cycle_time: optStr('cycle 用: 执行时间 HH:MM，如 09:00'), notify_feishu: optNum('是否推送飞书通知: 1 / 0'), output_target: optStr('结果保存路径（相对笔记库），默认存到 任务输出/ 目录') }), execute: exec(createTaskTool) },
+    { name: 'update_task', label: 'update_task', description: '更新 AI 自执行任务（标题、说明、触发配置、状态）。先调用 query_tasks 获取任务 id。', parameters: Type.Object({ id: Type.Number({ description: '任务 id' }), title: optStr('新标题'), prompt: optStr('新说明'), status: optStr('状态: pending / in_progress / done'), trigger_type: optStr('触发类型: manual / once / cycle'), scheduled_start: optStr('once 用: YYYY-MM-DD HH:MM'), cycle_type: optStr('cycle 用: daily / weekly / monthly / cron'), cycle_value: optStr('cycle 用'), cycle_time: optStr('cycle 用: HH:MM') }), execute: exec(updateTaskTool) },
     { name: 'get_today_info', label: 'get_today_info', description: '获取当前日期信息（今天的中国日期、项目/知识库名称等）。', parameters: Type.Object({}), execute: exec((args) => getTodayInfoTool(args, kbId)) },
   ];
 }
