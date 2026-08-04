@@ -8,6 +8,9 @@
  */
 import * as path from 'path';
 import * as os from 'os';
+import { EventEmitter } from 'events';
+
+EventEmitter.defaultMaxListeners = 30;
 import * as fs from 'fs';
 import logger from './logger';
 
@@ -200,7 +203,7 @@ export async function runPi(opts: RunPiOptions): Promise<void> {
     cwd,
     modelPattern,
     images,
-    timeoutMs = 300000,
+    timeoutMs = 0,
     onDelta = () => {},
     onThinking = () => {},
     onTool = () => {},
@@ -329,23 +332,17 @@ export async function generateDailyReport(sessionId: string, prompt: string): Pr
   const customTools = await buildReportToolDefs(undefined);
   return new Promise((resolve, reject) => {
     let done = false;
-    const timeout = setTimeout(() => {
-      if (!done) reject(new Error('日报生成超时'));
-    }, 300000);
-
     runPi({
       prompt,
       sessionId: sessionId + '_report',
       customTools,
       onDone: (finalText) => {
         done = true;
-        clearTimeout(timeout);
         const result = (finalText || '').trim().split('\n').filter(l => !l.trim().startsWith('数据来源')).join('\n').trim();
         resolve(result);
       },
       onError: (err) => {
         done = true;
-        clearTimeout(timeout);
         reject(new Error(err));
       },
     });

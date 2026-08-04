@@ -58,11 +58,20 @@ let tray: Electron.Tray | null = null;
 let backgroundReady = false;
 
 function convertMarkdownForFeishu(md: string): string {
-  const lines = md.split('\n');
+  const lines = md.trim().split('\n');
   const out: string[] = [];
+  let lastBlank = false;
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
+    // 连续空行合并为一个
+    if (line.trim() === '') {
+      if (!lastBlank) { out.push(''); lastBlank = true; }
+      i++;
+      continue;
+    }
+    lastBlank = false;
+    // 表格：转为 key: value 列表
     if (line.startsWith('|') && line.endsWith('|')) {
       const headerCells = line.split('|').slice(1, -1).map(c => c.trim());
       const isSeparator = headerCells.every(c => /^[-: ]+$/.test(c));
@@ -91,6 +100,19 @@ function convertMarkdownForFeishu(md: string): string {
           out.push('- ' + parts.join(' | '));
         }
       }
+      continue;
+    }
+    // 标题：## xxx → **xxx**
+    const headingMatch = line.match(/^#{1,6}\s+(.+)/);
+    if (headingMatch) {
+      out.push('**' + headingMatch[1].trim() + '**');
+      i++;
+      continue;
+    }
+    // 分割线：--- / *** → 空行
+    if (/^[-*]{3,}\s*$/.test(line.trim())) {
+      out.push('');
+      i++;
       continue;
     }
     out.push(line);
@@ -305,7 +327,7 @@ const feishuMessageHandler = async (msg) => {
     if (isCodingMessage(msg.text, db)) {
       const result = await handleFeishuCodingMessage(msg, { db, feishu, appConfig });
       if (result.handled) {
-        if (result.reply) feishu.replyCard(msg, result.reply, '🤖 启航AI·编程');
+        if (result.reply) feishu.replyCard(msg, convertMarkdownForFeishu(result.reply), '🤖 启航AI·编程');
         return;
       }
     }
@@ -401,7 +423,7 @@ const feishuMessageHandler = async (msg) => {
         logger.info('[Feishu] Sending card reply: "%s"', (text || '').slice(0, 200));
         if (text) {
           db.chat.addMessage(sessionId, 'assistant', text, 'general');
-          feishu.replyCard(msg, text, '🤖 启航AI');
+          feishu.replyCard(msg, convertMarkdownForFeishu(text), '🤖 启航AI');
         }
         const end = fTs();
         if (feishuExecId != null) db.taskExecution.update(feishuExecId, { status: 'SUCCESS', end_time: end, result_text: text || '' });

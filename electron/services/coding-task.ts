@@ -191,24 +191,16 @@ export async function handleFeishuCodingMessage(
   db.chat.addMessage(sessionId, 'user', cleanText, 'general');
 
   try {
-    const runtime = taskRuntime(sessionId, project, cleanText);
-    const ws = await ensureWorkspace(runtime, project);
-
     let reply = '';
-    const prompt = ws.isolated
-      ? `以下代码项目已为你准备了隔离工作目录（基于最新远端代码）：
-项目名称：${project.name}
-工作目录：${ws.path}
+    const prompt = `请排查项目 ${project.name}（${project.dir}）中的问题：${cleanText}
 
-请在该目录下处理任务：${cleanText}
-提示：如果任务需要修改代码，直接在工作目录中修改；完成后简要说明改动了哪些文件。`
-      : `请在项目 ${project.name}（${project.dir}）中处理任务：${cleanText}`;
+⚠️ 重要：当前为只读排查模式，请勿修改任何文件。仅查看代码、日志、配置，定位问题并给出分析报告和解决方案。`;
 
     await runPi({
       prompt,
       sessionId,
-      cwd: ws.path,
-      customTools: await buildCodingToolDefs(ws.path),
+      cwd: project.dir || '',
+      customTools: await buildCodingToolDefs(project.dir || ''),
       onDelta: (delta) => { reply += delta; },
       onTool: (toolEvent) => {
         logger.info('[CodingTask] tool %s %s', toolEvent.name, toolEvent.type);
@@ -236,10 +228,8 @@ export async function handleFeishuCodingMessage(
       },
     });
 
-    const footer = ws.isolated
-      ? `\n\n— 本任务在隔离 worktree 中执行（未改动你的原目录）。若 Agent 修改了代码，可到工作台「编程」页审查并合并。`
-      : `\n\n— 该目录非 git 项目，直接在原目录中执行。`;
-    return { handled: true, reply: (reply || '✅ 处理完成。') + footer };
+    const footer = `\n\n— 排查项目：${project.name}（${project.dir}）· 只读排查，未做任何修改。`;
+    return { handled: true, reply: (reply || '✅ 排查完成。') + footer };
   } catch (e: any) {
     logger.error('[CodingTask] execution failed: %s', e?.message);
     if (execId != null) {

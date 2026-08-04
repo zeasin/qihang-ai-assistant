@@ -6,11 +6,20 @@ import logger from './logger';
 import { Notification } from 'electron';
 
 function convertMarkdownForFeishu(md: string): string {
-  const lines = md.split('\n');
+  const lines = md.trim().split('\n');
   const out: string[] = [];
+  let lastBlank = false;
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
+    // 连续空行合并为一个
+    if (line.trim() === '') {
+      if (!lastBlank) { out.push(''); lastBlank = true; }
+      i++;
+      continue;
+    }
+    lastBlank = false;
+    // 表格：转为 key: value 列表
     if (line.startsWith('|') && line.endsWith('|')) {
       const headerCells = line.split('|').slice(1, -1).map(c => c.trim());
       const isSeparator = headerCells.every(c => /^[-: ]+$/.test(c));
@@ -39,6 +48,19 @@ function convertMarkdownForFeishu(md: string): string {
           out.push('- ' + parts.join(' | '));
         }
       }
+      continue;
+    }
+    // 标题：## xxx → **xxx**
+    const headingMatch = line.match(/^#{1,6}\s+(.+)/);
+    if (headingMatch) {
+      out.push('**' + headingMatch[1].trim() + '**');
+      i++;
+      continue;
+    }
+    // 分割线：--- / *** → 空行
+    if (/^[-*]{3,}\s*$/.test(line.trim())) {
+      out.push('');
+      i++;
       continue;
     }
     out.push(line);
