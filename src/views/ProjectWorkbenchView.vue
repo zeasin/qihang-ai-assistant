@@ -890,24 +890,21 @@ onBeforeUnmount(() => {
 .coding-workbench {
   display: flex;
   height: 100%;
-  overflow: hidden;
-  background: #f5f5f5;
 }
 
 /* ========== 左栏 ========== */
 .workbench-sidebar {
-  width: 280px;
-  min-width: 280px;
-  background: #fafafa;
-  border-right: 1px solid #e2e8f0;
+  width: 240px;
+  min-width: 240px;
+  background: #f8fafc;
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
 }
 
 .sidebar-header {
-  padding: 12px 14px;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -917,7 +914,7 @@ onBeforeUnmount(() => {
 .sidebar-title {
   font-size: 14px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--text-primary);
   margin: 0;
 }
 
@@ -928,24 +925,29 @@ onBeforeUnmount(() => {
 }
 
 .project-node {
-  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 2px;
 }
 
 .project-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 14px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s;
   user-select: none;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .project-header:hover {
-  background: #f0f0f0;
+  background: rgba(99,102,241,0.06);
 }
 .project-header.active {
-  background: rgba(99,102,241,0.08);
+  background: rgba(99,102,241,0.12);
+  color: var(--primary);
+  font-weight: 500;
 }
 
 .project-icon {
@@ -954,13 +956,12 @@ onBeforeUnmount(() => {
 }
 
 .project-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: #1e293b;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 500;
+  color: inherit;
 }
 
 .project-actions {
@@ -1003,19 +1004,22 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px 8px 32px;
+  padding: 8px 10px 8px 24px;
   cursor: pointer;
   transition: background 0.15s;
   font-size: 13px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 2px;
 }
 
 .conversation-item:hover {
-  background: #eef2ff;
+  background: rgba(99,102,241,0.06);
 }
 
 .conversation-item.active {
-  background: rgba(99, 102, 241, 0.1);
-  border-left: 3px solid #6366f1;
+  background: rgba(99,102,241,0.12);
+  color: var(--primary);
+  font-weight: 500;
 }
 
 .conv-icon {
@@ -1030,11 +1034,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #334155;
+  color: var(--text-secondary);
 }
 
 .conv-title.new {
-  color: #6366f1;
+  color: var(--primary);
 }
 
 .conv-delete {
@@ -1059,7 +1063,7 @@ onBeforeUnmount(() => {
 }
 
 .new-conversation {
-  color: #6366f1;
+  color: var(--primary);
   font-weight: 500;
 }
 
@@ -1093,7 +1097,8 @@ onBeforeUnmount(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  min-width: 0;
+  background: white;
 }
 
 .workbench-empty {
@@ -1117,7 +1122,7 @@ onBeforeUnmount(() => {
   font-size: 18px;
   font-weight: 600;
   margin-bottom: 8px;
-  color: #1e293b;
+  color: var(--text-primary);
 }
 
 .workbench-empty .empty-desc {
@@ -1128,8 +1133,8 @@ onBeforeUnmount(() => {
 
 /* ========== 对话头部 ========== */
 .chat-header {
-  padding: 12px 20px;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
   background: white;
   display: flex;
   align-items: center;
@@ -1157,7 +1162,7 @@ onBeforeUnmount(() => {
 .chat-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--text-primary);
   margin: 0;
 }
 
@@ -1165,8 +1170,8 @@ onBeforeUnmount(() => {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 8px;
-  background: #f1f5f9;
-  color: #64748b;
+  background: rgba(99,102,241,0.1);
+  color: var(--primary);
 }
 
 .chat-header-right {
@@ -1179,11 +1184,11 @@ onBeforeUnmount(() => {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 24px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: #ffffff;
+  background: white;
 }
 
 .message {
