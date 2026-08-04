@@ -20,7 +20,7 @@
             <div class="conv-title">{{ session.title || '新对话' }}</div>
             <div class="conv-preview">{{ session.last_message || '' }}</div>
           </div>
-          <span class="conv-delete" @click.stop="deleteSession(session.id)" title="删除">×</span>
+          <span class="conv-delete" @click.stop="deleteSession(session.session_id || session.id)" title="删除">×</span>
         </div>
       </div>
       <div v-else class="sidebar-empty">
@@ -247,7 +247,7 @@ async function selectSession(session: any) {
   if (isStreaming.value) return;
   currentSessionId.value = session.id;
   currentSession.value = session;
-  await loadMessages(session.id);
+  await loadMessages(session.session_id || session.id);
   saveState();
 }
 
@@ -300,11 +300,11 @@ async function restoreState() {
     if (!saved) return false;
     const { sessionId } = JSON.parse(saved);
     if (!sessionId) return false;
-    const session = sessions.value.find((s) => s.id === sessionId);
+    const session = sessions.value.find((s) => s.session_id === sessionId);
     if (!session) return false;
     currentSessionId.value = session.id;
     currentSession.value = session;
-    await loadMessages(session.id);
+    await loadMessages(session.session_id);
     return true;
   } catch { return false; }
 }

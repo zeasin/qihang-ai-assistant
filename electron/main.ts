@@ -888,7 +888,8 @@ ipcMain.handle('coding:session:create', (_, { id, projectId, title, agent }) => 
   return db.chat.createSession(id || ('coding_' + Date.now()), projectId, title, 'coding', agent, 'ui');
 });
 ipcMain.handle('coding:session:listByProject', (_, { projectId }) => {
-  return db.chat.sessions(projectId);
+  const all = db.chat.sessions(projectId);
+  return (all || []).filter((s: any) => s.source !== 'feishu');
 });
 ipcMain.handle('coding:session:messages', (_, { sessionId }) => db.chat.messages(sessionId));
 ipcMain.handle('coding:session:delete', (_, { sessionId }) => db.chat.deleteSession(sessionId));

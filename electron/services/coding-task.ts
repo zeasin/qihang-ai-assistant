@@ -455,7 +455,7 @@ export function latestCodingSessions(db: any, limit = 10): any[] {
   return db.q(
     `SELECT s.*, p.name as project_name, p.dir as project_dir
      FROM prj_sessions s LEFT JOIN prj_projects p ON s.project_id = p.id
-     WHERE s.mode = 'coding' ORDER BY s.updated_at DESC LIMIT ?`,
+     WHERE s.mode = 'coding' AND (s.source IS NULL OR s.source != 'feishu') ORDER BY s.updated_at DESC LIMIT ?`,
     limit,
   );
 }

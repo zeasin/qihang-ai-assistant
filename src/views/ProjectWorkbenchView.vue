@@ -36,7 +36,7 @@
             >
               <span class="conv-icon">🗨️</span>
               <span class="conv-title">{{ session.title || '新对话' }}</span>
-              <span class="conv-delete" @click.stop="deleteSession(session.id)" title="删除">×</span>
+              <span class="conv-delete" @click.stop="deleteSession(session.session_id || session.id)" title="删除">×</span>
             </div>
             <div class="conversation-item new-conversation" @click="newSession(project.id)">
               <span class="conv-icon">➕</span>
@@ -383,7 +383,7 @@ async function selectSession(session: any) {
   if (isStreaming.value) return;
   currentSessionId.value = session.id;
   currentSession.value = session;
-  await loadMessages(session.id);
+  await loadMessages(session.session_id || session.id);
   saveCodingState();
 }
 
@@ -456,13 +456,13 @@ async function restoreCodingState() {
     
     // 找到对应的对话
     const sessions = projectSessions[projectId] || [];
-    const session = sessions.find((s) => s.id === sessionId);
+    const session = sessions.find((s) => s.session_id === sessionId);
     if (!session) return false;
     
     // 恢复选中状态
     currentSessionId.value = session.id;
     currentSession.value = session;
-    await loadMessages(session.id);
+    await loadMessages(session.session_id);
     
     return true;
   } catch (e) {
