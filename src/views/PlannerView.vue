@@ -1,32 +1,42 @@
 <template>
   <div class="planner-view">
-    <div class="content-header">
-      <h1 class="content-title">任务中心</h1>
-      <div class="header-actions">
-        <router-link to="/reminders" class="btn btn-secondary btn-sm">⏰ 提醒</router-link>
-        <button class="btn btn-primary btn-sm" @click="createTask">+ 新建任务</button>
+    <div class="planner-sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">项目</span>
+        <button class="btn btn-primary btn-xs" @click="showProjectModal = true">+</button>
+      </div>
+      <div class="sidebar-list">
+        <div
+          v-for="p in allProjects"
+          :key="'p' + p.id"
+          class="sidebar-item"
+          :class="{ active: selectedProjectId === p.id }"
+          @click="selectProject(p.id)"
+        >
+          <span class="project-icon-sm">{{ p.type === 'code' ? '💻' : '📚' }}</span>
+          <span class="project-name-sm">{{ p.name }}</span>
+          <span class="project-count-sm">{{ taskCountByProject(p.id) }}</span>
+          <button class="btn-delete-project" @click.stop="deleteProject(p)" title="删除项目">✕</button>
+        </div>
       </div>
     </div>
 
-    <div class="content-body">
-      <div v-if="groups.length === 0" class="empty-state">
-        <div class="empty-icon">🗂️</div>
-        <div class="empty-text">还没有任务。点击「新建任务」挂到代码项目或笔记库下；飞书发来的编程请求也会自动记录在这里。</div>
+    <div class="planner-main">
+      <div class="content-header">
+        <h1 class="content-title">{{ currentProjectLabel }}</h1>
+        <div class="header-actions">
+          <router-link to="/reminders" class="btn btn-secondary btn-sm">⏰ 提醒</router-link>
+          <button class="btn btn-primary btn-sm" @click="createTask">+ 新建任务</button>
+        </div>
       </div>
 
-      <div v-for="group in groups" :key="group.key" class="project-section">
-        <div class="project-header">
-          <div class="project-info">
-            <span class="project-icon">{{ group.type === 'code' ? '💻' : '📚' }}</span>
-            <span class="project-name">{{ group.name }}</span>
-            <span class="project-type">{{ group.type === 'code' ? '代码项目' : '笔记库' }}</span>
-            <span class="project-count">{{ group.tasks.length }} 个任务</span>
-          </div>
+      <div class="content-body">
+        <div v-if="currentTasks.length === 0" class="empty-state">
+          <div class="empty-icon">🗂️</div>
+          <div class="empty-text">暂无任务。点击「新建任务」创建。</div>
         </div>
 
-        <div v-if="group.tasks.length === 0" class="project-empty">该项目下暂无任务</div>
-
-        <div v-for="task in group.tasks" :key="task.id" class="task-card" :class="{ running: task.status === 'in_progress' }">
+        <div v-for="task in currentTasks" :key="task.id" class="task-card" :class="{ running: task.status === 'in_progress' }">
           <div class="task-main">
             <div class="task-head">
               <span class="task-title">{{ task.title }}</span>
@@ -56,13 +66,7 @@
             <div v-if="task.followupDone" class="followup-reply">{{ task.followupReply }}</div>
             <div v-if="task.followupRunning" class="followup-reply followup-streaming">{{ task.followupReply }}</div>
             <div class="followup-input-row">
-              <textarea
-                v-model="task.followupText"
-                class="followup-input"
-                rows="2"
-                placeholder="输入追问内容，将沿用该任务的原对话上下文继续执行…"
-                @keydown.enter.exact.prevent="sendFollowup(task)"
-              ></textarea>
+              <textarea v-model="task.followupText" class="followup-input" rows="2" placeholder="输入追问内容…" @keydown.enter.exact.prevent="sendFollowup(task)"></textarea>
               <button class="btn btn-primary btn-sm" :disabled="!(task.followupText || '').trim() || task.followupRunning" @click="sendFollowup(task)">{{ task.followupRunning ? '执行中…' : '发送' }}</button>
             </div>
           </div>
@@ -76,6 +80,33 @@
               <div v-if="ex.result_text" class="history-result">{{ truncate(ex.result_text, 200) }}</div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建项目模态框 -->
+    <div v-if="showProjectModal" class="modal-overlay" @click="showProjectModal = false">
+      <div class="modal-box" style="width:420px;" @click.stop>
+        <div class="modal-header">
+          <h3>新建项目</h3>
+          <button class="btn btn-secondary" @click="showProjectModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>项目名称 *</label>
+            <input type="text" class="form-control" v-model="projectForm.name" placeholder="如 CRM系统">
+          </div>
+          <div class="form-group">
+            <label>目录路径</label>
+            <div style="display:flex;gap:8px;">
+              <input type="text" class="form-control" v-model="projectForm.dir" placeholder="选择目录..." readonly>
+              <button class="btn btn-secondary" @click="selectDir">选择</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showProjectModal = false">取消</button>
+          <button class="btn btn-primary" :disabled="!projectForm.name.trim()" @click="saveProject">保存</button>
         </div>
       </div>
     </div>
@@ -106,7 +137,7 @@
           </div>
           <div class="form-group">
             <label>任务诉求（AI 将据此执行）</label>
-            <textarea class="form-control" v-model="editing.prompt" rows="4" placeholder="描述要让 AI 做什么，例如：查询今天的任务和数据中心记录，生成工作总结保存到笔记"></textarea>
+            <textarea class="form-control" v-model="editing.prompt" rows="4" placeholder="描述要让 AI 做什么"></textarea>
           </div>
           <div class="form-group">
             <label>执行方式</label>
@@ -116,14 +147,12 @@
               <option value="cycle">🔁 定时循环 - 按周期自动执行</option>
             </select>
           </div>
-
           <div class="form-row" v-if="editing.trigger_type === 'once'">
             <div class="form-group">
               <label>执行时间 *</label>
               <input type="datetime-local" class="form-control" v-model="editing.scheduled_start">
             </div>
           </div>
-
           <template v-if="editing.trigger_type === 'cycle'">
             <div class="form-row">
               <div class="form-group">
@@ -158,7 +187,6 @@
               <input type="text" class="form-control" v-model="editing.cycle_value" placeholder="如 0 9 * * *（每天早上 9 点）">
             </div>
           </template>
-
           <div class="form-row">
             <div class="form-group">
               <label>结果保存位置（相对笔记库，留空自动保存）</label>
@@ -189,7 +217,7 @@
           <button class="btn btn-secondary" @click="showDeleteModal = false">✕</button>
         </div>
         <div class="modal-body">
-          <p style="color:#94a3b8;font-size:13px;">确定要删除任务「{{ deleting?.title }}」吗？此操作不可撤销。</p>
+          <p style="color:#94a3b8;font-size:13px;">确定要删除{{ deletingTask ? '任务' : '项目' }}「{{ deletingTask?.title || deletingProject?.name }}」吗？此操作不可撤销。</p>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" @click="showDeleteModal = false">取消</button>
@@ -206,52 +234,38 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 const API = window.electronAPI;
 
 interface AiTask {
-  id: number;
-  title: string;
-  prompt: string;
-  description: string;
-  priority: string;
-  status: string;
-  task_type: string;
-  project_id: number | null;
-  source: string;
-  trigger_type: string;
-  scheduled_start: string;
-  cycle_type: string;
-  cycle_value: string;
-  cycle_time: string;
-  output_target: string;
-  notify_feishu: boolean;
-  last_result: string;
-  last_run_at: string;
-  last_status: string;
-  executions?: any[];
-  showHistory?: boolean;
-  showFollowup?: boolean;
-  followupText?: string;
-  followupReply?: string;
-  followupRunning?: boolean;
-  followupDone?: boolean;
+  id: number; title: string; prompt: string; description: string; priority: string;
+  status: string; task_type: string; project_id: number | null; source: string;
+  trigger_type: string; scheduled_start: string; cycle_type: string; cycle_value: string;
+  cycle_time: string; output_target: string; notify_feishu: boolean;
+  last_result: string; last_run_at: string; last_status: string; session_id: string;
+  created_at?: string;
+  executions?: any[]; showHistory?: boolean; showFollowup?: boolean;
+  followupText?: string; followupReply?: string; followupRunning?: boolean; followupDone?: boolean;
 }
 
 interface Project { id: number; name: string; type: string; dir: string; }
 
 const tasks = ref<AiTask[]>([]);
 const projects = ref<Project[]>([]);
+const selectedProjectId = ref<number | null>(null);
 
 const codeProjects = computed(() => projects.value.filter(p => p.type === 'code'));
 const noteProjects = computed(() => projects.value.filter(p => p.type === 'note'));
+const allProjects = computed(() => projects.value);
 
-const groups = computed(() => {
-  const unassigned = tasks.value.filter(t => !t.project_id);
-  const list: { key: string; name: string; type: string; tasks: AiTask[] }[] = [];
-  for (const p of projects.value) {
-    const ts = tasks.value.filter(t => Number(t.project_id) === Number(p.id));
-    if (ts.length) list.push({ key: 'p' + p.id, name: p.name, type: p.type, tasks: ts });
-  }
-  if (unassigned.length) list.push({ key: 'unassigned', name: '未关联项目', type: '', tasks: unassigned });
-  return list;
+const currentTasks = computed(() => {
+  return tasks.value.filter(t => Number(t.project_id) === Number(selectedProjectId.value));
 });
+
+const currentProjectLabel = computed(() => {
+  const p = projects.value.find(x => x.id === selectedProjectId.value);
+  return p ? `${p.type === 'code' ? '💻' : '📚'} ${p.name}` : '任务中心';
+});
+
+function taskCountByProject(pid: number) {
+  return tasks.value.filter(t => Number(t.project_id) === Number(pid)).length;
+}
 
 // ========== 模态框状态 ==========
 const showTaskModal = ref(false);
@@ -259,9 +273,11 @@ const isEditing = ref(false);
 const editing = ref<AiTask>(emptyTask());
 const editingWeekDays = ref<number[]>([]);
 const editingMonthDays = ref<number | string>(1);
-
 const showDeleteModal = ref(false);
-const deleting = ref<AiTask | null>(null);
+const deletingTask = ref<AiTask | null>(null);
+const deletingProject = ref<Project | null>(null);
+const showProjectModal = ref(false);
+const projectForm = ref({ name: '', dir: '' });
 
 const weekDays = [
   { label: '周一', value: 1 }, { label: '周二', value: 2 }, { label: '周三', value: 3 },
@@ -274,7 +290,7 @@ function emptyTask(): AiTask {
     id: 0, title: '', prompt: '', description: '', priority: 'mid', status: 'pending',
     task_type: 'note', project_id: null, source: '', trigger_type: 'now', scheduled_start: '',
     cycle_type: 'daily', cycle_value: '', cycle_time: '09:00', output_target: '',
-    notify_feishu: false, last_result: '', last_run_at: '', last_status: ''
+    notify_feishu: false, last_result: '', last_run_at: '', last_status: '', session_id: ''
   };
 }
 
@@ -286,15 +302,42 @@ async function loadTasks() {
 }
 
 async function loadProjects() {
+  try { projects.value = (await API.project.list()) || []; } catch { projects.value = []; }
+  if (projects.value.length > 0 && !selectedProjectId.value) {
+    selectedProjectId.value = projects.value[0].id;
+  }
+}
+
+function selectProject(id: number) {
+  selectedProjectId.value = id;
+}
+
+// ========== 项目 CRUD ==========
+async function selectDir() {
+  try { const dir = await API.dialog.openDirectory(); if (dir) projectForm.value.dir = dir; } catch {}
+}
+
+async function saveProject() {
+  if (!projectForm.value.name.trim()) return;
   try {
-    projects.value = (await API.project.list()) || [];
-  } catch { projects.value = []; }
+    await API.project.add(projectForm.value.name.trim(), 'code', projectForm.value.dir || '', '', '');
+    showProjectModal.value = false;
+    projectForm.value = { name: '', dir: '' };
+    await loadProjects();
+  } catch (e: any) { alert('创建项目失败: ' + (e.message || e)); }
+}
+
+function deleteProject(p: Project) {
+  deletingProject.value = p;
+  deletingTask.value = null;
+  showDeleteModal.value = true;
 }
 
 // ========== 任务 CRUD ==========
 function createTask() {
   isEditing.value = false;
   editing.value = emptyTask();
+  if (selectedProjectId.value !== null) editing.value.project_id = selectedProjectId.value;
   editingWeekDays.value = [];
   editingMonthDays.value = 1;
   showTaskModal.value = true;
@@ -318,8 +361,7 @@ async function saveTask() {
   if (t.cycle_type === 'weekly') cycleValue = editingWeekDays.value.join(',');
   if (t.cycle_type === 'monthly') cycleValue = String(editingMonthDays.value || 1);
   const data = {
-    title: t.title,
-    prompt: t.prompt,
+    title: t.title, prompt: t.prompt,
     task_type: proj && proj.type === 'code' ? 'coding' : 'note',
     project_id: t.project_id,
     trigger_type: t.trigger_type,
@@ -344,50 +386,48 @@ async function saveTask() {
 }
 
 async function runTask(task: AiTask) {
-  try {
-    await API.task.execute(task.id);
-    await loadTasks();
-  } catch (e: any) { alert('执行失败: ' + (e.message || e)); }
+  try { await API.task.execute(task.id); await loadTasks(); } catch (e: any) { alert('执行失败: ' + (e.message || e)); }
 }
 
 async function toggleHistory(task: AiTask) {
   task.showHistory = !task.showHistory;
   if (task.showHistory && !task.executions) {
-    try {
-      task.executions = await API.task.executions(task.id);
-    } catch { task.executions = []; }
+    try { task.executions = await API.task.executions(task.id); } catch { task.executions = []; }
   }
 }
 
-// ========== 追问（卡片内直接追问，复用任务原会话） ==========
+function openDeleteModal(task: AiTask) {
+  deletingTask.value = task;
+  deletingProject.value = null;
+  showDeleteModal.value = true;
+}
+
+async function confirmDelete() {
+  if (deletingTask.value) {
+    try { await API.task.remove(deletingTask.value.id); await loadTasks(); } catch {}
+  } else if (deletingProject.value) {
+    try { await API.project.delete(deletingProject.value.id); await loadProjects(); await loadTasks(); } catch {}
+  }
+  showDeleteModal.value = false;
+}
+
+// ========== 追问 ==========
 function toggleFollowup(task: AiTask) {
   task.showFollowup = !task.showFollowup;
   if (task.showFollowup && !task.followupReply) {
-    task.followupText = '';
-    task.followupReply = '';
-    task.followupRunning = false;
-    task.followupDone = false;
+    task.followupText = ''; task.followupReply = ''; task.followupRunning = false; task.followupDone = false;
   }
 }
 
 async function sendFollowup(task: AiTask) {
   const q = (task.followupText || '').trim();
   if (!q || task.followupRunning) return;
-  task.followupText = '';
-  task.followupRunning = true;
-  task.followupDone = false;
+  task.followupText = ''; task.followupRunning = true; task.followupDone = false;
   task.followupReply = '> ' + q + '\n\n';
   try {
     const ok = await API.task.followup(task.id, q);
-    if (!ok) {
-      task.followupRunning = false;
-      task.followupReply += '\n❌ 追问失败：任务不存在或正在执行中';
-    }
-  } catch (e: any) {
-    task.followupRunning = false;
-    task.followupDone = true;
-    task.followupReply += '\n❌ 追问失败：' + (e.message || e);
-  }
+    if (!ok) { task.followupRunning = false; task.followupReply += '\n❌ 追问失败'; }
+  } catch (e: any) { task.followupRunning = false; task.followupDone = true; task.followupReply += '\n❌ ' + (e.message || e); }
 }
 
 function handleFollowupDelta(payload: any) {
@@ -397,36 +437,14 @@ function handleFollowupDelta(payload: any) {
 
 function handleFollowupDone(payload: any) {
   const t = tasks.value.find((x: any) => x.id === payload.taskId);
-  if (t) {
-    t.followupRunning = false;
-    t.followupDone = true;
-    t.followupReply = payload.text || t.followupReply;
-  }
+  if (t) { t.followupRunning = false; t.followupDone = true; t.followupReply = payload.text || t.followupReply; }
   loadTasks();
 }
 
 function handleFollowupError(payload: any) {
   const t = tasks.value.find((x: any) => x.id === payload.taskId);
-  if (t) {
-    t.followupRunning = false;
-    t.followupDone = true;
-    t.followupReply += '\n\n❌ ' + (payload.error || '执行出错');
-  }
+  if (t) { t.followupRunning = false; t.followupDone = true; t.followupReply += '\n\n❌ ' + (payload.error || '执行出错'); }
   loadTasks();
-}
-
-function openDeleteModal(task: AiTask) {
-  deleting.value = task;
-  showDeleteModal.value = true;
-}
-
-async function confirmDelete() {
-  if (!deleting.value) return;
-  try {
-    await API.task.remove(deleting.value.id);
-    await loadTasks();
-  } catch {}
-  showDeleteModal.value = false;
 }
 
 // ========== 工具函数 ==========
@@ -466,9 +484,7 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
-function onTaskChanged() {
-  loadTasks();
-}
+function onTaskChanged() { loadTasks(); }
 
 onMounted(async () => {
   await Promise.all([loadProjects(), loadTasks()]);
@@ -487,10 +503,70 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.planner-view {
+.planner-view { display: flex; height: 100%; }
+
+/* ========== 左侧栏 ========== */
+.planner-sidebar {
+  width: 240px;
+  min-width: 240px;
+  background: #f8fafc;
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  height: 100%;
+}
+
+.sidebar-header {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+  margin-bottom: 2px;
+}
+
+.sidebar-item:hover { background: rgba(99,102,241,0.06); }
+.sidebar-item.active { background: rgba(99,102,241,0.12); color: var(--primary); font-weight: 500; }
+
+.project-icon-sm { font-size: 15px; }
+.project-name-sm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-count-sm { font-size: 11px; color: var(--text-muted); background: #e8e8e8; padding: 0 6px; border-radius: 8px; }
+
+.btn-delete-project {
+  background: none; border: none; color: #ccc; cursor: pointer; font-size: 12px; padding: 0 2px; line-height: 1; visibility: hidden;
+}
+.sidebar-item:hover .btn-delete-project { visibility: visible; }
+.btn-delete-project:hover { color: #ef4444; }
+
+/* ========== 右侧主区域 ========== */
+.planner-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .content-header {
@@ -509,10 +585,7 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
 }
 
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
+.header-actions { display: flex; gap: 8px; }
 
 .content-body {
   flex: 1;
@@ -525,83 +598,21 @@ onBeforeUnmount(() => {
   padding: 64px 0;
 }
 
-.empty-icon {
-  font-size: 40px;
-  margin-bottom: 12px;
-}
+.empty-icon { font-size: 40px; margin-bottom: 12px; }
+.empty-text { font-size: 14px; color: var(--text-muted); }
 
-.empty-text {
-  font-size: 14px;
-  color: var(--text-muted);
-  max-width: 480px;
-  margin: 0 auto;
-}
-
-.project-section {
-  background: white;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
-  padding: 20px 24px;
-  margin-bottom: 24px;
-}
-
-.project-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.project-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.project-icon {
-  font-size: 18px;
-}
-
-.project-name {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.project-type {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: rgba(99, 102, 241, 0.1);
-  color: var(--primary);
-}
-
-.project-count {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.project-empty {
-  font-size: 13px;
-  color: var(--text-muted);
-  padding: 12px 0;
-}
-
+/* ========== 任务卡片 ========== */
 .task-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 14px 16px;
   margin-bottom: 12px;
   transition: all 0.2s;
+  background: white;
 }
 
-.task-card:hover {
-  box-shadow: var(--shadow-sm);
-}
-
-.task-card.running {
-  border-color: var(--primary);
-}
+.task-card:hover { box-shadow: var(--shadow-sm); }
+.task-card.running { border-color: var(--primary); }
 
 .task-head {
   display: flex;
@@ -611,36 +622,19 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
-.task-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.task-type-badge {
-  font-size: 13px;
-  line-height: 1;
-}
+.task-title { font-size: 14px; font-weight: 600; }
+.task-type-badge { font-size: 13px; line-height: 1; }
 
 .running-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #3b82f6;
-  animation: pulse 1s infinite;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #3b82f6; animation: pulse 1s infinite;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
 .status-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-weight: 500;
+  font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500;
 }
-
 .status-pending { background: rgba(251, 146, 60, 0.1); color: #fb923c; }
 .status-in_progress { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 .status-done { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
@@ -648,266 +642,52 @@ onBeforeUnmount(() => {
 .status-FAILED { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 .status-RUNNING { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 
-.task-desc {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-bottom: 6px;
-}
+.task-desc { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.task-run { font-size: 12px; color: var(--text-muted); }
 
-.task-result {
-  font-size: 13px;
-  color: var(--text-secondary);
-  background: #f8fafc;
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  margin-bottom: 6px;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
+.task-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.btn-xs { padding: 4px 10px; font-size: 12px; }
 
-.result-label {
-  font-weight: 500;
-}
+.task-followup { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 12px; }
+.followup-reply { font-size: 13px; color: var(--text-secondary); background: #f8fafc; border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px; white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow-y: auto; }
+.followup-streaming::after { content: '▋'; color: var(--primary); animation: blink 1s infinite; }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+.followup-input-row { display: flex; gap: 8px; align-items: flex-end; }
+.followup-input { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; outline: none; resize: vertical; font-family: inherit; }
+.followup-input:focus { border-color: var(--primary); }
 
-.task-run {
-  font-size: 12px;
-  color: var(--text-muted);
-}
+.task-history { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.history-item { font-size: 12px; color: var(--text-secondary); background: #f8fafc; border-radius: var(--radius-sm); padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.history-empty { font-size: 12px; color: var(--text-muted); }
+.history-trigger, .history-time { color: var(--text-muted); }
+.history-error { width: 100%; color: #ef4444; }
+.history-result { width: 100%; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); }
 
-.task-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-
-.btn-xs {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
-.task-history {
-  margin-top: 12px;
-  border-top: 1px dashed var(--border);
-  padding-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.task-followup {
-  margin-top: 12px;
-  border-top: 1px dashed var(--border);
-  padding-top: 12px;
-}
-
-.followup-reply {
-  font-size: 13px;
-  color: var(--text-secondary);
-  background: #f8fafc;
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  margin-bottom: 10px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 240px;
-  overflow-y: auto;
-}
-
-.followup-streaming::after {
-  content: '▋';
-  color: var(--primary);
-  animation: blink 1s infinite;
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.2; }
-}
-
-.followup-input-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-}
-
-.followup-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  outline: none;
-  resize: vertical;
-  font-family: inherit;
-}
-
-.followup-input:focus {
-  border-color: var(--primary);
-}
-
-.history-item {
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: #f8fafc;
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.history-empty {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.history-trigger, .history-time {
-  color: var(--text-muted);
-}
-
-.history-error {
-  width: 100%;
-  color: #ef4444;
-}
-
-.history-result {
-  width: 100%;
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: var(--text-secondary);
-}
-
-/* 模态框 */
+/* ========== 模态框 ========== */
 .modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0,0,0,0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000;
 }
-
 .modal-box {
-  background: white;
-  border-radius: var(--radius-md);
-  box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-  max-width: 90%;
-  max-height: 90vh;
-  overflow-y: auto;
-  width: 520px;
+  background: white; border-radius: var(--radius-md); box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+  max-width: 90%; max-height: 90vh; overflow-y: auto; width: 520px;
 }
+.modal-box-lg { width: 640px; }
+.modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.modal-header h3 { font-size: 16px; font-weight: 600; }
+.modal-body { padding: 20px; }
+.modal-footer { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
-.modal-box-lg {
-  width: 640px;
-}
-
-.modal-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.modal-header h3 {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.modal-body {
-  padding: 20px;
-}
-
-.modal-footer {
-  padding: 16px 20px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-
-.form-control {
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  outline: none;
-  background: white;
-}
-
-.form-control:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
-}
-
-.form-row {
-  display: flex;
-  gap: 12px;
-}
-
-.form-row .form-group {
-  flex: 1;
-}
-
-textarea.form-control {
-  resize: vertical;
-  min-height: 80px;
-}
-
-select.form-control {
-  cursor: pointer;
-}
-
-.check-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  padding: 10px 0;
-  cursor: pointer;
-}
-
-.week-select {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.week-chip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.week-chip:hover {
-  border-color: var(--primary);
-}
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
+.form-control { width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 14px; outline: none; background: white; }
+.form-control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.form-row { display: flex; gap: 12px; }
+.form-row .form-group { flex: 1; }
+textarea.form-control { resize: vertical; min-height: 80px; }
+select.form-control { cursor: pointer; }
+.check-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); padding: 10px 0; cursor: pointer; }
+.week-select { display: flex; gap: 8px; flex-wrap: wrap; }
+.week-chip { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; cursor: pointer; user-select: none; }
+.week-chip:hover { border-color: var(--primary); }
 </style>
