@@ -255,7 +255,12 @@ function nowChinaString(): string {
 
 /** 将 SQLite 方言转换为 MySQL 可执行 SQL（所有云端语句统一经过此转换） */
 function rewriteCloudSql(sql: string): string {
-  let s = sql.replace(/datetime\('now',\s*'\+8 hours'\)/gi, "'" + nowChinaString() + "'");
+  const now = nowChinaString();
+  const today = now.slice(0, 10);
+  let s = sql.replace(/datetime\('now',\s*'\+8 hours',\s*'start of day'\)/gi, `'${today} 00:00:00'`);
+  s = s.replace(/datetime\('now',\s*'\+8 hours'\)/gi, `'${now}'`);
+  s = s.replace(/date\('now',\s*'\+8 hours'\)/gi, `'${today}'`);
+  s = s.replace(/date\('now'\)/gi, `'${today}'`);
   s = s.replace(/\bINSERT OR REPLACE INTO\b/gi, 'REPLACE INTO');
   s = s.replace(/\bINSERT OR IGNORE INTO\b/gi, 'INSERT IGNORE INTO');
   return s;
