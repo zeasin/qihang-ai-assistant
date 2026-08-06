@@ -13,6 +13,11 @@ declare module '*.vue' {
 }
 
 interface ElectronAPI {
+  app: {
+    version: () => Promise<string>;
+    firstRun: () => Promise<{ firstRun: boolean }>;
+    firstRunDone: () => Promise<boolean>;
+  };
   dialog: {
     openDirectory: () => Promise<string | null>;
   };

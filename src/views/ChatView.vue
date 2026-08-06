@@ -40,26 +40,49 @@
 
     <!-- ========== 右栏：对话区 ========== -->
     <div class="chat-main">
-      <!-- 无对话时：未配置笔记库 → 首次引导 -->
-      <div v-if="!currentSessionId && kbLoaded && !defaultKbId" class="chat-empty">
-        <div class="empty-icon">📚</div>
-        <div class="empty-title">欢迎使用启航 AI 助理</div>
-        <div class="empty-desc">
-          第一步：配置本地笔记库路径<br>
-          笔记库用于知识检索与 AI 问答，可在设置页随时修改
-        </div>
-        <button class="btn btn-primary btn-lg" @click="setupNotesDir">📂 选择笔记库目录</button>
-      </div>
+      <!-- 无对话时：分步引导 -->
+      <div v-if="!currentSessionId && kbLoaded" class="chat-empty">
+        <div class="empty-icon">🚀</div>
+        <div class="empty-title">欢迎使用启航 AI 工作台</div>
+        <div class="empty-desc">首次使用？跟着以下步骤快速上手</div>
 
-      <!-- 无对话时 -->
-      <div v-else-if="!currentSessionId" class="chat-empty">
-        <div class="empty-icon">🤖</div>
-        <div class="empty-title">启航 AI 助理</div>
-        <div class="empty-desc">
-          问任何问题，无需绑定项目<br>
-          支持 日常问答 · 数据查询 · 笔记库检索 · 待办任务
+        <div class="guide-card">
+          <div class="guide-step" :class="{ done: !!defaultKbId }">
+            <div class="step-index">{{ defaultKbId ? '✓' : '1' }}</div>
+            <div class="step-content">
+              <div class="step-title">配置本地笔记库</div>
+              <div class="step-desc">
+                <template v-if="defaultKbId">笔记库已配置，AI 问答将基于你的笔记进行</template>
+                <template v-else>笔记库用于知识检索与 AI 问答，可在设置页随时修改</template>
+              </div>
+              <button v-if="!defaultKbId" class="btn btn-primary" @click="setupNotesDir">📂 选择笔记库目录</button>
+            </div>
+          </div>
+
+          <div class="guide-step">
+            <div class="step-index">2</div>
+            <div class="step-content">
+              <div class="step-title">开始第一个对话</div>
+              <div class="step-desc">支持 日常问答 · 笔记库检索 · 数据查询 · 图片识别</div>
+              <button class="btn btn-primary" @click="newSession">💬 开始对话</button>
+            </div>
+          </div>
+
+          <div class="guide-step">
+            <div class="step-index">3</div>
+            <div class="step-content">
+              <div class="step-title">探索更多功能</div>
+              <div class="step-desc">任务待办 · 数据集管理 · 定时提醒 · AI 工具箱</div>
+              <div class="guide-links">
+                <router-link to="/planner" class="guide-link">📋 任务</router-link>
+                <router-link to="/data" class="guide-link">🗃️ 数据</router-link>
+                <router-link to="/reminders" class="guide-link">🔔 提醒</router-link>
+                <router-link to="/tools" class="guide-link">🔧 工具箱</router-link>
+                <router-link to="/help" class="guide-link">❓ 帮助中心</router-link>
+              </div>
+            </div>
+          </div>
         </div>
-        <button class="btn btn-primary" @click="newSession">开始对话</button>
       </div>
 
       <!-- 有对话时 -->
@@ -822,6 +845,90 @@ onBeforeUnmount(() => {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
 }
+
+/* ========== 空状态引导卡 ========== */
+.guide-card {
+  width: 520px;
+  max-width: 100%;
+  background: white;
+  border: 1px solid #e8ecf1;
+  border-radius: 16px;
+  padding: 8px 24px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+  text-align: left;
+}
+
+.guide-step {
+  display: flex;
+  gap: 14px;
+  padding: 16px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.guide-step:last-child {
+  border-bottom: none;
+}
+
+.step-index {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.guide-step.done .step-index {
+  background: #16a34a;
+}
+
+.step-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.step-desc {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.guide-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.guide-link {
+  font-size: 12px;
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  padding: 5px 12px;
+  border-radius: 20px;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+
+.guide-link:hover {
+  background: var(--primary);
+  color: white;
+}
+
 
 .chat-header {
   display: flex;

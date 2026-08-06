@@ -11,7 +11,18 @@
         <span class="version-badge" v-if="appVersion">v{{ appVersion }}</span>
       </div>
 
-      <div class="card">
+      <div class="card card-index">
+        <h2 style="font-size:17px;">📑 快速索引</h2>
+        <p class="text-muted mb-2">点击跳转到对应章节：</p>
+        <div class="index-grid">
+          <button v-for="s in sections" :key="s.id" class="index-item" @click="scrollToSection(s.id)">
+            <span class="index-icon">{{ s.icon }}</span>
+            <span>{{ s.label }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="card" id="sec-core">
         <h2 style="font-size:17px;">✨ 核心卖点：一条完整的自动化链路</h2>
         <p class="text-muted mb-2">启航AI工作台不是"对话框 + 一堆孤立功能"，而是一套完整的自动化流程：</p>
         <div style="text-align:center;padding:12px 0;font-size:14px;font-weight:600;color:var(--primary);">
@@ -40,7 +51,7 @@
         </div>
       </div>
 
-      <div class="card card-prereq">
+      <div class="card card-prereq" id="sec-prereq">
         <h2 style="font-size:17px;">📋 使用前必读：两个前置条件</h2>
         <p class="text-muted mb-2">应用启动后，需要完成以下配置才能正常使用所有功能。</p>
 
@@ -63,7 +74,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="sec-quickstart">
         <h2>🚀 快速开始</h2>
         <p class="text-muted mb-2">启航AI工作台是一款桌面应用，将本地笔记知识库、结构化数据、待办提醒、飞书推送和 AI 智能体整合成一套完整的工作流。所有数据保存在本机，模型自由选择。</p>
         <ol style="margin:8px 0;padding-left:20px;font-size:13px;line-height:1.8;">
@@ -75,7 +86,7 @@
         </ol>
       </div>
 
-      <div class="card">
+      <div class="card" id="sec-nav">
         <h2>🧭 页面导航</h2>
         <table class="help-table">
           <thead><tr><th>菜单</th><th>说明</th></tr></thead>
@@ -93,7 +104,7 @@
         </table>
       </div>
 
-      <div class="card">
+      <div class="card" id="sec-kb">
         <h2>📁 知识库</h2>
         <p class="text-muted mb-2">浏览和管理本地 Markdown 笔记文件，支持文件搜索和预览。</p>
         <ul>
@@ -103,7 +114,7 @@
         </ul>
       </div>
 
-      <div class="card">
+      <div class="card" id="sec-data">
         <h2>🗃️ 数据</h2>
         <p class="text-muted mb-2">模块化数据集管理，支持自定义字段和批量导入导出。</p>
         <ul>
@@ -115,7 +126,7 @@
         </ul>
       </div>
 
-      <div class="card">
+      <div class="card" id="sec-ai">
         <h2>🤖 AI 助理</h2>
         <p class="text-muted mb-2">基于 pi agent 引擎的本地 AI 助理，对话页支持图片上传/粘贴，可在输入框上方切换模型。</p>
         <table class="help-table">
@@ -132,7 +143,7 @@
         <p class="text-muted">对话模型通过 pi agent 配置（终端运行 <code>pi</code> 命令设置），支持 DeepSeek、OpenAI 兼容接口、Ollama 本地模型等。</p>
       </div>
 
-      <div class="card card-feishu">
+      <div class="card card-feishu" id="sec-feishu">
         <h2>💻 飞书编程指令</h2>
         <p class="text-muted mb-2">配置飞书 Bot 后，可在飞书里直接给 AI 下发编程任务。AI 会在 <strong>Git worktree 隔离目录</strong>中执行，<strong>绝不改动你的原项目目录</strong>；改动的代码可在「编程」页审查、合并、提交或丢弃。</p>
         <table class="help-table">
@@ -154,7 +165,7 @@
         <p class="text-muted" style="margin-top:8px;">提示：<code>/code</code> 前缀是<strong>明确编程指令</strong>，与知识库问答互不干扰；只发 <code>/code：项目名</code>（不带任务）会提示补全任务内容。</p>
       </div>
 
-      <div class="card">
+      <div class="card" id="sec-config">
         <h2>⚙️ 系统配置</h2>
         <p class="text-muted mb-2">所有配置通过设置页面管理，无需手动编辑文件。</p>
         <table class="help-table">
@@ -172,7 +183,7 @@
         </table>
       </div>
 
-      <div class="card">
+      <div class="card" id="sec-faq">
         <h2>❓ 常见问题</h2>
         <table class="help-table">
           <thead><tr><th>问题</th><th>原因</th><th>解决</th></tr></thead>
@@ -188,7 +199,7 @@
         </table>
       </div>
 
-      <div class="card">
+      <div class="card" id="sec-privacy">
         <h2>🔒 数据与隐私</h2>
         <ul>
           <li>数据保存在本机数据库（<code>~/.qihang-ai-desktop/qihang-ai-desktop.db</code>）与你的笔记文件夹中，不上传任何云端</li>
@@ -206,6 +217,31 @@ import { ref, onMounted } from 'vue';
 
 const API = (window as any).electronAPI;
 const appVersion = ref('');
+
+const sections = [
+  { id: 'sec-core', icon: '✨', label: '核心卖点' },
+  { id: 'sec-prereq', icon: '📋', label: '使用前必读' },
+  { id: 'sec-quickstart', icon: '🚀', label: '快速开始' },
+  { id: 'sec-nav', icon: '🧭', label: '页面导航' },
+  { id: 'sec-kb', icon: '📁', label: '知识库' },
+  { id: 'sec-data', icon: '🗃️', label: '数据' },
+  { id: 'sec-ai', icon: '🤖', label: 'AI 助理' },
+  { id: 'sec-feishu', icon: '💻', label: '飞书编程' },
+  { id: 'sec-config', icon: '⚙️', label: '系统配置' },
+  { id: 'sec-faq', icon: '❓', label: '常见问题' },
+  { id: 'sec-privacy', icon: '🔒', label: '数据与隐私' },
+];
+
+function scrollToSection(id: string) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const body = document.querySelector('.content-body');
+  if (body) {
+    body.scrollTo({ top: el.offsetTop - 16, behavior: 'smooth' });
+  } else {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
 
 onMounted(async () => {
   try {
@@ -354,6 +390,43 @@ onMounted(async () => {
 .card-prereq {
   border-color: var(--primary);
   background: linear-gradient(135deg, #fafaff 0%, #f5f3ff 100%);
+}
+
+.card-index {
+  border-color: rgba(99, 102, 241, 0.3);
+  background: linear-gradient(135deg, #fafaff 0%, #f5f3ff 100%);
+}
+
+.index-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.index-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: white;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.index-item:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.06);
+  transform: translateY(-1px);
+}
+
+.index-icon {
+  font-size: 15px;
 }
 
 .card-feishu {

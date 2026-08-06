@@ -1515,6 +1515,13 @@ ipcMain.handle('dialog:openDirectory', async () => {
 
 // --- App ---
 ipcMain.handle('app:version', () => app.getVersion());
+ipcMain.handle('app:firstRun', () => {
+  return { firstRun: !appConfig.hasConfigKey('firstRunWelcomeSeen') };
+});
+ipcMain.handle('app:firstRun:done', () => {
+  appConfig.saveConfig({ firstRunWelcomeSeen: true });
+  return true;
+});
 
 // --- Feishu ---
 ipcMain.handle('feishu:testBot', async (_, { app_id, app_secret }) => {
