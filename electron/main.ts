@@ -310,6 +310,36 @@ function parseFeishuContext(text, db) {
   return { projectDir, projectIds, cleanText: cleanText || text, explicit };
 }
 
+// ========== 工单记录路由（确定性落库，不依赖 AI 自主行为） ==========
+
+/** 识别 "帮我记录：金箔雲项目工单 1、... / 帮我记录：金箔雲项目需求 ..." 等指令 */
+function parseWorkOrderRecord(text: string) {
+  const m = text.match(/帮我记录\s*[：:]\s*([^\s，。；;]+?)(?:项目)?(工单|需求|BUG|bug)/)
+    || text.match(/(?:帮我|请)记录\s*([^\s，。；;]+?)项目(工单|需求)/);
+  if (!m) return null;
+  const projectRaw = m[1].replace(/项目$/, '').trim();
+  const content = text.slice((m.index || 0) + m[0].length).trim();
+  if (!projectRaw || !content) return null;
+  if (/^(这|那|一|该|把|给|一个|一条|一下)/.test(projectRaw)) return null;
+  if (projectRaw === '项目' || projectRaw === m[2] || projectRaw === '无') return null;
+  return { project: projectRaw, kind: m[2], content };
+}
+
+/** 按 "1、" "2、" 编号切分为多条工单；无编号则整段为一条 */
+function splitWorkOrderItems(content: string): string[] {
+  const segs = content.split(/(?=\d+\s*[、.．])/).map(s => s.trim()).filter(Boolean);
+  return segs.length ? segs : [content];
+}
+
+/** 从工单文本中识别端（总部/商户/门店），未识别默认总部 */
+function detectWorkOrderEnd(text: string): string {
+  const found: string[] = [];
+  for (const kw of ['总部', '商户', '门店']) {
+    if (text.includes(kw) && !found.includes(kw)) found.push(kw);
+  }
+  return found.length ? found.join('、') : '总部';
+}
+
 const feishuMessageHandler = async (msg) => {
   logger.info('═══════════════════════════════════════');
   logger.info(' 飞书消息已接收');
@@ -342,6 +372,56 @@ const feishuMessageHandler = async (msg) => {
 
   let feishuTaskId: any = null;
   let feishuExecId: any = null;
+
+  // 工单记录指令 → 确定性写入"项目工单"数据集（不经过 AI，保证落库）
+  try {
+    const wo = parseWorkOrderRecord(msg.text);
+    if (wo) {
+      let ds = db.ds.list().find(d => d.name === '项目工单') || null;
+      if (!ds) {
+        db.ds.add({
+          name: '项目工单',
+          description: '项目需求、BUG、优化跟踪',
+          schemaJson: JSON.stringify({
+            fields: [
+              { name: '项目', type: 'string' }, { name: '端', type: 'string' },
+              { name: '详细', type: 'string' }, { name: '优先级', type: 'string' },
+            ],
+            typeOptions: ['需求', 'BUG', '优化'],
+            statusOptions: ['待处理', '已修复', '已发布', '已取消'],
+          }),
+        });
+        ds = db.ds.list().find(d => d.name === '项目工单') || null;
+      }
+      if (ds) {
+        const items = splitWorkOrderItems(wo.content);
+        const inserted: number[] = [];
+        for (const it of items) {
+          db.ds.insert(ds.id, { 项目: wo.project, 端: detectWorkOrderEnd(it), 详细: it, 优先级: '中' });
+          const r = db.qOne('SELECT id FROM data_center_records WHERE dataset_id = ? ORDER BY id DESC LIMIT 1', ds.id);
+          if (r) inserted.push(r.id);
+        }
+        const summary = `✅ 已向「${ds.name}」数据集写入 ${inserted.length} 条工单（项目：${wo.project}）\n\n${items.map((it, i) => `${i + 1}. ${it.slice(0, 60)}${it.length > 60 ? '…' : ''}`).join('\n')}\n\n可在「数据中心 → 项目工单」中查看与编辑。`;
+        const noteProj = db.project.list('note').find(p => p.dir === (appConfig.getConfig('notesDir') || '')) || db.project.list('note')[0] || null;
+        const r2 = recordFeishuTask(db, noteProj, msg.text, '', 'note');
+        feishuTaskId = r2.taskId;
+        feishuExecId = r2.execId;
+        const sessionId = 'task_' + (r2.taskId ?? '');
+        if (r2.taskId != null) db.task.update(r2.taskId, { session_id: sessionId });
+        try { db.chat.createSession(sessionId, noteProj ? noteProj.id : null, msg.text.slice(0, 30), 'feishu', 'pi', 'feishu'); } catch {}
+        db.chat.addMessage(sessionId, 'user', msg.text, 'general');
+        db.chat.addMessage(sessionId, 'assistant', summary, 'general');
+        const end = fTs();
+        if (feishuExecId != null) db.taskExecution.update(feishuExecId, { status: 'SUCCESS', end_time: end, result_text: summary });
+        if (feishuTaskId != null) db.task.update(feishuTaskId, { last_result: summary, last_status: 'SUCCESS', last_run_at: end, status: 'done' });
+        fNotifyUI();
+        feishu.replyCard(msg, convertMarkdownForFeishu(summary), '📋 工单已记录');
+        return;
+      }
+    }
+  } catch (e) {
+    logger.error('[Feishu] Work order record error: %s', e.message);
+  }
 
   try {
     const context = parseFeishuContext(msg.text, db);
@@ -404,9 +484,12 @@ const feishuMessageHandler = async (msg) => {
     };
 
     const notesDir = appConfig.getConfig('notesDir') || context.projectDir || '';
+    const recordHint = /(记录|登记|新建).{0,16}(工单|需求|BUG)/.test(context.cleanText)
+      ? '\n\n【记录要求】用户要求"记录/登记/新建 工单/需求/BUG"时，必须调用 insert_dataset_record 工具写入"项目工单"数据集（字段：项目、端、详细、优先级；一条工单一条记录），不要只写入笔记文件。'
+      : '';
     const prompt = notesDir
-      ? `以下是笔记库目录，请用 grep/find 等工具自行搜索相关文件后回答：\n笔记库路径：${notesDir}\n\n用户问题：${context.cleanText}`
-      : context.cleanText;
+      ? `以下是笔记库目录，请用 grep/find 等工具自行搜索相关文件后回答：\n笔记库路径：${notesDir}\n\n用户问题：${context.cleanText}` + recordHint
+      : context.cleanText + recordHint;
     setMode('kb');
     const toolDefs: any[] = [];
     if (notesDir) {
