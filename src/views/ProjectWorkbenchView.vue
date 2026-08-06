@@ -1,230 +1,365 @@
 <template>
   <div class="coding-workbench">
-    <!-- ========== 左栏：项目树 + 对话列表 ========== -->
-    <div class="workbench-sidebar">
-      <div class="sidebar-header">
-        <h3 class="sidebar-title">编程</h3>
-        <button class="btn btn-sm btn-secondary" @click="openAddProject">+ 项目</button>
-      </div>
-
-      <div class="project-tree" v-if="projects.length">
-        <div
-          v-for="project in projects"
-          :key="project.id"
-          class="project-node"
-        >
-          <div
-            class="project-header"
-            :class="{ expanded: expandedProjects.has(project.id) }"
-          >
-            <span class="project-arrow" @click="toggleProject(project.id)">{{ expandedProjects.has(project.id) ? '▼' : '▶' }}</span>
-            <span class="project-icon" @click="selectProject(project)">📁</span>
-            <span class="project-name" @click="selectProject(project)">{{ project.name }}</span>
-            <span class="project-actions">
-              <span class="project-edit-btn" @click.stop="openEditProject(project)" title="编辑项目">✏️</span>
-              <span class="project-delete-btn" @click.stop="deleteProject(project)" title="删除项目">🗑️</span>
-            </span>
-          </div>
-
-          <div v-if="expandedProjects.has(project.id)" class="conversation-list">
-            <div
-              v-for="session in projectSessions[project.id] || []"
-              :key="session.id"
-              class="conversation-item"
-              :class="{ active: currentSessionId === session.id }"
-              @click="selectSession(session)"
-            >
-              <span class="conv-icon">🗨️</span>
-              <span class="conv-title">{{ session.title || '新对话' }}</span>
-              <span class="conv-delete" @click.stop="deleteSession(session.session_id || session.id)" title="删除">×</span>
-            </div>
-            <div class="conversation-item new-conversation" @click="newSession(project.id)">
-              <span class="conv-icon">➕</span>
-              <span class="conv-title new">新对话</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-else class="sidebar-empty">
-        <div class="empty-icon">📁</div>
-        <div class="empty-text">还没有项目，创建一个开始吧</div>
-        <button class="btn btn-primary btn-sm" @click="openAddProject">新建项目</button>
-      </div>
+    <!-- ========== 顶部视图切换（仅全功能模式） ========== -->
+    <div v-if="props.view === 'all'" class="workbench-tabs">
+      <button class="workbench-tab" :class="{ active: rightTab === 'chat' }" @click="rightTab = 'chat'">💬 对话</button>
+      <button class="workbench-tab" :class="{ active: rightTab === 'tasks' }" @click="rightTab = 'tasks'">⏰ 任务</button>
     </div>
 
-    <!-- ========== 右栏：对话区 ========== -->
-    <div class="workbench-main">
-      <!-- 无对话时 -->
-      <div v-if="!currentSessionId" class="workbench-empty">
-        <div class="empty-icon">💻</div>
-        <div class="empty-title">编程</div>
-        <div class="empty-desc">
-          从左侧选择一个项目下的对话，或新建一个对话开始<br>
-          数据集查询 · 笔记库检索 · 项目文件操作，一个助理全部搞定
+    <!-- ========== 对话视图：自带左侧会话列表 ========== -->
+    <div v-if="props.view !== 'tasks'" v-show="props.view === 'all' ? rightTab === 'chat' : true" class="wb-view">
+      <div class="workbench-sidebar wb-sidebar-chat">
+        <div class="sidebar-header">
+          <h3 class="sidebar-title">代码库</h3>
+          <button class="btn btn-primary btn-xs" @click="openAddProject">+ 代码库</button>
+        </div>
+        <div class="project-tree" v-if="projects.length">
+          <div
+            v-for="project in projects"
+            :key="project.id"
+            class="project-node"
+          >
+            <div
+              class="project-header"
+              :class="{ expanded: expandedProjects.has(project.id) }"
+            >
+              <span class="project-arrow" @click="toggleProject(project.id)">{{ expandedProjects.has(project.id) ? '▼' : '▶' }}</span>
+              <span class="project-icon" @click="selectProject(project)">📁</span>
+              <span class="project-name" @click="selectProject(project)">{{ project.name }}</span>
+              <span class="project-actions">
+                <span class="project-edit-btn" @click.stop="openEditProject(project)" title="编辑项目">✏️</span>
+                <span class="project-delete-btn" @click.stop="deleteProject(project)" title="删除项目">🗑️</span>
+              </span>
+            </div>
+
+            <div v-if="expandedProjects.has(project.id)" class="conversation-list">
+              <div
+                v-for="session in sessionsWithoutTask(project.id)"
+                :key="session.id"
+                class="conversation-item"
+                :class="{ active: currentSessionId === session.id }"
+                @click="selectSession(session)"
+              >
+                <span class="conv-icon">🗨️</span>
+                <span class="conv-title">{{ session.title || '新对话' }}</span>
+                <span class="conv-delete" @click.stop="deleteSession(session.session_id || session.id)" title="删除">×</span>
+              </div>
+              <div class="conversation-item new-conversation" @click="newSession(project.id)">
+                <span class="conv-icon">➕</span>
+                <span class="conv-title new">新对话</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="sidebar-empty">
+          <div class="empty-icon">📁</div>
+          <div class="empty-text">还没有项目，创建一个开始吧</div>
+          <button class="btn btn-primary btn-sm" @click="openAddProject">新建项目</button>
         </div>
       </div>
 
-      <!-- 有对话时 -->
-      <template v-else>
-        <!-- 对话头部 -->
-        <div class="chat-header">
-          <div class="chat-header-left">
-            <h3 class="chat-title">{{ currentSession?.title || '对话' }}</h3>
-            <span class="chat-project-badge" v-if="currentProject">📁 {{ currentProject.name }}</span>
-          </div>
-          <div class="chat-header-right">
-            <button class="btn btn-sm btn-secondary" :disabled="isStreaming" @click="openChangesModal" title="查看该会话在隔离 worktree 中的改动，可合并/提交/丢弃">🛠️ 审查变更</button>
-          </div>
-        </div>
-
-        <!-- 消息列表 -->
-        <div class="chat-messages" ref="messagesContainer">
-          <div v-for="(msg, idx) in messages" :key="idx" class="message" :class="msg.role">
-            <div class="message-avatar">
-              <span v-if="msg.role === 'user'">👤</span>
-              <span v-else-if="msg.role === 'tool'">🔧</span>
-              <span v-else-if="msg.role === 'system'">⚡</span>
-              <span v-else>🤖</span>
-            </div>
-            <div class="message-content-wrapper">
-              <div class="message-header">
-                <span class="message-author">
-                  {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : msg.role === 'system' ? '系统' : 'AI 助理' }}
-                </span>
-                <span class="message-status" v-if="msg.status">{{ msg.status }}</span>
-              </div>
-              <div
-                class="message-content"
-                :class="{ 'markdown-body': msg.role === 'assistant' }"
-              >
-                <div v-if="thinkingText && idx === messages.length - 1" class="thinking-status">{{ thinkingText }}</div>
-                <div v-if="msg.images?.length" class="message-images">
-                    <img v-for="(img, i) in msg.images" :key="i" :src="`data:${img.mimeType};base64,${img.data}`" class="chat-image" />
-                  </div>
-                <div v-html="msg.role === 'user' ? escHtml(msg.content) : renderMarkdown(msg.content)"></div>
-              </div>
-            </div>
+    <!-- ========== 对话视图主体 ========== -->
+    <div class="workbench-chat">
+        <!-- 无对话时 -->
+        <div v-if="!currentSessionId" class="workbench-empty">
+          <div class="empty-icon">💻</div>
+          <div class="empty-title">编程</div>
+          <div class="empty-desc">
+            从左侧选择一个项目下的对话，或新建一个对话开始<br>
+            数据集查询 · 笔记库检索 · 项目文件操作，一个助理全部搞定
           </div>
         </div>
 
-        <!-- 输入区 -->
-        <div class="chat-input-area">
-          <div class="input-wrapper">
-            <textarea
-              v-model="inputText"
-              class="chat-input"
-              :placeholder="`输入问题，Enter 发送... (支持 数据集 · 笔记库 · 代码操作)`"
-              @keydown.enter.exact.prevent="sendMessage"
-              @paste="handlePaste"
-              @compositionstart="composing = true"
-              @compositionend="composing = false"
-              ref="inputRef"
-              :disabled="isStreaming"
-              rows="1"
-            ></textarea>
-            <div v-if="pendingImages.length" class="image-preview-bar">
-                <div v-for="(img, i) in pendingImages" :key="i" class="image-preview-item">
-                  <img :src="`data:${img.mimeType};base64,${img.data}`" class="image-preview-thumb" />
-                  <button class="image-preview-remove" @click="removeImage(i)">×</button>
+        <!-- 有对话时 -->
+        <template v-else>
+          <!-- 对话头部 -->
+          <div class="chat-header">
+            <div class="chat-header-left">
+              <h3 class="chat-title">{{ currentSession?.title || '对话' }}</h3>
+              <span class="chat-project-badge" v-if="currentProject">📁 {{ currentProject.name }}</span>
+            </div>
+            <div class="chat-header-right">
+              <button class="btn btn-sm btn-secondary" :disabled="isStreaming" @click="openChangesModal" title="查看该会话在隔离 worktree 中的改动，可合并/提交/丢弃">🛠️ 审查变更</button>
+            </div>
+          </div>
+
+          <!-- 消息列表 -->
+          <div class="chat-messages" ref="messagesContainer">
+            <div v-for="(msg, idx) in messages" :key="idx" class="message" :class="msg.role">
+              <div class="message-avatar">
+                <span v-if="msg.role === 'user'">👤</span>
+                <span v-else-if="msg.role === 'tool'">🔧</span>
+                <span v-else-if="msg.role === 'system'">⚡</span>
+                <span v-else>🤖</span>
+              </div>
+              <div class="message-content-wrapper">
+                <div class="message-header">
+                  <span class="message-author">
+                    {{ msg.role === 'user' ? '我' : msg.role === 'tool' ? '工具' : msg.role === 'system' ? '系统' : 'AI 助理' }}
+                  </span>
+                  <span class="message-status" v-if="msg.status">{{ msg.status }}</span>
+                </div>
+                <div
+                  class="message-content"
+                  :class="{ 'markdown-body': msg.role === 'assistant' }"
+                >
+                  <div v-if="thinkingText && idx === messages.length - 1" class="thinking-status">{{ thinkingText }}</div>
+                  <div v-if="msg.images?.length" class="message-images">
+                      <img v-for="(img, i) in msg.images" :key="i" :src="`data:${img.mimeType};base64,${img.data}`" class="chat-image" />
+                    </div>
+                  <div v-html="msg.role === 'user' ? escHtml(msg.content) : renderMarkdown(msg.content)"></div>
                 </div>
               </div>
-            <div class="input-footer">
-              <div class="input-left">
-                <button class="toolbar-btn" @click="handleImageClick" title="上传图片">
+            </div>
+          </div>
+
+          <!-- 输入区 -->
+          <div class="chat-input-area">
+            <div class="input-wrapper">
+              <textarea
+                v-model="inputText"
+                class="chat-input"
+                :placeholder="`输入问题，Enter 发送... (支持 数据集 · 笔记库 · 代码操作)`"
+                @keydown.enter.exact.prevent="sendMessage"
+                @paste="handlePaste"
+                @compositionstart="composing = true"
+                @compositionend="composing = false"
+                ref="inputRef"
+                :disabled="isStreaming"
+                rows="1"
+              ></textarea>
+              <div v-if="pendingImages.length" class="image-preview-bar">
+                  <div v-for="(img, i) in pendingImages" :key="i" class="image-preview-item">
+                    <img :src="`data:${img.mimeType};base64,${img.data}`" class="image-preview-thumb" />
+                    <button class="image-preview-remove" @click="removeImage(i)">×</button>
+                  </div>
+                </div>
+              <div class="input-footer">
+                <div class="input-left">
+                  <button class="toolbar-btn" @click="handleImageClick" title="上传图片">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                        <polyline points="21 15 16 10 5 21"/>
+                      </svg>
+                    </button>
+                    <input ref="fileInputRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
+                    <select class="model-selector" v-model="selectedModel" :disabled="isStreaming" title="选择模型">
+                      <option value="">默认模型</option>
+                      <option v-for="m in piModels" :key="m.pattern" :value="m.pattern">
+                        {{ m.providerLabel }} · {{ m.name }}
+                      </option>
+                    </select>
+                  <span class="input-hint">Enter 发送 · Shift+Enter 换行 · pi agent 驱动</span>
+                </div>
+                <div class="input-right">
+                  <button
+                    class="send-btn"
+                    :disabled="!inputText.trim() || isStreaming"
+                    @click="sendMessage"
+                    :title="isStreaming ? '正在处理...' : '发送'"
+                  >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                      <circle cx="8.5" cy="8.5" r="1.5"/>
-                      <polyline points="21 15 16 10 5 21"/>
+                      <line x1="22" y1="2" x2="11" y2="13"/>
+                      <polygon points="22 2 15 22 11 13 2 9 22 2"/>
                     </svg>
                   </button>
-                  <input ref="fileInputRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
-                  <select class="model-selector" v-model="selectedModel" :disabled="isStreaming" title="选择模型">
-                    <option value="">默认模型</option>
-                    <option v-for="m in piModels" :key="m.pattern" :value="m.pattern">
-                      {{ m.providerLabel }} · {{ m.name }}
-                    </option>
-                  </select>
-                <span class="input-hint">Enter 发送 · Shift+Enter 换行 · pi agent 驱动</span>
+                </div>
               </div>
-              <div class="input-right">
-                <button
-                  class="send-btn"
-                  :disabled="!inputText.trim() || isStreaming"
-                  @click="sendMessage"
-                  :title="isStreaming ? '正在处理...' : '发送'"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                    <line x1="22" y1="2" x2="11" y2="13"/>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                  </svg>
-                </button>
-              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ========== 任务视图：自带左侧任务列表 ========== -->
+    <div v-if="props.view !== 'chat'" v-show="props.view === 'all' ? rightTab === 'tasks' : true" class="wb-view">
+      <div class="workbench-sidebar wb-sidebar-tasks">
+        <div class="sidebar-header">
+          <h3 class="sidebar-title">任务列表</h3>
+          <button class="btn btn-sm btn-primary" :disabled="taskTabProjectId === null" @click="openTaskModal(taskTabProjectId || 0)">+ 新建任务</button>
+        </div>
+        <div class="tasks-list-filter">
+          <select class="filter-select" v-model="taskTabProjectId">
+            <option v-for="p in projects" :key="p.id" :value="p.id">📁 {{ p.name }}</option>
+          </select>
+        </div>
+        <div class="tasks-list-scroll">
+          <div v-if="taskTabTasks.length === 0" class="tasks-list-empty">
+            <div class="empty-icon">🗂️</div>
+            <div class="empty-text">暂无任务，点击「+ 新建任务」创建</div>
+          </div>
+          <div
+            v-for="t in taskTabTasks"
+            :key="t.id"
+            class="tasks-list-item"
+            :class="{ active: taskSelectedId === t.id }"
+            @click="selectWorkbenchTask(t)"
+          >
+            <div class="list-item-head">
+              <span class="list-item-title">{{ t.title }}</span>
+              <span class="task-status-badge" :class="'status-' + t.status">{{ taskStatusText(t.status) }}</span>
+            </div>
+            <div class="list-item-meta">{{ taskTriggerText(t) }}</div>
+            <div v-if="t.last_run_at" class="list-item-meta list-item-last">
+              最近执行：{{ t.last_run_at }}（{{ t.last_status === 'SUCCESS' ? '成功' : t.last_status === 'FAILED' ? '失败' : t.last_status || '未执行' }}）
             </div>
           </div>
         </div>
-<!-- 项目详情弹窗 -->
-  <div v-if="showDetailModal" class="modal-overlay" @click.self="closeDetailModal">
-    <div class="project-detail-modal">
-      <div class="project-detail-header">
-        <span class="project-detail-icon">📁</span>
-        <span class="project-detail-name">{{ detailProject?.name }}</span>
-        <button class="modal-close" @click="closeDetailModal">✕</button>
       </div>
-      <div class="project-detail-body">
-        <div class="detail-row"><span class="detail-label">类型</span><span class="detail-value">{{ detailProject?.type }}</span></div>
-        <div class="detail-row"><span class="detail-label">文件夹</span><span class="detail-value">{{ detailProject?.dir || '未设置' }}</span></div>
-        <div class="detail-row" v-if="detailProject?.description"><span class="detail-label">描述</span><span class="detail-value">{{ detailProject?.description }}</span></div>
-      </div>
-    </div>
-  </div>
 
-  <!-- 变更审查弹窗 -->
-  <div v-if="showChangesModal" class="modal-overlay" @click.self="closeChangesModal">
-    <div class="modal-box changes-modal" @click.stop>
-      <div class="modal-header">
-        <h3>🛠️ 变更审查</h3>
-        <button class="modal-close" @click="closeChangesModal">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div v-if="changesLoading" class="changes-loading">正在收集改动...</div>
-        <template v-else-if="changesError">
-          <div class="changes-error">{{ changesError }}</div>
-        </template>
+      <!-- ========== 任务视图主体 ========== -->
+      <div class="workbench-tasks">
+        <div v-if="!taskSelected" class="tasks-detail-empty">
+          <div class="empty-icon">🗂️</div>
+          <div class="empty-text">选择左侧任务查看详情</div>
+        </div>
         <template v-else>
-          <div class="changes-meta" v-if="changes">
-            <span class="meta-badge" :class="{ isolated: changes.isolated }">{{ changes.isolated ? '🔒 隔离 worktree' : '📂 原目录执行' }}</span>
-            <span class="meta-badge">{{ changes.integrationStatus === 'integrated' ? '✅ 已合并' : changes.integrationStatus === 'pending_review' ? '⏳ 待提交' : '🧩 待合并' }}</span>
-            <span class="meta-badge" v-if="changes.pendingCommits">⬆ {{ changes.pendingCommits }} 待合并提交</span>
-          </div>
-          <div class="changes-summary" v-if="changes && changes.files">
-            <span>改动文件: {{ changes.files.length }}</span>
-            <span v-if="changes.latestCommit">最近提交: {{ changes.latestCommit.message.slice(0, 40) }}</span>
-          </div>
-          <div class="changes-files" v-if="changes && changes.files.length">
-            <div v-for="(f, i) in changes.files" :key="i" class="change-file">
-              <span class="change-type" :class="f.changeType">{{ typeLabel(f.changeType) }}</span>
-              <span class="change-path">{{ f.path }}</span>
-              <span class="change-stat" v-if="!f.binary">+{{ f.additions }} -{{ f.deletions }}</span>
+            <div class="tasks-detail-header">
+              <div class="detail-title-wrap">
+                <h3 class="tasks-detail-title">{{ taskSelected.title }}</h3>
+                <div class="detail-badges">
+                  <span class="task-status-badge" :class="'status-' + taskSelected.status">{{ taskStatusText(taskSelected.status) }}</span>
+                  <span v-if="taskSelected.last_status === 'FAILED'" class="task-status-badge status-FAILED">执行失败</span>
+                  <span v-if="taskSelected.status === 'in_progress'" class="running-dot"></span>
+                </div>
+              </div>
+              <div class="tasks-detail-actions">
+                <button class="btn btn-primary btn-sm" :disabled="taskSelected.status === 'in_progress' || taskSelected.followupRunning" @click="runTaskNow(taskSelected)">{{ taskSelected.status === 'in_progress' ? '执行中…' : '▶ 立即执行' }}</button>
+                <button class="btn btn-secondary btn-sm" @click="openTaskModal(taskSelected.project_id, taskSelected)">编辑</button>
+                <button class="btn btn-secondary btn-sm" @click="gotoTaskSession(taskSelected)">💬 进入对话</button>
+                <button class="btn btn-danger btn-sm" @click="deleteTaskFromWorkbench(taskSelected)">删除</button>
+              </div>
             </div>
-          </div>
-          <div class="changes-diff" v-if="changes && changes.diff">
-            <pre>{{ changes.diff.slice(0, 30000) }}</pre>
-          </div>
-        </template>
-      </div>
-      <div class="modal-footer changes-actions">
-        <span class="changes-hint" v-if="changes && changes.isolated">改动合并到主项目后仍不提交，需手动提交</span>
-        <button class="btn btn-secondary" @click="closeChangesModal">关闭</button>
-        <button v-if="changes?.integrationStatus === 'not_applied'" class="btn btn-primary" :disabled="changesBusy" @click="doApply">合并到主项目</button>
-        <button v-if="changes?.integrationStatus === 'pending_review'" class="btn btn-primary" :disabled="changesBusy" @click="doCommit">提交变更</button>
-        <button v-if="changes?.integrationStatus === 'pending_review'" class="btn btn-secondary" :disabled="changesBusy" @click="doAbort">撤销合并</button>
-        <button class="btn btn-danger" :disabled="changesBusy" @click="doDiscard">丢弃改动</button>
+
+            <div class="tasks-detail-scroll">
+              <div class="tasks-detail-info">
+                <span class="di-item">📁 {{ projectNameById(taskSelected.project_id) }}</span>
+                <span class="di-item">⏱ {{ taskTriggerText(taskSelected) }}</span>
+                <span class="di-item">🕐 {{ taskSelected.created_at || '-' }}</span>
+              </div>
+
+              <div v-if="taskSelected.prompt" class="tasks-detail-section">
+                <div class="section-title">任务诉求</div>
+                <div class="prompt-text">{{ taskSelected.prompt }}</div>
+              </div>
+
+              <div class="tasks-detail-section">
+                <div class="section-title">对话记录</div>
+                <div v-if="taskMessages.length === 0" class="empty-sub">暂无对话记录</div>
+                <div v-for="(msg, idx) in taskMessages" :key="idx" class="message" :class="msg.role">
+                  <div class="message-avatar">
+                    <span v-if="msg.role === 'user'">👤</span>
+                    <span v-else-if="msg.role === 'assistant'">🤖</span>
+                    <span v-else>🔧</span>
+                  </div>
+                  <div class="message-content-wrapper">
+                    <div class="message-header">
+                      <span class="message-author">{{ msg.role === 'user' ? '我' : msg.role === 'assistant' ? 'AI 助理' : msg.role === 'tool' ? '工具' : '系统' }}</span>
+                    </div>
+                    <div class="message-content" :class="{ 'markdown-body': msg.role === 'assistant' }">
+                      <div v-html="msg.role === 'user' ? escHtml(msg.content) : renderMarkdown(msg.content)"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tasks-detail-section">
+                <div class="section-title">执行记录</div>
+                <div v-if="taskExecutions.length === 0" class="empty-sub">暂无执行记录</div>
+                <div v-for="ex in taskExecutions" :key="ex.id" class="execution-card">
+                  <div class="exec-header">
+                    <span class="task-status-badge" :class="'status-' + ex.status">{{ ex.status }}</span>
+                    <span class="exec-trigger">{{ triggerLabel(ex.trigger_type) }}</span>
+                    <span class="exec-time">{{ ex.start_time }}</span>
+                    <span v-if="ex.end_time" class="exec-time">→ {{ ex.end_time }}</span>
+                  </div>
+                  <div v-if="ex.error_message" class="exec-error">❌ {{ ex.error_message }}</div>
+                  <div v-if="ex.result_text" class="exec-result markdown-body" v-html="renderMarkdown(ex.result_text)"></div>
+                </div>
+              </div>
+
+              <div class="tasks-detail-section">
+                <div class="section-title">追问</div>
+                <div v-if="taskSelected.followupDone" class="followup-reply markdown-body" v-html="renderMarkdown(taskSelected.followupReply)"></div>
+                <div v-if="taskSelected.followupRunning" class="followup-reply markdown-body followup-streaming" v-html="renderMarkdown(taskSelected.followupReply)"></div>
+                <div class="followup-input-row">
+                  <textarea
+                    v-model="taskSelected.followupText"
+                    class="followup-input"
+                    rows="2"
+                    placeholder="输入追问内容，将沿用该任务的原对话上下文继续执行…"
+                    @keydown.enter.exact.prevent="sendTaskFollowup(taskSelected)"
+                  ></textarea>
+                  <button class="btn btn-primary btn-sm" :disabled="!(taskSelected.followupText || '').trim() || taskSelected.followupRunning" @click="sendTaskFollowup(taskSelected)">{{ taskSelected.followupRunning ? '执行中…' : '发送' }}</button>
+                </div>
+              </div>
+            </div>
+          </template>
       </div>
     </div>
-  </div>
-</template>
-    </div>
+
+      <!-- 项目详情弹窗 -->
+      <div v-if="showDetailModal" class="modal-overlay" @click.self="closeDetailModal">
+        <div class="project-detail-modal">
+          <div class="project-detail-header">
+            <span class="project-detail-icon">📁</span>
+            <span class="project-detail-name">{{ detailProject?.name }}</span>
+            <button class="modal-close" @click="closeDetailModal">✕</button>
+          </div>
+          <div class="project-detail-body">
+            <div class="detail-row"><span class="detail-label">类型</span><span class="detail-value">{{ detailProject?.type }}</span></div>
+            <div class="detail-row"><span class="detail-label">文件夹</span><span class="detail-value">{{ detailProject?.dir || '未设置' }}</span></div>
+            <div class="detail-row" v-if="detailProject?.description"><span class="detail-label">描述</span><span class="detail-value">{{ detailProject?.description }}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 变更审查弹窗 -->
+      <div v-if="showChangesModal" class="modal-overlay" @click.self="closeChangesModal">
+        <div class="modal-box changes-modal" @click.stop>
+          <div class="modal-header">
+            <h3>🛠️ 变更审查</h3>
+            <button class="modal-close" @click="closeChangesModal">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div v-if="changesLoading" class="changes-loading">正在收集改动...</div>
+            <template v-else-if="changesError">
+              <div class="changes-error">{{ changesError }}</div>
+            </template>
+            <template v-else>
+              <div class="changes-meta" v-if="changes">
+                <span class="meta-badge" :class="{ isolated: changes.isolated }">{{ changes.isolated ? '🔒 隔离 worktree' : '📂 原目录执行' }}</span>
+                <span class="meta-badge">{{ changes.integrationStatus === 'integrated' ? '✅ 已合并' : changes.integrationStatus === 'pending_review' ? '⏳ 待提交' : '🧩 待合并' }}</span>
+                <span class="meta-badge" v-if="changes.pendingCommits">⬆ {{ changes.pendingCommits }} 待合并提交</span>
+              </div>
+              <div class="changes-summary" v-if="changes && changes.files">
+                <span>改动文件: {{ changes.files.length }}</span>
+                <span v-if="changes.latestCommit">最近提交: {{ changes.latestCommit.message.slice(0, 40) }}</span>
+              </div>
+              <div class="changes-files" v-if="changes && changes.files.length">
+                <div v-for="(f, i) in changes.files" :key="i" class="change-file">
+                  <span class="change-type" :class="f.changeType">{{ typeLabel(f.changeType) }}</span>
+                  <span class="change-path">{{ f.path }}</span>
+                  <span class="change-stat" v-if="!f.binary">+{{ f.additions }} -{{ f.deletions }}</span>
+                </div>
+              </div>
+              <div class="changes-diff" v-if="changes && changes.diff">
+                <pre>{{ changes.diff.slice(0, 30000) }}</pre>
+              </div>
+            </template>
+          </div>
+          <div class="modal-footer changes-actions">
+            <span class="changes-hint" v-if="changes && changes.isolated">改动合并到主项目后仍不提交，需手动提交</span>
+            <button class="btn btn-secondary" @click="closeChangesModal">关闭</button>
+            <button v-if="changes?.integrationStatus === 'not_applied'" class="btn btn-primary" :disabled="changesBusy" @click="doApply">合并到主项目</button>
+            <button v-if="changes?.integrationStatus === 'pending_review'" class="btn btn-primary" :disabled="changesBusy" @click="doCommit">提交变更</button>
+            <button v-if="changes?.integrationStatus === 'pending_review'" class="btn btn-secondary" :disabled="changesBusy" @click="doAbort">撤销合并</button>
+            <button class="btn btn-danger" :disabled="changesBusy" @click="doDiscard">丢弃改动</button>
+          </div>
+        </div>
+      </div>
 
     <!-- ========== 新建/编辑项目弹窗 ========== -->
     <div v-if="showProjectModal" class="modal-overlay" @click.self="closeProjectModal">
@@ -266,14 +401,104 @@
         </div>
       </div>
     </div>
+
+    <!-- ========== 定时任务弹窗 ========== -->
+    <div v-if="showTaskModal" class="modal-overlay" @click.self="closeTaskModal">
+      <div class="modal-box task-modal" @click.stop>
+        <div class="modal-header">
+          <h3>{{ taskIsEditing ? '编辑定时任务' : '新建定时任务' }}</h3>
+          <button class="modal-close" @click="closeTaskModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>归属项目 *</label>
+            <select class="form-control" v-model="taskForm.project_id" :disabled="taskIsEditing">
+              <option :value="null" disabled>请选择项目</option>
+              <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>任务标题 *</label>
+            <input v-model="taskForm.title" class="form-control" placeholder="例如：每日代码审查 / 修复登录超时">
+          </div>
+          <div class="form-group">
+            <label>任务诉求（AI 将据此执行）</label>
+            <textarea v-model="taskForm.prompt" class="form-control" rows="4" placeholder="描述要让 AI 做什么"></textarea>
+          </div>
+          <div class="form-group">
+            <label>执行方式</label>
+            <select class="form-control" v-model="taskForm.trigger_type">
+              <option value="now">⚡ 立即执行 - 创建后马上运行</option>
+              <option value="once">⏰ 指定时间 - 到点执行一次</option>
+              <option value="cycle">🔁 定时循环 - 按周期自动执行</option>
+            </select>
+          </div>
+          <div class="form-row" v-if="taskForm.trigger_type === 'once'">
+            <div class="form-group">
+              <label>执行时间 *</label>
+              <input type="datetime-local" class="form-control" v-model="taskForm.scheduled_start">
+            </div>
+          </div>
+          <template v-if="taskForm.trigger_type === 'cycle'">
+            <div class="form-row">
+              <div class="form-group">
+                <label>循环类型</label>
+                <select class="form-control" v-model="taskForm.cycle_type">
+                  <option value="daily">📅 每天</option>
+                  <option value="weekly">📆 每周</option>
+                  <option value="monthly">🗓️ 每月</option>
+                  <option value="cron">⚙️ Cron 表达式</option>
+                </select>
+              </div>
+              <div class="form-group" v-if="taskForm.cycle_type !== 'cron'">
+                <label>执行时间</label>
+                <input type="time" class="form-control" v-model="taskForm.cycle_time">
+              </div>
+            </div>
+            <div class="form-group" v-if="taskForm.cycle_type === 'weekly'">
+              <label>星期几（可多选）</label>
+              <div class="week-select">
+                <label v-for="d in weekDays" :key="d.value" class="week-chip">
+                  <input type="checkbox" :value="d.value" v-model="taskWeekDays">
+                  {{ d.label }}
+                </label>
+              </div>
+            </div>
+            <div class="form-group" v-if="taskForm.cycle_type === 'monthly'">
+              <label>每月几号</label>
+              <input type="number" class="form-control" v-model.number="taskMonthDays" min="1" max="31" placeholder="如 1 或 1,15">
+            </div>
+            <div class="form-group" v-if="taskForm.cycle_type === 'cron'">
+              <label>Cron 表达式</label>
+              <input type="text" class="form-control" v-model="taskForm.cycle_value" placeholder="如 0 9 * * *（每天早上 9 点）">
+            </div>
+          </template>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <label class="check-item">
+              <input type="checkbox" v-model="taskForm.notify_feishu">
+              完成后推送飞书
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="closeTaskModal">取消</button>
+          <button class="btn btn-danger" v-if="taskIsEditing" @click="deleteTaskFromWorkbench(taskEditingTask)">🗑️ 删除</button>
+          <button class="btn btn-primary" :disabled="!taskForm.title.trim()" @click="saveTaskModal">保存</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, nextTick, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, watch, onMounted, nextTick, onBeforeUnmount } from 'vue';
 import { marked } from 'marked';
 
 const API = window.electronAPI;
+
+const props = defineProps<{ view?: 'all' | 'chat' | 'tasks' }>();
+const emit = defineEmits<{ (e: 'go-chat', task: any): void }>();
 
 // ========== 状态 ==========
 const projects = ref<any[]>([]);
@@ -330,6 +555,305 @@ async function loadSessions(projectId: number) {
   }
 }
 
+// ========== 定时任务 ==========
+const codeTasks = ref<any[]>([]);
+
+async function loadTasks() {
+  try {
+    const list = await API.task.list();
+    const codeIds = new Set(projects.value.map(p => p.id));
+    codeTasks.value = (list || []).filter(t => codeIds.has(Number(t.project_id)));
+    if (codeTasks.value.length) {
+      for (const t of codeTasks.value) expandedProjects.add(Number(t.project_id));
+    }
+  } catch { codeTasks.value = []; }
+}
+
+function projectTaskList(projectId: number) {
+  return codeTasks.value
+    .filter(t => Number(t.project_id) === Number(projectId))
+    .sort((a: any, b: any) => {
+      const ta = a.created_at || '';
+      const tb = b.created_at || '';
+      if (ta !== tb) return ta < tb ? 1 : -1;
+      return (b.id || 0) - (a.id || 0);
+    });
+}
+
+function matchedSessionForTask(task: any) {
+  if (!task.session_id) return null;
+  const sessions = projectSessions[task.project_id] || [];
+  return sessions.find((s: any) => s.session_id === task.session_id) || null;
+}
+
+function sessionsWithoutTask(projectId: number) {
+  const sessions = projectSessions[projectId] || [];
+  const taskSessionIds = new Set(projectTaskList(projectId).map(t => t.session_id).filter(Boolean));
+  return sessions.filter((s: any) => !taskSessionIds.has(s.session_id));
+}
+
+// ========== 右侧任务 Tab ==========
+const rightTab = ref<'chat' | 'tasks'>('chat');
+
+const taskTabProjectId = ref<number | null>(null);
+const taskSelectedId = ref<number | null>(null);
+const taskMessages = ref<any[]>([]);
+const taskExecutions = ref<any[]>([]);
+
+const taskTabTasks = computed(() => {
+  if (taskTabProjectId.value === null) return [];
+  return projectTaskList(taskTabProjectId.value);
+});
+
+const taskSelected = computed(() => {
+  if (taskSelectedId.value === null) return null;
+  return codeTasks.value.find(t => t.id === taskSelectedId.value) || null;
+});
+
+function selectWorkbenchTask(t: any) {
+  taskSelectedId.value = t.id;
+  if (t.followupText === undefined) t.followupText = '';
+  if (t.followupReply === undefined) t.followupReply = '';
+  if (t.followupRunning === undefined) t.followupRunning = false;
+  if (t.followupDone === undefined) t.followupDone = false;
+  loadTaskDetail();
+}
+
+async function loadTaskDetail() {
+  const t = taskSelected.value;
+  if (!t) { taskMessages.value = []; taskExecutions.value = []; return; }
+  if (t.session_id) {
+    try { taskMessages.value = await API.coding.getMessages(t.session_id); } catch { taskMessages.value = []; }
+  } else {
+    taskMessages.value = [];
+  }
+  try { taskExecutions.value = await API.task.executions(t.id); } catch { taskExecutions.value = []; }
+}
+
+function ensureTaskSelected() {
+  const list = taskTabTasks.value;
+  if (list.length === 0) {
+    taskSelectedId.value = null;
+    taskMessages.value = [];
+    taskExecutions.value = [];
+    return;
+  }
+  if (taskSelectedId.value === null || !list.some(t => t.id === taskSelectedId.value)) {
+    taskSelectedId.value = list[0].id;
+  }
+  loadTaskDetail();
+}
+
+watch(taskTabProjectId, () => { ensureTaskSelected(); });
+
+async function gotoTaskSession(task: any) {
+  let session = matchedSessionForTask(task);
+  if (!session) {
+    await loadSessions(task.project_id);
+    session = matchedSessionForTask(task);
+  }
+  if (!session) {
+    alert('该任务尚未执行，先点击「▶ 立即执行」，执行后会生成对应对话');
+    return;
+  }
+  if (props.view === 'tasks') {
+    emit('go-chat', task);
+    return;
+  }
+  rightTab.value = 'chat';
+  await selectSession(session);
+}
+
+function openTaskSession(task: any) {
+  gotoTaskSession(task);
+}
+
+defineExpose({ openTaskSession });
+
+async function runTaskNow(task: any) {
+  try {
+    await API.task.execute(task.id);
+    await loadTasks();
+    await loadTaskDetail();
+    await reloadExpandedSessions();
+  } catch (e: any) { alert('执行失败: ' + (e.message || e)); }
+}
+
+async function deleteTaskFromWorkbench(task: any) {
+  if (!confirm(`确定删除任务「${task.title}」吗？此操作不可撤销。`)) return;
+  try {
+    await API.task.remove(task.id);
+    await loadTasks();
+    await reloadExpandedSessions();
+    ensureTaskSelected();
+  } catch (e: any) { alert('删除失败: ' + (e.message || e)); }
+}
+
+async function reloadExpandedSessions() {
+  for (const pid of Array.from(expandedProjects)) {
+    await loadSessions(pid);
+  }
+}
+
+function taskStatusText(status: string): string {
+  switch (status) {
+    case 'pending': return '待执行';
+    case 'in_progress': return '执行中';
+    case 'done': return '已完成';
+    default: return status;
+  }
+}
+
+function taskTriggerText(t: any): string {
+  if (t.trigger_type === 'once') return '指定时间 ' + (t.scheduled_start || '未设置');
+  if (t.trigger_type === 'cycle') {
+    switch (t.cycle_type) {
+      case 'weekly': return '每周' + (t.cycle_value || '') + ' ' + (t.cycle_time || '');
+      case 'monthly': return '每月' + (t.cycle_value || '') + '号 ' + (t.cycle_time || '');
+      case 'cron': return 'Cron ' + (t.cycle_value || '');
+      default: return '每天 ' + (t.cycle_time || '');
+    }
+  }
+  return '立即执行';
+}
+
+function projectNameById(pid: number | null): string {
+  if (pid == null) return '';
+  const p = projects.value.find(x => x.id === Number(pid));
+  return p ? p.name : '';
+}
+
+function triggerLabel(type: string): string {
+  switch (type) {
+    case 'manual': return '立即';
+    case 'scheduled': return '定时';
+    default: return type;
+  }
+}
+
+// ========== 定时任务弹窗 ==========
+const showTaskModal = ref(false);
+const taskIsEditing = ref(false);
+const taskEditingTask = ref<any>(null);
+const taskForm = ref<any>({});
+const taskWeekDays = ref<number[]>([]);
+const taskMonthDays = ref<number | string>(1);
+
+const weekDays = [
+  { label: '周一', value: 1 }, { label: '周二', value: 2 }, { label: '周三', value: 3 },
+  { label: '周四', value: 4 }, { label: '周五', value: 5 }, { label: '周六', value: 6 },
+  { label: '周日', value: 0 },
+];
+
+function openTaskModal(projectId: number, task?: any) {
+  taskIsEditing.value = !!task;
+  taskEditingTask.value = task || null;
+  if (task) {
+    taskForm.value = {
+      project_id: task.project_id, title: task.title, prompt: task.prompt,
+      trigger_type: task.trigger_type, scheduled_start: task.scheduled_start || '',
+      cycle_type: task.cycle_type || 'daily', cycle_value: task.cycle_value || '',
+      cycle_time: task.cycle_time || '09:00', notify_feishu: !!task.notify_feishu,
+    };
+    taskWeekDays.value = String(task.cycle_value || '').split(',').filter(Boolean).map(Number);
+    taskMonthDays.value = task.cycle_value || 1;
+  } else {
+    taskForm.value = {
+      project_id: projectId, title: '', prompt: '', trigger_type: 'now',
+      scheduled_start: '', cycle_type: 'daily', cycle_value: '', cycle_time: '09:00',
+      notify_feishu: false,
+    };
+    taskWeekDays.value = [];
+    taskMonthDays.value = 1;
+  }
+  showTaskModal.value = true;
+}
+
+function closeTaskModal() {
+  showTaskModal.value = false;
+  taskEditingTask.value = null;
+}
+
+async function saveTaskModal() {
+  const t = taskForm.value;
+  if (!t.project_id) { alert('请选择归属项目'); return; }
+  if (!t.title.trim()) { alert('请输入任务标题'); return; }
+  if (t.trigger_type === 'once' && !t.scheduled_start) { alert('指定时间任务请选择执行时间'); return; }
+  let cycleValue = t.cycle_value || '';
+  if (t.cycle_type === 'weekly') cycleValue = taskWeekDays.value.join(',');
+  if (t.cycle_type === 'monthly') cycleValue = String(taskMonthDays.value || 1);
+  const data = {
+    title: t.title,
+    prompt: t.prompt,
+    task_type: 'coding',
+    project_id: t.project_id,
+    trigger_type: t.trigger_type,
+    scheduled_start: t.trigger_type === 'once' ? t.scheduled_start : '',
+    cycle_type: t.trigger_type === 'cycle' ? t.cycle_type : '',
+    cycle_value: t.trigger_type === 'cycle' ? cycleValue : '',
+    cycle_time: t.trigger_type === 'cycle' ? t.cycle_time : '',
+    output_target: '',
+    notify_feishu: t.notify_feishu ? 1 : 0,
+    status: 'pending',
+  };
+  try {
+    if (taskIsEditing.value) {
+      await API.task.update(taskEditingTask.value.id, data);
+    } else {
+      const r = await API.task.add(data);
+      if (data.trigger_type === 'now') await API.task.execute(r.id);
+    }
+    showTaskModal.value = false;
+    taskEditingTask.value = null;
+    await loadTasks();
+    await reloadExpandedSessions();
+  } catch (e: any) { alert('操作失败: ' + (e.message || e)); }
+}
+
+// ========== 任务追问 ==========
+async function sendTaskFollowup(task: any) {
+  const q = (task.followupText || '').trim();
+  if (!q || task.followupRunning) return;
+  task.followupText = '';
+  task.followupRunning = true;
+  task.followupDone = false;
+  task.followupReply = '> ' + q + '\n\n';
+  try {
+    const ok = await API.task.followup(task.id, q);
+    if (!ok) {
+      task.followupRunning = false;
+      task.followupReply += '\n❌ 追问失败：任务不存在或正在执行中';
+    }
+  } catch (e: any) {
+    task.followupRunning = false;
+    task.followupDone = true;
+    task.followupReply += '\n❌ ' + (e.message || e);
+  }
+}
+
+function handleTaskFollowupDelta(payload: any) {
+  const t = codeTasks.value.find((x: any) => x.id === payload.taskId);
+  if (t && t.followupRunning) t.followupReply += payload.delta;
+}
+
+function handleTaskFollowupDone(payload: any) {
+  const t = codeTasks.value.find((x: any) => x.id === payload.taskId);
+  if (t) { t.followupRunning = false; t.followupDone = true; t.followupReply = payload.text || t.followupReply; }
+  loadTasks();
+}
+
+function handleTaskFollowupError(payload: any) {
+  const t = codeTasks.value.find((x: any) => x.id === payload.taskId);
+  if (t) { t.followupRunning = false; t.followupDone = true; t.followupReply += '\n\n❌ ' + (payload.error || '执行出错'); }
+  loadTasks();
+}
+
+function onTaskChanged() {
+  loadTasks();
+  reloadExpandedSessions();
+  ensureTaskSelected();
+}
+
 async function loadMessages(sessionId: string) {
   try {
     const msgs = await API.coding.getMessages(sessionId);
@@ -381,6 +905,7 @@ function toggleProject(projectId: number) {
 // ========== 对话选择 ==========
 async function selectSession(session: any) {
   if (isStreaming.value) return;
+  rightTab.value = 'chat';
   currentSessionId.value = session.id;
   currentSession.value = session;
   await loadMessages(session.session_id || session.id);
@@ -827,6 +1352,7 @@ async function saveProject() {
     }
     closeProjectModal();
     await loadProjects();
+    await loadTasks();
     // 选中新项目
     if (projects.value.length > 0 && !editingProject.value) {
       const firstProject = projects.value[0];
@@ -856,6 +1382,7 @@ async function deleteProject(project: any) {
     }
     delete projectSessions[project.id];
     await loadProjects();
+    await loadTasks();
   } catch (e: any) {
     alert('删除失败: ' + (e.message || ''));
   }
@@ -865,6 +1392,12 @@ async function deleteProject(project: any) {
 onMounted(async () => {
   await loadProjects();
   await loadPiModels();
+  await loadTasks();
+  if (taskTabProjectId.value === null) {
+    const withTasks = codeTasks.value[0]?.project_id;
+    taskTabProjectId.value = withTasks ?? projects.value[0]?.id ?? null;
+  }
+  ensureTaskSelected();
   if (projects.value.length > 0) {
     const firstProject = projects.value[0];
     if (!firstProject) return;
@@ -875,6 +1408,10 @@ onMounted(async () => {
       await selectSession(sessions[0]);
     }
   }
+  API.on('task:changed', onTaskChanged);
+  API.on('task:followup:delta', handleTaskFollowupDelta);
+  API.on('task:followup:done', handleTaskFollowupDone);
+  API.on('task:followup:error', handleTaskFollowupError);
 });
 
 onBeforeUnmount(() => {
@@ -883,23 +1420,49 @@ onBeforeUnmount(() => {
   API.removeAllListeners('coding:tool');
   API.removeAllListeners('coding:done');
   API.removeAllListeners('coding:error');
+  API.removeAllListeners('task:changed');
+  API.removeAllListeners('task:followup:delta');
+  API.removeAllListeners('task:followup:done');
+  API.removeAllListeners('task:followup:error');
 });
 </script>
 
 <style scoped>
 .coding-workbench {
   display: flex;
+  flex-direction: column;
   height: 100%;
+}
+
+/* 每个视图自带左栏 + 主体 */
+.wb-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
 }
 
 /* ========== 左栏 ========== */
 .workbench-sidebar {
-  width: 240px;
-  min-width: 240px;
+  width: 280px;
+  min-width: 280px;
   background: #f8fafc;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+}
+
+/* 任务/代码库视图左栏：对齐笔记任务 */
+.wb-sidebar-tasks,
+.wb-sidebar-chat {
+  width: 320px;
+  min-width: 320px;
+  background: white;
+}
+
+.wb-sidebar-tasks .sidebar-header,
+.wb-sidebar-chat .sidebar-header {
+  padding: 12px 16px;
 }
 
 .sidebar-header {
@@ -1071,6 +1634,22 @@ onBeforeUnmount(() => {
   background: rgba(99, 102, 241, 0.06);
 }
 
+/* 任务状态徽标 */
+.task-status-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.task-status-badge.status-pending { background: rgba(251, 146, 60, 0.12); color: #fb923c; }
+.task-status-badge.status-in_progress { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
+.task-status-badge.status-done { background: rgba(34, 197, 94, 0.12); color: #22c55e; }
+.task-status-badge.status-RUNNING { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
+.task-status-badge.status-SUCCESS { background: rgba(34, 197, 94, 0.12); color: #22c55e; }
+.task-status-badge.status-FAILED { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
+
 .sidebar-empty {
   flex: 1;
   display: flex;
@@ -1092,14 +1671,304 @@ onBeforeUnmount(() => {
   color: #94a3b8;
 }
 
-/* ========== 右栏 ========== */
-.workbench-main {
+/* ========== 顶部视图切换 ========== */
+.workbench-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: white;
+  flex-shrink: 0;
+  padding: 0 12px;
+  gap: 4px;
+}
+
+.workbench-tab {
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  border-radius: 0;
+}
+
+.workbench-tab:hover {
+  color: var(--text-primary);
+  background: var(--hover);
+}
+
+.workbench-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* 对话 Tab */
+.workbench-chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 任务 Tab */
+.workbench-tasks {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tasks-list-filter {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.filter-select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  outline: none;
+  background: white;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.tasks-list-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.tasks-list-empty {
+  padding: 32px 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.tasks-list-empty .empty-icon {
+  font-size: 28px;
+  opacity: 0.3;
+  margin-bottom: 8px;
+}
+
+.tasks-list-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.15s;
+  border: 1px solid transparent;
+}
+
+.tasks-list-item:hover { background: rgba(99, 102, 241, 0.05); }
+.tasks-list-item.active { background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.25); }
+
+.list-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.list-item-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-item-last { color: var(--text-muted); }
+
+/* 任务详情 */
+.tasks-detail-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f8fafc;
+}
+
+.tasks-detail-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  background: white;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
 }
+
+.tasks-detail-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  background: white;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.detail-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tasks-detail-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tasks-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.tasks-detail-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.tasks-detail-info {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.tasks-detail-section {
+  background: white;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 18px;
+  margin-bottom: 14px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.prompt-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f8fafc;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  line-height: 1.6;
+}
+
+.empty-sub { font-size: 13px; color: var(--text-muted); }
+
+/* 执行记录 */
+.execution-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.exec-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.exec-trigger, .exec-time { font-size: 12px; color: var(--text-muted); }
+
+.exec-error {
+  font-size: 13px;
+  color: #ef4444;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.exec-result {
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: #f8fafc;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  line-height: 1.6;
+}
+
+/* 追问 */
+.followup-reply {
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: #f8fafc;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.followup-streaming::after {
+  content: '▋';
+  color: var(--primary);
+  animation: blink 1s infinite;
+}
+
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+.followup-input-row { display: flex; gap: 8px; align-items: flex-end; }
+.followup-input { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; outline: none; resize: vertical; font-family: inherit; }
+.followup-input:focus { border-color: var(--primary); }
+
+.running-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #3b82f6; animation: pulse 1s infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.btn-xs { padding: 4px 10px; font-size: 12px; }
 
 .workbench-empty {
   flex: 1;
@@ -1596,6 +2465,18 @@ onBeforeUnmount(() => {
 .input-with-btn .form-control {
   flex: 1;
 }
+
+/* 定时任务弹窗 */
+.task-modal { width: 560px; }
+
+.form-row { display: flex; gap: 12px; }
+.form-row .form-group { flex: 1; }
+select.form-control { cursor: pointer; }
+textarea.form-control { resize: vertical; min-height: 80px; font-family: inherit; }
+.check-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); padding: 8px 0; cursor: pointer; }
+.week-select { display: flex; gap: 8px; flex-wrap: wrap; }
+.week-chip { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; cursor: pointer; user-select: none; }
+.week-chip:hover { border-color: var(--primary); }
 
 /* 项目详情卡片 */
 /* 项目详情弹窗 */

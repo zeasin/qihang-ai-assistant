@@ -46,8 +46,7 @@ const routes = [
   },
   {
     path: '/coding',
-    name: 'Coding',
-    component: () => import('@/views/ProjectWorkbenchView.vue')
+    redirect: '/planner'
   },
   {
     path: '/config',
