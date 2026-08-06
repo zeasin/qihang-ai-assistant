@@ -1,5 +1,14 @@
 <template>
   <div class="chat-home">
+    <!-- ========== 顶部视图切换 ========== -->
+    <div class="view-tabs">
+      <button class="view-tab" :class="{ active: activeView === 'chat' }" @click="activeView = 'chat'">💬 对话</button>
+      <button class="view-tab" :class="{ active: activeView === 'kb' }" @click="activeView = 'kb'">📚 知识库</button>
+      <button class="view-tab" :class="{ active: activeView === 'overview' }" @click="activeView = 'overview'">📊 概览</button>
+    </div>
+
+    <!-- ========== 对话视图 ========== -->
+    <div v-show="activeView === 'chat'" class="chat-body">
     <!-- ========== 左栏：对话列表 ========== -->
     <div class="chat-sidebar">
       <div class="sidebar-header">
@@ -145,13 +154,26 @@
         </div>
       </template>
     </div>
+    </div>
+
+    <!-- ========== 知识库视图 ========== -->
+    <div v-show="activeView === 'kb'" class="chat-body kb-body">
+      <NotesView />
+    </div>
+
+    <!-- ========== 概览视图 ========== -->
+    <div v-show="activeView === 'overview'" class="chat-body overview-body">
+      <OverviewView />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue';
+import { ref, onMounted, nextTick, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import { useRoute } from 'vue-router';
 import { marked } from 'marked';
+const NotesView = defineAsyncComponent(() => import('@/views/NotesView.vue'));
+const OverviewView = defineAsyncComponent(() => import('@/views/OverviewView.vue'));
 
 // 配置 marked 以启用换行和 GFM
 marked.setOptions({
@@ -185,6 +207,8 @@ const modelsLoaded = ref(false);
 
 const CHAT_STATE_KEY = 'chat_home_state';
 const CHAT_MODEL_KEY = 'chat_home_model';
+
+const activeView = ref<'chat' | 'kb' | 'overview'>('chat');
 
 // ========== 加载数据 ==========
 async function loadKbLibraries() {
@@ -538,9 +562,69 @@ onBeforeUnmount(() => {
 <style scoped>
 .chat-home {
   display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
   background: var(--bg-main);
+}
+
+/* ========== 顶部视图切换 ========== */
+.view-tabs {
+  display: flex;
+  border-bottom: 1px solid #e8ecf1;
+  background: white;
+  flex-shrink: 0;
+  padding: 0 16px;
+  gap: 4px;
+}
+
+.view-tab {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  border-radius: 0;
+}
+
+.view-tab:hover {
+  color: var(--text-primary);
+  background: var(--hover);
+}
+
+.view-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.kb-body {
+  background: white;
+}
+
+.kb-body :deep(.notes-view) {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.overview-body {
+  background: var(--bg-main);
+}
+
+.overview-body :deep(.overview-view) {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ========== 左栏 ========== */
