@@ -1774,7 +1774,10 @@ ipcMain.handle('aitool:image:setConfig', (_, { baseUrl, apiKey, model }) => {
 
 app.whenReady().then(async () => {
   startupElapsed('whenReady fired');
-  if (process.platform !== 'darwin') {
+  if (process.platform === 'darwin') {
+    app.setName('启航AI工作台');
+    try { app.dock?.setIcon(getWindowIcon()); } catch {}
+  } else {
     Menu.setApplicationMenu(null);
   }
   // 命令行迁移模式：electron . --migrate-cloud

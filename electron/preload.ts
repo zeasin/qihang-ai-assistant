@@ -9,6 +9,7 @@ const VALID_CHANNELS = [
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  platform: process.platform,
   app: {
     version: () => ipcRenderer.invoke('app:version'),
     firstRun: () => ipcRenderer.invoke('app:firstRun'),

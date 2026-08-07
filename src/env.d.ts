@@ -13,6 +13,7 @@ declare module '*.vue' {
 }
 
 interface ElectronAPI {
+  platform: string;
   app: {
     version: () => Promise<string>;
     firstRun: () => Promise<{ firstRun: boolean }>;
