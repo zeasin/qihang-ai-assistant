@@ -100,6 +100,21 @@ async function getSession(opts: {
     if (customTools.length && handle.customTools.length !== customTools.length) {
       logger.warn('[PiAgent] session %s already created with %d tools, ignoring new %d tools', sessionId, handle.customTools.length, customTools.length);
     }
+    // 会话已缓存但请求的模型不同：立即 resolve 并 setModel，更新 currentModelPattern，避免后面再重复 set
+    if (modelPattern && modelPattern !== handle.currentModelPattern) {
+      try {
+        const idx = modelPattern.indexOf('/');
+        if (idx >= 0) {
+          const model = (await getRuntime()).modelRegistry.find(modelPattern.slice(0, idx), modelPattern.slice(idx + 1));
+          if (model) {
+            await handle.session.setModel(model);
+            handle.currentModelPattern = modelPattern;
+          }
+        }
+      } catch (e: any) {
+        logger.warn('[PiAgent] setModel on cached session failed: %s', e.message);
+      }
+    }
     return handle;
   }
 

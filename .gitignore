@@ -23,3 +23,4 @@ app.log.*.gz
 src/main/resources/application-dev.yml
 日报_*.md
 analysis
+.aider*
