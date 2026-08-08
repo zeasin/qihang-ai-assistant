@@ -5,7 +5,10 @@ import { run, qOne } from './database';
 
 export interface BuiltinField {
   name: string;
-  type?: string;
+  displayName?: string;
+  type?: 'text' | 'textarea' | 'number' | 'money' | 'date' | 'datetime' | 'select';
+  required?: boolean;
+  options?: string[];
 }
 
 export interface BuiltinDatasetDef {
@@ -55,9 +58,14 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '客户基本信息与分级',
             schema: {
               fields: [
-                { name: '客户名称' }, { name: '联系人' }, { name: '电话' },
-                { name: '邮箱' }, { name: '地址' }, { name: '行业' },
-                { name: '来源' }, { name: '客户等级' },
+                { name: '客户名称', type: 'text', required: true },
+                { name: '联系人', type: 'text' },
+                { name: '电话', type: 'text' },
+                { name: '邮箱', type: 'text' },
+                { name: '地址', type: 'textarea' },
+                { name: '行业', type: 'select', options: ['互联网', '贸易', '教育', '制造', '金融'] },
+                { name: '来源', type: 'select', options: ['官网咨询', '老客户转介绍', '展会', '广告投放', '电话营销'] },
+                { name: '客户等级', type: 'select', options: ['A', 'B', 'C', 'D'] },
               ],
               typeOptions: ['企业', '个人'],
               statusOptions: ['潜在客户', '跟进中', '已成交', '已流失'],
@@ -74,8 +82,12 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '销售机会与推进阶段',
             schema: {
               fields: [
-                { name: '线索名称' }, { name: '关联客户' }, { name: '预计金额' },
-                { name: '负责人' }, { name: '预计成交日期' }, { name: '备注' },
+                { name: '线索名称', type: 'text', required: true },
+                { name: '关联客户', type: 'text' },
+                { name: '预计金额', type: 'money' },
+                { name: '负责人', type: 'text' },
+                { name: '预计成交日期', type: 'date' },
+                { name: '备注', type: 'textarea' },
               ],
               statusOptions: ['新线索', '洽谈中', '已成交', '已流失'],
             },
@@ -90,8 +102,11 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '客户拜访与沟通记录',
             schema: {
               fields: [
-                { name: '关联客户' }, { name: '跟进方式' }, { name: '跟进内容' },
-                { name: '负责人' }, { name: '下次跟进时间' },
+                { name: '关联客户', type: 'text', required: true },
+                { name: '跟进方式', type: 'select', options: ['电话', '拜访', '微信', '邮件', '线上会议'] },
+                { name: '跟进内容', type: 'textarea' },
+                { name: '负责人', type: 'text' },
+                { name: '下次跟进时间', type: 'date' },
               ],
               statusOptions: ['待跟进', '已跟进'],
             },
@@ -122,9 +137,14 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '商品档案与库存预警',
             schema: {
               fields: [
-                { name: '商品名称' }, { name: '商品编码' }, { name: '分类' },
-                { name: '单位' }, { name: '成本价' }, { name: '销售价' },
-                { name: '当前库存' }, { name: '库存预警值' },
+                { name: '商品名称', type: 'text', required: true },
+                { name: '商品编码', type: 'text' },
+                { name: '分类', type: 'text' },
+                { name: '单位', type: 'select', options: ['个', '件', '张', '台', '箱'] },
+                { name: '成本价', type: 'money' },
+                { name: '销售价', type: 'money' },
+                { name: '当前库存', type: 'number' },
+                { name: '库存预警值', type: 'number' },
               ],
               typeOptions: ['原材料', '成品', '耗材'],
               statusOptions: ['在售', '停售'],
@@ -141,8 +161,12 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '供应商档案与结算信息',
             schema: {
               fields: [
-                { name: '供应商名称' }, { name: '联系人' }, { name: '电话' },
-                { name: '地址' }, { name: '主营商品' }, { name: '账期天数' },
+                { name: '供应商名称', type: 'text', required: true },
+                { name: '联系人', type: 'text' },
+                { name: '电话', type: 'text' },
+                { name: '地址', type: 'textarea' },
+                { name: '主营商品', type: 'text' },
+                { name: '账期天数', type: 'number' },
               ],
               statusOptions: ['合作中', '已停用'],
             },
@@ -157,9 +181,14 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '采购单与入库记录',
             schema: {
               fields: [
-                { name: '采购单号' }, { name: '供应商' }, { name: '商品' },
-                { name: '数量' }, { name: '单价' }, { name: '总金额' },
-                { name: '入库日期' }, { name: '经办人' },
+                { name: '采购单号', type: 'text', required: true },
+                { name: '供应商', type: 'text' },
+                { name: '商品', type: 'text' },
+                { name: '数量', type: 'number' },
+                { name: '单价', type: 'money' },
+                { name: '总金额', type: 'money' },
+                { name: '入库日期', type: 'date' },
+                { name: '经办人', type: 'text' },
               ],
               statusOptions: ['已入库'],
             },
@@ -174,9 +203,14 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '销售单与出库记录',
             schema: {
               fields: [
-                { name: '销售单号' }, { name: '客户' }, { name: '商品' },
-                { name: '数量' }, { name: '单价' }, { name: '总金额' },
-                { name: '出库日期' }, { name: '经办人' },
+                { name: '销售单号', type: 'text', required: true },
+                { name: '客户', type: 'text' },
+                { name: '商品', type: 'text' },
+                { name: '数量', type: 'number' },
+                { name: '单价', type: 'money' },
+                { name: '总金额', type: 'money' },
+                { name: '出库日期', type: 'date' },
+                { name: '经办人', type: 'text' },
               ],
               statusOptions: ['已出库'],
             },
@@ -207,9 +241,14 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '工单受理与处理记录',
             schema: {
               fields: [
-                { name: '工单编号' }, { name: '标题' }, { name: '客户' },
-                { name: '负责人' }, { name: '优先级' }, { name: '创建日期' },
-                { name: '完成日期' }, { name: '问题描述' },
+                { name: '工单编号', type: 'text', required: true },
+                { name: '标题', type: 'text' },
+                { name: '客户', type: 'text' },
+                { name: '负责人', type: 'text' },
+                { name: '优先级', type: 'select', options: ['高', '中', '低'] },
+                { name: '创建日期', type: 'date' },
+                { name: '完成日期', type: 'date' },
+                { name: '问题描述', type: 'textarea' },
               ],
               typeOptions: ['故障报修', '咨询', '投诉', '需求'],
               statusOptions: ['待受理', '处理中', '已完成', '已关闭'],
@@ -225,8 +264,12 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '签约服务客户档案',
             schema: {
               fields: [
-                { name: '客户名称' }, { name: '联系人' }, { name: '电话' },
-                { name: '服务类型' }, { name: '合同编号' }, { name: '到期日期' },
+                { name: '客户名称', type: 'text', required: true },
+                { name: '联系人', type: 'text' },
+                { name: '电话', type: 'text' },
+                { name: '服务类型', type: 'select', options: ['远程支持+季度巡检', '全年驻场', '季度巡检'] },
+                { name: '合同编号', type: 'text' },
+                { name: '到期日期', type: 'date' },
               ],
               typeOptions: ['驻场服务', '远程服务', '巡检服务'],
               statusOptions: ['服务中', '已到期'],
@@ -258,9 +301,13 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '项目主档案',
             schema: {
               fields: [
-                { name: '项目名称' }, { name: '项目编号' }, { name: '负责人' },
-                { name: '开始日期' }, { name: '截止日期' }, { name: '预算' },
-                { name: '客户' },
+                { name: '项目名称', type: 'text', required: true },
+                { name: '项目编号', type: 'text' },
+                { name: '负责人', type: 'text' },
+                { name: '开始日期', type: 'date' },
+                { name: '截止日期', type: 'date' },
+                { name: '预算', type: 'money' },
+                { name: '客户', type: 'text' },
               ],
               statusOptions: ['立项', '进行中', '已结项', '已暂停'],
             },
@@ -275,8 +322,12 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '项目任务分解与执行',
             schema: {
               fields: [
-                { name: '任务名称' }, { name: '所属项目' }, { name: '负责人' },
-                { name: '优先级' }, { name: '截止日期' }, { name: '进度' },
+                { name: '任务名称', type: 'text', required: true },
+                { name: '所属项目', type: 'text' },
+                { name: '负责人', type: 'text' },
+                { name: '优先级', type: 'select', options: ['高', '中', '低'] },
+                { name: '截止日期', type: 'date' },
+                { name: '进度', type: 'text' },
               ],
               statusOptions: ['待办', '进行中', '已完成'],
             },
@@ -291,8 +342,11 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '项目关键节点',
             schema: {
               fields: [
-                { name: '里程碑名称' }, { name: '所属项目' }, { name: '计划日期' },
-                { name: '实际日期' }, { name: '说明' },
+                { name: '里程碑名称', type: 'text', required: true },
+                { name: '所属项目', type: 'text' },
+                { name: '计划日期', type: 'date' },
+                { name: '实际日期', type: 'date' },
+                { name: '说明', type: 'textarea' },
               ],
               statusOptions: ['未达成', '已达成'],
             },
@@ -323,9 +377,13 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '招聘职位与编制',
             schema: {
               fields: [
-                { name: '职位名称' }, { name: '部门' }, { name: '招聘人数' },
-                { name: '薪资范围' }, { name: '负责人' }, { name: '发布日期' },
-                { name: '招聘渠道' },
+                { name: '职位名称', type: 'text', required: true },
+                { name: '部门', type: 'text' },
+                { name: '招聘人数', type: 'number' },
+                { name: '薪资范围', type: 'text' },
+                { name: '负责人', type: 'text' },
+                { name: '发布日期', type: 'date' },
+                { name: '招聘渠道', type: 'select', options: ['BOSS直聘', '猎聘', '智联招聘', '内推', '校园招聘'] },
               ],
               statusOptions: ['招聘中', '已招满', '已暂停'],
             },
@@ -340,8 +398,12 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '候选人档案',
             schema: {
               fields: [
-                { name: '姓名' }, { name: '应聘职位' }, { name: '电话' },
-                { name: '学历' }, { name: '工作经验' }, { name: '来源' },
+                { name: '姓名', type: 'text', required: true },
+                { name: '应聘职位', type: 'text' },
+                { name: '电话', type: 'text' },
+                { name: '学历', type: 'select', options: ['大专', '本科', '硕士', '博士'] },
+                { name: '工作经验', type: 'text' },
+                { name: '来源', type: 'select', options: ['BOSS直聘', '猎聘', '智联招聘', '内推', '校园招聘'] },
               ],
               statusOptions: ['待筛选', '已初筛', '已面试', '已录用', '已淘汰'],
             },
@@ -356,8 +418,12 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '面试计划与结果',
             schema: {
               fields: [
-                { name: '候选人' }, { name: '面试职位' }, { name: '面试官' },
-                { name: '面试时间' }, { name: '面试方式' }, { name: '评价' },
+                { name: '候选人', type: 'text', required: true },
+                { name: '面试职位', type: 'text' },
+                { name: '面试官', type: 'text' },
+                { name: '面试时间', type: 'datetime' },
+                { name: '面试方式', type: 'select', options: ['现场面试', '视频面试', '电话面试'] },
+                { name: '评价', type: 'textarea' },
               ],
               typeOptions: ['现场面试', '视频面试', '电话面试'],
               statusOptions: ['待面试', '已通过', '未通过'],
@@ -389,9 +455,14 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '合同主档案',
             schema: {
               fields: [
-                { name: '合同编号' }, { name: '合同名称' }, { name: '甲方' },
-                { name: '乙方' }, { name: '金额' }, { name: '签订日期' },
-                { name: '到期日期' }, { name: '负责人' },
+                { name: '合同编号', type: 'text', required: true },
+                { name: '合同名称', type: 'text' },
+                { name: '甲方', type: 'text' },
+                { name: '乙方', type: 'text' },
+                { name: '金额', type: 'money' },
+                { name: '签订日期', type: 'date' },
+                { name: '到期日期', type: 'date' },
+                { name: '负责人', type: 'text' },
               ],
               typeOptions: ['采购合同', '销售合同', '服务合同', '劳动合同'],
               statusOptions: ['履行中', '已到期', '已终止', '已完成'],
@@ -407,8 +478,11 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '合同回款明细',
             schema: {
               fields: [
-                { name: '关联合同' }, { name: '收款日期' }, { name: '金额' },
-                { name: '收款方式' }, { name: '经办人' },
+                { name: '关联合同', type: 'text', required: true },
+                { name: '收款日期', type: 'date' },
+                { name: '金额', type: 'money' },
+                { name: '收款方式', type: 'select', options: ['银行转账', '支付宝', '微信', '现金', '支票'] },
+                { name: '经办人', type: 'text' },
               ],
               statusOptions: ['已到账'],
             },
@@ -438,9 +512,14 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '资产卡片',
             schema: {
               fields: [
-                { name: '资产编号' }, { name: '资产名称' }, { name: '类别' },
-                { name: '型号' }, { name: '负责人' }, { name: '购置日期' },
-                { name: '金额' }, { name: '存放位置' },
+                { name: '资产编号', type: 'text', required: true },
+                { name: '资产名称', type: 'text' },
+                { name: '类别', type: 'select', options: ['电脑', '打印机', '服务器', '办公家具', '其他'] },
+                { name: '型号', type: 'text' },
+                { name: '负责人', type: 'text' },
+                { name: '购置日期', type: 'date' },
+                { name: '金额', type: 'money' },
+                { name: '存放位置', type: 'text' },
               ],
               typeOptions: ['电脑', '打印机', '服务器', '办公家具', '其他'],
               statusOptions: ['在用', '闲置', '维修中', '已报废'],
@@ -456,8 +535,12 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '资产维修历史',
             schema: {
               fields: [
-                { name: '资产名称' }, { name: '报修日期' }, { name: '故障描述' },
-                { name: '维修费用' }, { name: '维修商' }, { name: '完成日期' },
+                { name: '资产名称', type: 'text', required: true },
+                { name: '报修日期', type: 'date' },
+                { name: '故障描述', type: 'textarea' },
+                { name: '维修费用', type: 'money' },
+                { name: '维修商', type: 'text' },
+                { name: '完成日期', type: 'date' },
               ],
               statusOptions: ['维修中', '已修复'],
             },
@@ -488,8 +571,12 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '营业收入明细',
             schema: {
               fields: [
-                { name: '日期' }, { name: '来源' }, { name: '金额' },
-                { name: '收款方式' }, { name: '经办人' }, { name: '备注' },
+                { name: '日期', type: 'date' },
+                { name: '来源', type: 'text' },
+                { name: '金额', type: 'money' },
+                { name: '收款方式', type: 'select', options: ['银行转账', '支付宝', '微信', '现金', '支票'] },
+                { name: '经办人', type: 'text' },
+                { name: '备注', type: 'textarea' },
               ],
               typeOptions: ['销售回款', '服务费', '其他收入'],
               statusOptions: ['已到账'],
@@ -505,8 +592,12 @@ export const BUILTIN_SUITES: BuiltinSuiteDef[] = [
             description: '费用支出明细',
             schema: {
               fields: [
-                { name: '日期' }, { name: '用途' }, { name: '金额' },
-                { name: '付款方式' }, { name: '经办人' }, { name: '备注' },
+                { name: '日期', type: 'date' },
+                { name: '用途', type: 'text' },
+                { name: '金额', type: 'money' },
+                { name: '付款方式', type: 'select', options: ['对公转账', '支付宝', '微信', '现金', '其他'] },
+                { name: '经办人', type: 'text' },
+                { name: '备注', type: 'textarea' },
               ],
               typeOptions: ['采购', '办公', '差旅', '人力', '其他'],
               statusOptions: ['已支付'],
@@ -548,6 +639,43 @@ export function listBuiltinSuites() {
       })),
     })),
   }));
+}
+
+/** 升级旧版内置数据集：为已安装的内置数据集补齐字段类型/必填/选项（保留用户自定义字段与修改） */
+export function upgradeBuiltinSchemas(): number {
+  let upgraded = 0;
+  for (const suite of BUILTIN_SUITES) {
+    for (const mod of suite.modules) {
+      for (const ds of mod.datasets) {
+        const row = qOne<{ schema_json?: string }>('SELECT schema_json FROM data_center_datasets WHERE dataset_id = ?', ds.datasetId);
+        if (!row || !row.schema_json) continue;
+        let schema: any;
+        try { schema = JSON.parse(row.schema_json); } catch { continue; }
+        if (!schema || !Array.isArray(schema.fields)) continue;
+        const defMap = new Map<string, BuiltinField>();
+        ds.schema.fields.forEach(f => defMap.set(f.name, f));
+        let changed = false;
+        const fields = schema.fields.map((f: any) => {
+          if (!f || !f.name) return f;
+          const def = defMap.get(f.name);
+          if (!def) return f;
+          const out = { ...f };
+          if (!out.type && def.type) { out.type = def.type; changed = true; }
+          if (out.required === undefined && def.required !== undefined) { out.required = def.required; changed = true; }
+          if (!Array.isArray(out.options) && Array.isArray(def.options) && def.options.length) { out.options = def.options; changed = true; }
+          return out;
+        });
+        if (changed) {
+          run(
+            "UPDATE data_center_datasets SET schema_json = ?, updated_at = datetime('now', '+8 hours') WHERE dataset_id = ?",
+            JSON.stringify({ ...schema, fields }), ds.datasetId
+          );
+          upgraded++;
+        }
+      }
+    }
+  }
+  return upgraded;
 }
 
 export function applyBuiltinSuites(ids: string[]): { applied: string[]; skipped: string[]; failed: string[] } {

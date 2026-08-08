@@ -87,12 +87,12 @@
               <table class="preview-table" v-if="ds.recentRecords && ds.recentRecords.length > 0">
                 <thead>
                   <tr>
-                    <th v-for="col in getPreviewColumns(ds)" :key="col">{{ col }}</th>
+                    <th v-for="col in getPreviewColumns(ds)" :key="col">{{ (schemaFieldsMap(ds)[col] && schemaFieldsMap(ds)[col].displayName) || col }}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="rec in ds.recentRecords" :key="rec.id" class="pv-row" @click="viewRecordPortal(rec, ds)">
-                    <td v-for="col in getPreviewColumns(ds)" :key="col" :title="rec[col] || ''">{{ truncateText(rec[col], 24) }}</td>
+                    <td v-for="col in getPreviewColumns(ds)" :key="col" :title="rec[col] || ''">{{ truncateText(formatFieldValue(schemaFieldsMap(ds)[col], rec[col]), 24) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -198,13 +198,13 @@
             <thead>
               <tr>
                 <th class="th-status">状态</th>
-                <th v-for="col in fullViewColumns" :key="col" class="th-data">{{ col }}</th>
+                <th v-for="col in fullViewColumns" :key="col" class="th-data">{{ (fullViewFieldsMap[col] && fullViewFieldsMap[col].displayName) || col }}</th>
               </tr>
             </thead>
 <tbody>
                 <tr v-for="rec in fullViewRecords" :key="rec.id" class="fv-row" @click="viewRecordPortal(rec, fullViewDs)">
                   <td class="td-status" @click.stop><span class="badge badge-gray">{{ rec.status || '无' }}</span></td>
-                  <td v-for="col in fullViewColumns" :key="col" class="td-data" :title="rec[col] || ''">{{ truncateText(rec[col], 30) || '' }}</td>
+                  <td v-for="col in fullViewColumns" :key="col" class="td-data" :title="rec[col] || ''">{{ truncateText(formatFieldValue(fullViewFieldsMap[col], rec[col]), 30) || '' }}</td>
                 </tr>
               </tbody>
           </table>
@@ -219,7 +219,7 @@
 
     <!-- 数据集模态框 -->
     <div v-if="showDsModal" class="modal-overlay">
-      <div class="modal-box" @click.stop>
+      <div class="modal-box modal-box-ds" @click.stop>
         <div class="modal-header">
           <h3>{{ editingDsId ? '编辑数据集' : '新建数据集' }}</h3>
           <button class="btn btn-secondary" @click="showDsModal = false">✕</button>
@@ -237,16 +237,54 @@
             </select>
           </div>
           <div class="form-group">
-            <label>Schema 字段（每行一个字段名）</label>
-            <textarea class="form-control" v-model="dsForm.schema" rows="6" placeholder="例如：&#10;姓名&#10;电话&#10;邮箱&#10;地址"></textarea>
+            <div class="label-row">
+              <label>字段定义</label>
+              <button class="btn btn-sm btn-secondary" @click="addFieldRow">+ 添加字段</button>
+            </div>
+            <div class="field-editor">
+              <div v-for="(row, idx) in dsForm.fields" :key="idx" class="field-row">
+                <div class="field-row-grid">
+                  <input
+                    type="text" class="form-control form-control-sm"
+                    :placeholder="'显示名，如：客户名称'"
+                    :value="row.displayName"
+                    @input="row.displayName = ($event.target as HTMLInputElement).value; autoFillFieldName(row, idx)"
+                  >
+                  <input
+                    type="text" class="form-control form-control-sm"
+                    :value="row.name"
+                    @input="row.name = ($event.target as HTMLInputElement).value"
+                    placeholder="字段名(field_N)"
+                  >
+                  <select
+                    class="form-control form-control-sm field-type"
+                    :value="row.type"
+                    @change="row.type = ($event.target as HTMLSelectElement).value"
+                  >
+                    <option v-for="t in FIELD_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+                  </select>
+                  <input
+                    v-if="row.type === 'select'"
+                    type="text" class="form-control form-control-sm field-options"
+                    :value="(row.options || []).join(',')"
+                    @input="row.options = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)"
+                    placeholder="选项，逗号分隔"
+                  >
+                  <label class="field-required">
+                    <input type="checkbox" v-model="row.required"> 必填
+                  </label>
+                  <button class="btn btn-sm btn-secondary field-del" @click="removeFieldRow(idx)">×</button>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="form-group">
             <label>类型选项（每行一个，可选）</label>
-            <textarea class="form-control" v-model="dsForm.typeOptions" rows="5" placeholder="例如：&#10;个人&#10;企业"></textarea>
+            <textarea class="form-control" v-model="dsForm.typeOptions" rows="4" placeholder="例如：&#10;个人&#10;企业"></textarea>
           </div>
           <div class="form-group">
             <label>状态选项（每行一个，可选）</label>
-            <textarea class="form-control" v-model="dsForm.statusOptions" rows="5" placeholder="例如：&#10;待办&#10;进行中&#10;已完成"></textarea>
+            <textarea class="form-control" v-model="dsForm.statusOptions" rows="4" placeholder="例如：&#10;待办&#10;进行中&#10;已完成"></textarea>
           </div>
           <div class="form-group">
             <label>描述（可选）</label>
@@ -290,7 +328,7 @@
 
     <!-- 记录模态框 -->
     <div v-if="showRecordModal" class="modal-overlay" @click="showRecordModal = false">
-      <div class="modal-box" @click.stop>
+      <div class="modal-box modal-box-record" @click.stop>
         <div class="modal-header">
           <h3>{{ editingRecordId ? '编辑记录' : '新增记录' }}</h3>
           <button class="btn btn-secondary" @click="showRecordModal = false">✕</button>
@@ -308,9 +346,48 @@
               <option v-for="opt in recordTypeOptions" :key="opt" :value="opt">{{ opt }}</option>
             </select>
           </div>
-          <div v-for="field in recordFormFields" :key="field" class="form-group">
-            <label>{{ field }}</label>
-            <input type="text" class="form-control" v-model="recordForm[field]">
+          <div v-for="field in recordFormFields" :key="field.name" class="form-group">
+            <label>{{ field.displayName || field.name }}<span v-if="field.required" class="req-mark"> *</span></label>
+            <select
+              v-if="field.type === 'select'"
+              class="form-control" :value="recordForm[field.name] ?? ''"
+              @change="recordForm[field.name] = ($event.target as HTMLSelectElement).value"
+            >
+              <option value="" disabled>请选择</option>
+              <option v-for="opt in (field.options || [])" :key="opt" :value="opt">{{ opt }}</option>
+            </select>
+            <textarea
+              v-else-if="field.type === 'textarea'" class="form-control" rows="3"
+              :value="recordForm[field.name] ?? ''"
+              @input="recordForm[field.name] = ($event.target as HTMLTextAreaElement).value"
+            ></textarea>
+            <input
+              v-else-if="field.type === 'number'"
+              type="number" step="any" class="form-control"
+              :value="recordForm[field.name] ?? ''"
+              @input="recordForm[field.name] = ($event.target as HTMLInputElement).value"
+            >
+            <input
+              v-else-if="field.type === 'money'"
+              type="number" step="0.01" class="form-control"
+              :value="recordForm[field.name] ?? ''"
+              @input="recordForm[field.name] = ($event.target as HTMLInputElement).value"
+            >
+            <input
+              v-else-if="field.type === 'date'" type="date" class="form-control"
+              :value="recordForm[field.name] ?? ''"
+              @input="recordForm[field.name] = ($event.target as HTMLInputElement).value"
+            >
+            <input
+              v-else-if="field.type === 'datetime'" type="datetime-local" class="form-control"
+              :value="recordForm[field.name] ?? ''"
+              @input="recordForm[field.name] = ($event.target as HTMLInputElement).value"
+            >
+            <input
+              v-else type="text" class="form-control"
+              :value="recordForm[field.name] ?? ''"
+              @input="recordForm[field.name] = ($event.target as HTMLInputElement).value"
+            >
           </div>
         </div>
         <div class="modal-footer">
@@ -333,8 +410,8 @@
             <span class="value"><span class="badge badge-gray">{{ viewingRecord.status || '无' }}</span></span>
           </div>
           <div v-for="field in viewingRecordFields" :key="field" class="detail-row">
-            <span class="label">{{ field }}</span>
-            <span class="value">{{ viewingRecord[field] || '' }}</span>
+            <span class="label">{{ (viewingRecordFieldsMap[field] && viewingRecordFieldsMap[field].displayName) || field }}</span>
+            <span class="value">{{ formatFieldValue(viewingRecordFieldsMap[field], viewingRecord[field]) || '' }}</span>
           </div>
         </div>
         <div class="modal-footer">
@@ -385,6 +462,34 @@ import { marked } from 'marked';
 
 const API = (window as any).electronAPI;
 const route = useRoute();
+
+interface FieldDef {
+  name: string;
+  displayName?: string;
+  type: string;
+  required?: boolean;
+  options?: string[];
+  defaultValue?: string;
+}
+
+function normalizeType(t: string | undefined | null): string {
+  const valid = FIELD_TYPES.some(f => f.value === t);
+  return valid ? (t as string) : 'text';
+}
+
+const FIELD_TYPES: { value: string; label: string }[] = [
+  { value: 'text', label: '文本' },
+  { value: 'textarea', label: '多行文本' },
+  { value: 'number', label: '数字' },
+  { value: 'money', label: '金额' },
+  { value: 'date', label: '日期' },
+  { value: 'datetime', label: '日期时间' },
+  { value: 'select', label: '下拉选项' },
+];
+
+function newFieldRow(): FieldDef {
+  return { name: '', displayName: '', type: 'text', required: false, options: [], defaultValue: '' };
+}
 
 interface ModuleData {
   id: string;
@@ -569,35 +674,77 @@ async function deleteModule(mod: ModuleData) {
 
 const showDsModal = ref(false);
 const editingDsId = ref('');
-const dsForm = ref({ name: '', moduleId: '', description: '', schema: '', typeOptions: '', statusOptions: '' });
+const dsForm = ref({ name: '', moduleId: '', description: '', fields: [] as FieldDef[], typeOptions: '', statusOptions: '' });
 
 function showAddDataset() {
   editingDsId.value = '';
-  dsForm.value = { name: '', moduleId: '', description: '', schema: '', typeOptions: '', statusOptions: '' };
+  dsForm.value = { name: '', moduleId: '', description: '', fields: [newFieldRow()], typeOptions: '', statusOptions: '' };
   showDsModal.value = true;
 }
 
 function showEditDatasetPortal(mod: ModuleData, ds: DatasetData) {
   editingDsId.value = ds.datasetId;
+  const schema = (typeof ds.schema === 'string' ? JSON.parse(ds.schema) : ds.schema) || {};
   dsForm.value = {
     name: ds.name || '',
     moduleId: mod.id,
     description: ds.description || '',
-    schema: (ds.schema && ds.schema.fields) ? ds.schema.fields.map((f: any) => f.name).join('\n') : '',
-    typeOptions: (ds.schema && ds.schema.typeOptions) ? ds.schema.typeOptions.join('\n') : '',
-    statusOptions: (ds.schema && ds.schema.statusOptions) ? ds.schema.statusOptions.join('\n') : '',
+    fields: (schema.fields && schema.fields.length ? schema.fields : [newFieldRow()]).map((f: any) => ({
+      name: f.name || f.displayName || '',
+      displayName: f.displayName || f.name || '',
+      type: normalizeType(f.type),
+      required: !!f.required,
+      options: Array.isArray(f.options) ? f.options : [],
+      defaultValue: f.defaultValue !== undefined && f.defaultValue !== null ? String(f.defaultValue) : '',
+    })),
+    typeOptions: (schema.typeOptions || []).join('\n'),
+    statusOptions: (schema.statusOptions || []).join('\n'),
   };
   showDsModal.value = true;
+}
+
+function addFieldRow() {
+  dsForm.value.fields.push(newFieldRow());
+}
+
+function removeFieldRow(idx: number) {
+  dsForm.value.fields.splice(idx, 1);
+}
+
+function autoFillFieldName(row: FieldDef, idx: number) {
+  const raw = (row.name || '').trim();
+  if (!raw) {
+    row.name = 'field_' + (idx + 1);
+  }
 }
 
 async function saveDataset() {
   if (!dsForm.value.name.trim()) { alert('请输入数据集名称'); return; }
   if (!API) return;
-  const fields = dsForm.value.schema.split('\n').filter(s => s.trim()).map(s => ({ name: s.trim(), type: 'text' }));
+  const seen = new Set<string>();
+  const fields: any[] = [];
+  dsForm.value.fields.forEach((f, idx) => {
+    const displayName = (f.displayName || '').trim();
+    let name = (f.name || '').trim();
+    if (!name) name = 'field_' + (idx + 1);
+    if (!displayName && !name) return;
+    if (seen.has(name)) {
+      name = name + '_' + (seen.size + 1);
+    }
+    seen.add(name);
+    const field: any = {
+      name,
+      displayName: displayName || name,
+      type: normalizeType(f.type),
+      required: !!f.required,
+    };
+    if (field.type === 'select' && f.options && f.options.length) field.options = f.options.filter(Boolean);
+    fields.push(field);
+  });
   const schemaJson = JSON.stringify({
     fields,
-    typeOptions: dsForm.value.typeOptions.split('\n').filter(s => s.trim()),
-    statusOptions: dsForm.value.statusOptions.split('\n').filter(s => s.trim()),
+    typeOptions: dsForm.value.typeOptions.split('\n').map(s => s.trim()).filter(Boolean),
+    statusOptions: dsForm.value.statusOptions.split('\n').map(s => s.trim()).filter(Boolean),
   });
   try {
     const moduleId = dsForm.value.moduleId;
@@ -696,12 +843,14 @@ const fullViewMod = ref<ModuleData | null>(null);
 const fullViewDs = ref<DatasetData | null>(null);
 const fullViewRecords = ref<any[]>([]);
 const fullViewColumns = ref<string[]>([]);
+const fullViewFieldsMap = ref<Record<string, FieldDef>>({});
 const fullViewKeyword = ref('');
 
 function openFullView(mod: ModuleData, ds: DatasetData) {
   fullViewMod.value = mod;
   fullViewDs.value = ds;
   fullViewKeyword.value = '';
+  fullViewFieldsMap.value = schemaFieldsMap(ds);
   fullViewVisible.value = true;
   loadFullViewRecords();
 }
@@ -712,6 +861,7 @@ function closeFullView() {
   fullViewDs.value = null;
   fullViewRecords.value = [];
   fullViewColumns.value = [];
+  fullViewFieldsMap.value = {};
 }
 
 async function loadFullViewRecords() {
@@ -728,7 +878,7 @@ async function loadFullViewRecords() {
 const showRecordModal = ref(false);
 const editingRecordId = ref('');
 const recordForm = ref<any>({ status: '进行中' });
-const recordFormFields = ref<string[]>([]);
+const recordFormFields = ref<FieldDef[]>([]);
 const recordStatusOptions = ref<string[]>(['待办', '进行中', '已完成']);
 const recordTypeOptions = ref<string[]>([]);
 
@@ -736,6 +886,7 @@ const showDetailModal = ref(false);
 const viewingRecord = ref<any>(null);
 const viewingRecordDs = ref<any>(null);
 const viewingRecordFields = ref<string[]>([]);
+const viewingRecordFieldsMap = ref<Record<string, FieldDef>>({});
 
 const showImportModalFlag = ref(false);
 const importType = ref('json');
@@ -744,10 +895,18 @@ const importUrl = ref('');
 
 let currentRecordDs: any = null;
 
-function getSchemaFields(ds: any) {
+function getSchemaFields(ds: any): FieldDef[] {
   if (!ds) return [];
   const schema = typeof ds.schema === 'string' ? JSON.parse(ds.schema) : ds.schema;
-  return (schema && schema.fields) || [];
+  const fields = (schema && schema.fields) || [];
+  return fields.map((f: any) => ({
+    name: f.name || f.displayName || '',
+    displayName: f.displayName || f.name || '',
+    type: normalizeType(f.type),
+    required: !!f.required,
+    options: Array.isArray(f.options) ? f.options : [],
+    defaultValue: f.defaultValue !== undefined && f.defaultValue !== null ? String(f.defaultValue) : '',
+  })).filter((f: FieldDef) => f.name && f.name !== 'status' && f.name !== 'id' && f.name !== 'type' && f.name !== '类型');
 }
 
 function getSchemaOptions(ds: any, key: string) {
@@ -757,18 +916,24 @@ function getSchemaOptions(ds: any, key: string) {
   return Array.isArray(opts) && opts.length ? opts : [];
 }
 
+function fieldDefaultValue(field: FieldDef) {
+  if (field.defaultValue !== undefined && field.defaultValue !== null && String(field.defaultValue) !== '') {
+    return String(field.defaultValue);
+  }
+  return '';
+}
+
 function showAddRecord(dsArg?: any) {
   const ds = dsArg || fullViewDs.value;
   if (!ds) return;
   currentRecordDs = ds;
   editingRecordId.value = '';
-  const schemaFields = getSchemaFields(ds);
-  recordFormFields.value = schemaFields.map((f: any) => f.name || f.displayName).filter((f: string) => f !== 'status' && f !== 'id' && f !== 'type' && f !== '类型');
+  recordFormFields.value = getSchemaFields(ds);
   recordStatusOptions.value = [...getSchemaOptions(ds, 'statusOptions'), '待办', '进行中', '已完成'];
   recordTypeOptions.value = getSchemaOptions(ds, 'typeOptions');
   const form: any = { status: '进行中' };
   if (recordTypeOptions.value.length) form.type = recordTypeOptions.value[0];
-  recordFormFields.value.forEach((f: string) => { form[f] = ''; });
+  recordFormFields.value.forEach((f) => { form[f.name] = fieldDefaultValue(f); });
   recordForm.value = form;
   showRecordModal.value = true;
 }
@@ -776,12 +941,11 @@ function showAddRecord(dsArg?: any) {
 function editRecordPortal(mod: ModuleData | null, ds: DatasetData, rec: any) {
   currentRecordDs = ds;
   editingRecordId.value = rec.id;
-  const schemaFields = getSchemaFields(ds);
-  recordFormFields.value = schemaFields.map((f: any) => f.name || f.displayName).filter((f: string) => f !== 'status' && f !== 'id' && f !== 'type' && f !== '类型');
+  recordFormFields.value = getSchemaFields(ds);
   recordStatusOptions.value = [...getSchemaOptions(ds, 'statusOptions'), '待办', '进行中', '已完成'];
   recordTypeOptions.value = getSchemaOptions(ds, 'typeOptions');
   const form: any = { status: rec.status || '', type: rec.type || '' };
-  recordFormFields.value.forEach((f: string) => { form[f] = rec[f] || ''; });
+  recordFormFields.value.forEach((f) => { form[f.name] = rec[f.name] ?? ''; });
   recordForm.value = form;
   showRecordModal.value = true;
 }
@@ -789,8 +953,17 @@ function editRecordPortal(mod: ModuleData | null, ds: DatasetData, rec: any) {
 async function saveRecord() {
   const ds = currentRecordDs || fullViewDs.value;
   if (!ds || !API) return;
+  const missingReq: string[] = [];
   const record: any = {};
-  recordFormFields.value.forEach(f => { record[f] = recordForm.value[f] || ''; });
+  recordFormFields.value.forEach(f => {
+    const v = recordForm.value[f.name];
+    if ((v === null || v === undefined || v === '') && f.required) missingReq.push(f.displayName || f.name);
+    record[f.name] = v;
+  });
+  if (missingReq.length) {
+    alert('以下必填字段不能为空：' + missingReq.join('、'));
+    return;
+  }
   if (recordForm.value.status) record.status = recordForm.value.status;
   if (recordForm.value.type) record.type = recordForm.value.type;
   try {
@@ -804,7 +977,11 @@ async function saveRecord() {
       await loadFullViewRecords();
     }
     await loadAll();
-  } catch (e) { console.error('保存记录失败:', e); }
+    alert('已保存');
+  } catch (e: any) {
+    console.error('保存记录失败:', e);
+    alert('保存失败：' + ((e && e.message) || '未知错误'));
+  }
 }
 
 async function deleteRecordPortal(rec: any) {
@@ -821,6 +998,7 @@ async function deleteRecordPortal(rec: any) {
 function viewRecordPortal(rec: any, dsArg?: any) {
   viewingRecord.value = rec;
   viewingRecordDs.value = dsArg || null;
+  viewingRecordFieldsMap.value = dsArg ? schemaFieldsMap(dsArg) : {};
   viewingRecordFields.value = Object.keys(rec).filter(k => k !== 'id' && !k.startsWith('_'));
   showDetailModal.value = true;
 }
@@ -871,6 +1049,21 @@ async function doImport() {
 
 // ========== 工具函数 ==========
 
+function schemaFieldsMap(ds: any): Record<string, FieldDef> {
+  const map: Record<string, FieldDef> = {};
+  getSchemaFields(ds).forEach((f) => { map[f.name] = f; });
+  return map;
+}
+
+function formatFieldValue(field: FieldDef | undefined, value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (field && field.type === 'money') {
+    const n = Number(value);
+    if (!isNaN(n)) return '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  return String(value);
+}
+
 function buildRecordColumns(recs: any[]): string[] {
   const cols = new Set<string>();
   recs.forEach((r: any) => { Object.keys(r).forEach(k => { if (k !== 'id' && k !== '_created_at' && !k.startsWith('_')) cols.add(k); }); });
@@ -879,6 +1072,8 @@ function buildRecordColumns(recs: any[]): string[] {
 
 function getPreviewColumns(ds: DatasetData): string[] {
   if (!ds.recentRecords || ds.recentRecords.length === 0) return [];
+  const schemaCols = getSchemaFields(ds).map(f => f.name).filter(n => !['status', 'id', 'type', '类型'].includes(n));
+  if (schemaCols.length) return schemaCols.slice(0, 8);
   return buildRecordColumns(ds.recentRecords);
 }
 
@@ -1141,6 +1336,8 @@ onMounted(async () => {
   box-shadow: 0 10px 25px rgba(0,0,0,0.1); max-width: 90%;
   max-height: 90vh; overflow-y: auto; width: 480px;
 }
+.modal-box-ds { width: 720px; max-width: 720px; }
+.modal-box-record { width: 520px; max-width: 520px; }
 .modal-box-wide { width: 1200px; max-width: 1200px; height: 90vh; display: flex; flex-direction: column; }
 .modal-box-wide .modal-header { flex-shrink: 0; }
 .modal-box-wide .modal-body { flex: 1; overflow-y: auto; }
@@ -1159,13 +1356,29 @@ onMounted(async () => {
   display: block; font-size: 12px; font-weight: 500;
   color: var(--text-secondary); margin-bottom: 5px;
 }
+.label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+.label-row label { margin-bottom: 0; }
 .form-control {
   width: 100%; padding: 7px 10px; border: 1px solid var(--border);
   border-radius: var(--radius-sm); font-size: 13px; outline: none;
   transition: all 0.2s; background: white; box-sizing: border-box;
 }
 .form-control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.form-control-sm { padding: 5px 8px; font-size: 12px; }
 textarea.form-control { resize: vertical; font-family: inherit; }
+.field-editor {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 300px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px; background: #fafbfc;
+}
+.field-row-grid {
+  display: grid; grid-template-columns: 1fr 1fr 130px 1fr auto auto;
+  gap: 8px; align-items: center;
+}
+.field-required { display: flex; align-items: center; gap: 3px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.field-del { color: var(--danger); }
+.req-mark { color: var(--danger); }
 .detail-row {
   display: flex; justify-content: space-between; padding: 8px 0;
   border-bottom: 1px solid var(--border);

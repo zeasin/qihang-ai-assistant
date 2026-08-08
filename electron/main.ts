@@ -38,7 +38,7 @@ import { runPi, listPiModels, generateDailyReport as piGenerateDailyReport } fro
 import { buildNoteToolDefs, buildDataToolDefs, buildCodingToolDefs } from './services/tools';
 import { initCodingTasks, isCodingMessage, handleFeishuCodingMessage, getWorktreeService, listCodingProjects, collectSessionChanges, applySessionChanges, commitSessionChanges, abortSessionChanges, discardSessionChanges, latestCodingSessions, recordFeishuTask, followUpTask } from './services/coding-task';
 import * as aitool from './services/ai-tools';
-import { listBuiltinSuites, applyBuiltinSuites } from './services/builtin-datasets';
+import { listBuiltinSuites, applyBuiltinSuites, upgradeBuiltinSchemas } from './services/builtin-datasets';
 import * as backup from './services/backup';
 import { migrateLocalToCloud } from './services/migrate-cloud';
 import * as feishu from './services/feishu';
@@ -785,8 +785,54 @@ ipcMain.handle('ds:get', (_, { id }) => db.ds.get(id));
 ipcMain.handle('ds:query', (_, { datasetId, conditions }) => db.ds.query(datasetId, conditions));
 ipcMain.handle('ds:add', (_, params) => db.ds.add(params));
 ipcMain.handle('ds:updateMeta', (_, { id, data }) => db.ds.updateMeta(id, data));
-ipcMain.handle('ds:insert', (_, { datasetId, data }) => db.ds.insert(datasetId, data));
-ipcMain.handle('ds:updateRecord', (_, { id, data }) => db.ds.updateRecord(id, data));
+
+/** 按数据集 schema 的字段类型对记录值做校验与归一化（非法值抛错，由前端提示） */
+function normalizeRecordBySchema(datasetId: string, record: any): any {
+  if (!record) return record;
+  const dsRow = db.qOne('SELECT schema_json FROM data_center_datasets WHERE dataset_id = ?', datasetId);
+  if (!dsRow || !dsRow.schema_json) return record;
+  let schema: any = null;
+  try { schema = JSON.parse(dsRow.schema_json); } catch { return record; }
+  const fields = (schema && schema.fields) || [];
+  const out: any = { ...record };
+  for (const f of fields) {
+    if (!f || !f.name || !f.type) continue;
+    const raw = out[f.name];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const label = f.displayName || f.name;
+    const v = String(raw).trim();
+    if (f.type === 'number' || f.type === 'money') {
+      if (v === '') { delete out[f.name]; continue; }
+      const n = Number(v);
+      if (isNaN(n)) throw new Error(`字段「${label}」必须是数字，当前值: ${v}`);
+      out[f.name] = n;
+    } else if (f.type === 'date') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v) && isNaN(Date.parse(v))) {
+        throw new Error(`字段「${label}」必须是日期（如 2026-08-04），当前值: ${v}`);
+      }
+      out[f.name] = v.slice(0, 10);
+    } else if (f.type === 'datetime') {
+      if (isNaN(Date.parse(v))) {
+        throw new Error(`字段「${label}」必须是日期时间，当前值: ${v}`);
+      }
+    } else if (f.type === 'select' && Array.isArray(f.options) && f.options.length) {
+      if (!f.options.includes(v)) {
+        throw new Error(`字段「${label}」的值不在选项列表中: ${v}`);
+      }
+    }
+  }
+  return out;
+}
+
+ipcMain.handle('ds:insert', (_, { datasetId, data }) => {
+  const record = normalizeRecordBySchema(datasetId, data || {});
+  return db.ds.insert(datasetId, record);
+});
+ipcMain.handle('ds:updateRecord', (_, { id, data }) => {
+  const dsRow = db.qOne('SELECT dataset_id FROM data_center_records WHERE id = ?', id);
+  const record = dsRow ? normalizeRecordBySchema(dsRow.dataset_id, data || {}) : data;
+  return db.ds.updateRecord(id, record);
+});
 ipcMain.handle('ds:deleteRecord', (_, { id }) => db.ds.deleteRecord(id));
 ipcMain.handle('ds:remove', (_, { datasetId }) => db.ds.remove(datasetId));
 ipcMain.handle('ds:suites:list', () => listBuiltinSuites());
@@ -1817,6 +1863,14 @@ app.whenReady().then(async () => {
   }
   startupElapsed('db loaded');
   createTray();
+
+  // 旧版内置数据集 schema 升级：补齐字段类型/必填/选项（幂等）
+  try {
+    const n = upgradeBuiltinSchemas();
+    if (n > 0) logger.info('[Builtin] 已升级 %d 个内置数据集 schema', n);
+  } catch (e) {
+    logger.error('upgradeBuiltinSchemas error: %s', e);
+  }
 
   // 配置嵌入模型（从 config.json 读取）
   rag.configure({
