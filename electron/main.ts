@@ -39,6 +39,7 @@ import { buildNoteToolDefs, buildDataToolDefs, buildCodingToolDefs } from './ser
 import { initCodingTasks, isCodingMessage, handleFeishuCodingMessage, getWorktreeService, listCodingProjects, collectSessionChanges, applySessionChanges, commitSessionChanges, abortSessionChanges, discardSessionChanges, latestCodingSessions, recordFeishuTask, followUpTask } from './services/coding-task';
 import * as aitool from './services/ai-tools';
 import { listBuiltinSuites, applyBuiltinSuites, upgradeBuiltinSchemas } from './services/builtin-datasets';
+import { getSearchConfig, saveSearchConfig, webSearch } from './services/search';
 import * as backup from './services/backup';
 import { migrateLocalToCloud } from './services/migrate-cloud';
 import * as feishu from './services/feishu';
@@ -1166,6 +1167,26 @@ ipcMain.handle('pi:config:set', async (_, { providers }) => {
 });
 ipcMain.handle('pi:config:test', async (_, { baseUrl, apiKey, modelName }) => {
   return testBuiltinModelConnection({ baseUrl: String(baseUrl || ''), apiKey: String(apiKey || ''), modelName: String(modelName || '') });
+});
+
+// --- 网络搜索配置（免费多引擎默认可用，可选配博查/Serper API Key 增强） ---
+ipcMain.handle('search:config:get', () => getSearchConfig());
+ipcMain.handle('search:config:set', async (_, { provider, apiKey }) => {
+  try {
+    saveSearchConfig({ provider: String(provider || 'auto'), apiKey: String(apiKey || '') });
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+});
+ipcMain.handle('search:test', async () => {
+  try {
+    const cfg = getSearchConfig();
+    const text = await webSearch('启航 AI 工作台', 3);
+    return { ok: !text.startsWith('搜索失败') && !text.includes('未找到'), source: cfg.apiKey ? cfg.provider : '免费引擎', text: text.slice(0, 200) };
+  } catch (e: any) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
 });
 
 // --- Projects ---

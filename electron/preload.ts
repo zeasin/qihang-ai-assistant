@@ -147,6 +147,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     configTest: (cfg: { baseUrl: string; apiKey: string; modelName: string }) => ipcRenderer.invoke('pi:config:test', cfg),
   },
 
+  // 网络搜索（多引擎聚合）
+  search: {
+    configGet: () => ipcRenderer.invoke('search:config:get'),
+    configSet: (cfg: { provider: string; apiKey: string }) => ipcRenderer.invoke('search:config:set', cfg),
+    test: () => ipcRenderer.invoke('search:test'),
+  },
+
   // Service Management
   service: {
     status: () => ipcRenderer.invoke('service:status'),

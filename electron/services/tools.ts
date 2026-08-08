@@ -47,96 +47,21 @@ function walkDir(dir, out, opts: any = {}) {
   }
 }
 
-// ========== 外网工具 ==========
+// ========== 外网工具 (多引擎聚合 + API 通道，见 ./search) ==========
+
+import { webSearch as _webSearch, fetchPage as _fetchPage, getSearchConfig } from './search';
 
 async function webSearchTool({ query, maxResults }) {
-  const limit = Math.min(maxResults || 8, 15);
   try {
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) return `搜索请求失败 (HTTP ${res.status})`;
-    const html = await res.text();
-
-    const results: any[] = [];
-    const linkRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
-    const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
-    const links: any[] = [];
-    const snippets: any[] = [];
-    let m;
-    while ((m = linkRegex.exec(html)) !== null && links.length < limit) {
-      links.push({ url: m[1].replace(/^\/\/?/, 'https://'), title: m[2].replace(/<[^>]+>/g, '').trim() });
-    }
-    while ((m = snippetRegex.exec(html)) !== null && snippets.length < limit) {
-      snippets.push(m[1].replace(/<[^>]+>/g, '').trim());
-    }
-    for (let i = 0; i < Math.min(links.length, limit); i++) {
-      results.push(`[${i + 1}] ${links[i].title}\n    链接: ${links[i].url}\n    摘要: ${(snippets[i] || '(无摘要)').slice(0, 300)}`);
-    }
-    if (!results.length) {
-      const fallback = html.match(/<div[^>]*class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>/gi);
-      if (fallback) {
-        for (const block of fallback.slice(0, limit)) {
-          const titleMatch = block.match(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
-          const textMatch = block.replace(/<[^>]+>/g, '').trim().slice(0, 200);
-          if (titleMatch) {
-            results.push(`[${results.length + 1}] ${titleMatch[2].replace(/<[^>]+>/g, '').trim()}\n    链接: ${titleMatch[1].replace(/^\/\/?/, 'https://')}\n    摘要: ${textMatch.slice(0, 300)}`);
-          }
-        }
-      }
-    }
-    return results.length
-      ? results.join('\n\n')
-      : `未找到 "${query}" 的相关结果，可尝试更换关键词。`;
+    return await _webSearch(String(query || ''), maxResults, getSearchConfig());
   } catch (e) {
-    if (e.name === 'TimeoutError' || e.name === 'AbortError') return '搜索超时，请稍后重试。';
-    return `搜索失败: ${e.message}`;
+    return '搜索失败: ' + (e && e.message ? e.message : e);
   }
 }
 
 async function webFetchTool({ url, maxLength }) {
-  if (!url.startsWith('http://') && !url.startsWith('https://')) return '仅支持 http/https 协议';
-  const limit = Math.min(maxLength || 8000, 50000);
-  try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-      signal: AbortSignal.timeout(20000),
-      redirect: 'follow',
-    });
-    const contentType = res.headers.get('content-type') || '';
-    const isText = contentType.startsWith('text/') || contentType.includes('json') || contentType.includes('xml') || contentType.includes('javascript');
-    if (!isText) return `不支持非文本内容: ${contentType}`;
-
-    let text = await res.text();
-    text = text
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (text.length > limit) text = text.slice(0, limit) + '\n\n...(内容已截断，全文过长)';
-    return text || '(页面内容为空)';
-  } catch (e) {
-    if (e.name === 'TimeoutError' || e.name === 'AbortError') return '请求超时，请检查 URL 或稍后重试。';
-    return `获取失败: ${e.message}`;
-  }
+  return await _fetchPage(String(url || ''), maxLength);
 }
-
 // ========== 笔记库工具 ==========
 
 function noteDirOf(projectId) {
@@ -677,3 +602,4 @@ async function buildReportToolDefs(kbId) {
 }
 
 export { buildDataToolDefs, buildCodingToolDefs, buildNoteToolDefs, buildReportToolDefs, getChinaDate };
+

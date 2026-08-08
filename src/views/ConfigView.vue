@@ -80,6 +80,29 @@
         </div>
       </div>
 
+      <!-- 网络搜索配置 -->
+      <div class="card">
+        <h2>🔍 网络搜索配置</h2>
+        <div class="text-muted mb-2">AI 对话、任务执行中使用的外网搜索。默认「自动引擎」免费可用（百度/Bing/DuckDuckGo 自动降级）；如需更稳定、中文效果更好的搜索，可配置 API Key（博查或 Serper，保存后自动优先使用）。</div>
+        <div class="form-row" style="gap:8px;flex-wrap:wrap;align-items:end;">
+          <div class="form-group" style="flex:0 0 220px;">
+            <label style="font-size:12px;">搜索通道</label>
+            <select v-model="searchProvider" class="form-control">
+              <option value="auto">自动引擎（免费）</option>
+              <option value="bocha">博查 Bocha（推荐，中文强）</option>
+              <option value="serper">Serper (Google)</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1;min-width:260px;">
+            <label style="font-size:12px;">API Key（选填）</label>
+            <input v-model="searchApiKey" type="password" class="form-control" placeholder="选择博查/Serper 后填写对应 API Key">
+          </div>
+          <button class="btn btn-primary" @click="saveSearchConfig" style="margin-bottom:12px;">保存</button>
+          <button class="btn btn-secondary" @click="testSearchConfig" style="margin-bottom:12px;" :disabled="searchTesting">{{ searchTesting ? '测试中...' : '测试' }}</button>
+        </div>
+        <span v-if="searchStatus" class="text-muted" :style="{ color: searchStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }" style="display:block;margin-top:8px;">{{ searchStatus }}</span>
+      </div>
+
       <!-- Provider Edit Modal -->
       <div v-if="providerModalOpen" class="modal-overlay" @click.self="closeProviderModal">
         <div class="modal" style="width:520px;">
@@ -408,6 +431,12 @@ const embeddingProvider = ref('');
 const embeddingBaseUrl = ref('');
 const embeddingApiKey = ref('');
 const embeddingStatus = ref('');
+
+// 网络搜索
+const searchProvider = ref('auto');
+const searchApiKey = ref('');
+const searchStatus = ref('');
+const searchTesting = ref(false);
 
 // 对话模型（支持多个接入，每个接入可含多个模型）
 interface LlmModelEntry {
@@ -1007,6 +1036,45 @@ function removeLlmProvider(idx: number) {
   llmProviders.value.splice(idx, 1);
 }
 
+async function loadSearchConfig() {
+  try {
+    const cfg = await API.search.configGet();
+    searchProvider.value = cfg?.provider || 'auto';
+    searchApiKey.value = cfg?.apiKey || '';
+  } catch { /* 默认 auto */ }
+}
+
+async function saveSearchConfig() {
+  try {
+    const res = await API.search.configSet({ provider: searchProvider.value, apiKey: searchApiKey.value });
+    if (res?.ok) {
+      searchStatus.value = '✅ 已保存' + (searchProvider.value === 'auto' ? '（免费引擎通道）' : '，AI 搜索将优先使用该通道');
+    } else {
+      searchStatus.value = '❌ ' + (res?.error || '保存失败');
+    }
+    setTimeout(() => { if (searchStatus.value.startsWith('✅')) searchStatus.value = ''; }, 5000);
+  } catch (e: any) {
+    searchStatus.value = '❌ ' + (e?.message || '保存失败');
+  }
+}
+
+async function testSearchConfig() {
+  searchTesting.value = true;
+  searchStatus.value = '⏳ 正在测试网络搜索...';
+  try {
+    const res = await API.search.test();
+    if (res?.ok) {
+      searchStatus.value = `✅ 搜索正常（${res.text || res.source || '免费引擎'}）`;
+    } else {
+      searchStatus.value = '❌ ' + (res?.error || '搜索失败');
+    }
+  } catch (e: any) {
+    searchStatus.value = '❌ ' + (e?.message || '请求失败');
+  }
+  searchTesting.value = false;
+  setTimeout(() => { if (searchStatus.value.startsWith('✅')) searchStatus.value = ''; }, 8000);
+}
+
 async function saveLlmConfig() {
   const providers = llmProviders.value
     .map((p) => ({
@@ -1148,6 +1216,7 @@ async function testEmbedding() {
 onMounted(async () => {
   await loadConfig();
   await loadLlmConfig();
+  await loadSearchConfig();
   await loadProjects();
   await loadNotesDir();
   await loadSchedulerStatus();
