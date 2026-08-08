@@ -148,20 +148,43 @@ export async function listPiModels(): Promise<{ models: PiModelInfo[]; error?: s
     const available = (registry.getAvailable() || []) as any[];
     const configured = available.length > 0;
     const list = (configured ? available : (registry.getAll() || [])) as any[];
-    const models: PiModelInfo[] = list.map((m: any) => {
-      const provider: string = m.provider || '';
-      const id: string = m.id || '';
-      let providerLabel = provider;
-      try { providerLabel = registry.getProviderDisplayName(provider) || provider; } catch {}
-      return {
-        provider,
-        providerLabel,
-        id,
-        name: m.name || id,
-        pattern: provider && id ? `${provider}/${id}` : id,
-        configured,
-      };
-    });
+
+    // 读取用户实际在 models.json 中配置的 provider/model 集合，
+    // 过滤掉 pi SDK 内置的默认模型（如 deepseek-v4-pro），
+    // 只展示用户自己配置的模型。
+    const userConfig = readModelsJson();
+    const userModelKeys = new Set<string>();
+    for (const [provKey, provVal] of Object.entries(userConfig.providers || {})) {
+      const models = (provVal as any)?.models;
+      if (Array.isArray(models)) {
+        for (const m of models) {
+          if (m && m.id) userModelKeys.add(`${provKey}/${m.id}`);
+        }
+      }
+    }
+
+    const models: PiModelInfo[] = list
+      .filter((m: any) => {
+        const provider: string = m.provider || '';
+        const id: string = m.id || '';
+        const key = `${provider}/${id}`;
+        // 如果用户有配置，只显示用户配置的模型；如果用户没有任何配置，显示全部
+        return userModelKeys.size === 0 || userModelKeys.has(key);
+      })
+      .map((m: any) => {
+        const provider: string = m.provider || '';
+        const id: string = m.id || '';
+        let providerLabel = provider;
+        try { providerLabel = registry.getProviderDisplayName(provider) || provider; } catch {}
+        return {
+          provider,
+          providerLabel,
+          id,
+          name: m.name || id,
+          pattern: provider && id ? `${provider}/${id}` : id,
+          configured,
+        };
+      });
     models.sort(
       (a, b) => a.providerLabel.localeCompare(b.providerLabel) || a.name.localeCompare(b.name),
     );

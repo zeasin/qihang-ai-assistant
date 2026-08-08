@@ -1024,7 +1024,7 @@ async function saveLlmConfig() {
         else entry.input = ['text'];
         if (m.contextWindow) entry.contextWindow = Number(m.contextWindow);
         if (m.maxTokens) entry.maxTokens = Number(m.maxTokens);
-        if (m.compat) entry.compat = m.compat;
+        if (m.compat) entry.compat = JSON.parse(JSON.stringify(m.compat));
         return entry;
       }).filter((m: any) => m.id),
     }))
@@ -1037,7 +1037,7 @@ async function saveLlmConfig() {
   }
   llmStatus.value = '⏳ 正在保存...';
   try {
-    const r = await API.pi.configSet(providers);
+    const r = await API.pi.configSet(JSON.parse(JSON.stringify(providers)));
     if (r.ok) {
       llmStatus.value = '✅ 配置已保存，立即生效';
       await loadLlmConfig();
