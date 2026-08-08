@@ -37,13 +37,9 @@
 
 应用启动后，需要先完成以下配置才能正常使用：
 
-### 1. 安装 pi agent（AI 对话引擎）
+### 1. 配置 AI 对话大模型
 
-```bash
-npm install -g @earendil-works/pi-coding-agent
-```
-
-安装后运行 `pi` 命令，按照提示完成登录和模型配置（推荐 DeepSeek 或 Ollama 模型）。
+进入应用「设置 → 💬 对话模型配置」，填写接入点信息：服务地址（API Base URL）、API Key、模型名称。支持 OpenAI 兼容接口（如 DeepSeek、Ollama、LM Studio 等），可配置多个接入，每个接入可包含多个模型。保存后立即生效，无需安装任何终端工具。
 
 ### 2. 设置笔记库目录
 
@@ -152,7 +148,7 @@ npm run electron:build   # vite build + tsc 编译 + electron-builder 打包
 ## 常见问题（FAQ）
 
 **Q：提示"模型连接失败"？**
-A：运行 `pi` 检查模型配置，Ollama 需先 `ollama pull <模型名>` 并确保服务已启动。
+A：在「设置 → 💬 对话模型配置」检查服务地址/API Key/模型名称并点「测试」验证，Ollama 需先 `ollama pull <模型名>` 并确保服务已启动。
 
 **Q：可以完全离线使用吗？**
 A：可以。对话模型配置为 Ollama 本地模型即可。

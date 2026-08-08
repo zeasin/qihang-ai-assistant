@@ -8,17 +8,17 @@
       </div>
 
       <div class="welcome-body">
-        <!-- 步骤 1：安装 pi agent -->
-        <div class="guide-step" :class="{ done: piReady }">
+        <!-- 步骤 1：配置对话大模型 -->
+        <div class="guide-step" :class="{ done: llmReady }">
           <div class="step-index">1</div>
           <div class="step-content">
             <div class="step-title">
-              安装 AI 对话引擎（pi agent）
-              <span class="step-status" v-if="piReady">✓ 已就绪</span>
+              配置 AI 对话大模型
+              <span class="step-status" v-if="llmReady">✓ 已就绪</span>
             </div>
-            <p class="step-desc">所有 AI 对话、工具调用、日报生成都由 pi agent 驱动。打开终端执行：</p>
-            <pre class="step-code">npm install -g @earendil-works/pi-coding-agent</pre>
-            <p class="step-desc">安装后运行 <code>pi</code> 命令，按提示完成登录与模型配置（推荐 DeepSeek 或 Ollama），完成后应用会自动识别。</p>
+            <p class="step-desc">所有 AI 对话、工具调用、日报生成都由大模型驱动，无需安装任何终端工具。在「设置」页填写接入点信息即可（OpenAI 兼容接口，如 DeepSeek、Ollama 等）：</p>
+            <button class="btn btn-sm btn-primary" @click="go('/config')">⚙️ 前往「设置」配置大模型</button>
+            <p class="step-desc" style="margin-top:8px;">配置后应用自动识别，立即生效。也可随时在「设置 → 💬 对话模型配置」修改或添加多个接入点。</p>
           </div>
         </div>
 
@@ -73,7 +73,7 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const kbDir = ref('');
 const kbDirLoading = ref(false);
-const piReady = ref(false);
+const llmReady = ref(false);
 
 const pages = [
   { path: '/chat', icon: '💬', label: 'AI 对话' },
@@ -112,12 +112,12 @@ async function finish() {
 
 onMounted(async () => {
   try {
-    const [dir, agent] = await Promise.all([
+    const [dir, cfg] = await Promise.all([
       API.kb.getDir().catch(() => ''),
-      API.agent.status().catch(() => ({ pi: { configured: false } })),
+      API.pi.configGet().catch(() => ({ providers: [] })),
     ]);
     kbDir.value = dir || '';
-    piReady.value = !!(agent && agent.pi && agent.pi.configured);
+    llmReady.value = !!(cfg && Array.isArray(cfg.providers) && cfg.providers.length);
   } catch { /* ignore */ }
 });
 </script>

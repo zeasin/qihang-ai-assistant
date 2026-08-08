@@ -46,7 +46,7 @@
           </div>
           <div style="flex:1;min-width:140px;padding:10px;background:#fefce8;border-radius:8px;border:1px solid #fde68a;font-size:12px;line-height:1.5;">
             <strong style="color:#d97706;">🚀 持续进化</strong><br>
-            <span class="text-muted">底层 pi agent 引擎持续迭代，能力自动升级无需重构</span>
+            <span class="text-muted">底层 AI 引擎持续迭代，能力自动升级无需重构</span>
           </div>
         </div>
       </div>
@@ -58,10 +58,8 @@
         <div class="prereq-item">
           <div class="prereq-number">1</div>
           <div class="prereq-content">
-            <strong>安装 pi agent（AI 对话引擎）</strong>
-            <p class="text-muted">所有 AI 对话、工具调用、日报生成都由 pi agent 驱动。打开终端执行：</p>
-            <pre class="code-block">npm install -g @earendil-works/pi-coding-agent</pre>
-            <p class="text-muted">安装后运行 <code>pi</code> 命令，按照提示完成登录和模型配置（推荐配置 DeepSeek 或 Ollama 模型）。配置完成后应用会自动识别。</p>
+            <strong>配置 AI 对话大模型</strong>
+            <p class="text-muted">所有 AI 对话、工具调用、日报生成都由大模型驱动，无需安装任何终端工具。进入「设置 → 💬 对话模型配置」，填写接入点信息（服务地址、API Key、模型名称，支持 OpenAI 兼容接口，如 DeepSeek、Ollama 等，可配置多个接入）。保存后立即生效。</p>
           </div>
         </div>
 
@@ -78,7 +76,7 @@
         <h2>🚀 快速开始</h2>
         <p class="text-muted mb-2">启航AI工作台是一款桌面应用，将本地笔记知识库、结构化数据、待办提醒、飞书推送和 AI 智能体整合成一套完整的工作流。所有数据保存在本机，模型自由选择。</p>
         <ol style="margin:8px 0;padding-left:20px;font-size:13px;line-height:1.8;">
-          <li>完成上方三个前置条件配置</li>
+          <li>完成上方两个前置条件配置</li>
           <li>在「对话」页开始与 AI 对话（支持图片粘贴/上传）</li>
           <li>在「知识库」浏览笔记文件，或在「概览」Tab 中查看日报、待办、提醒</li>
           <li>在「数据」页管理结构化数据集，支持 JSON/URL 批量导入</li>
@@ -91,7 +89,7 @@
         <table class="help-table">
           <thead><tr><th>菜单</th><th>说明</th></tr></thead>
           <tbody>
-          <tr><td>💬 对话</td><td>AI 对话工作台，支持多轮对话、图片识别、模型切换，pi agent 驱动</td></tr>
+          <tr><td>💬 对话</td><td>AI 对话工作台，支持多轮对话、图片识别、模型切换</td></tr>
           <tr><td>💻 编程</td><td>代码项目工作台，基于项目的 AI 编程对话；代码任务在隔离 worktree 中执行，可在会话内审查/合并/提交改动</td></tr>
           <tr><td>📁 知识库</td><td>文件浏览 + 概览看板（统计、日报、待办、提醒、索引管理）</td></tr>
           <tr><td>🗃️ 数据</td><td>多数据集管理，自定义 Schema，JSON/URL 批量导入</td></tr>
@@ -128,7 +126,7 @@
 
       <div class="card" id="sec-ai">
         <h2>🤖 AI 助理</h2>
-        <p class="text-muted mb-2">基于 pi agent 引擎的本地 AI 助理，对话页支持图片上传/粘贴，可在输入框上方切换模型。</p>
+        <p class="text-muted mb-2">本地 AI 助理，对话页支持图片上传/粘贴，可在输入框上方切换模型。</p>
         <table class="help-table">
           <thead><tr><th>能力</th><th>说明</th></tr></thead>
           <tbody>
@@ -140,7 +138,7 @@
           <tr><td>🖼️ 图片识别</td><td>支持粘贴或上传图片，AI 自动识别内容</td></tr>
           </tbody>
         </table>
-        <p class="text-muted">对话模型通过 pi agent 配置（终端运行 <code>pi</code> 命令设置），支持 DeepSeek、OpenAI 兼容接口、Ollama 本地模型等。</p>
+        <p class="text-muted">对话模型在「设置 → 💬 对话模型配置」中配置（支持 OpenAI 兼容接口、DeepSeek、Ollama 本地模型等），配置后立即生效，无需安装任何终端工具。</p>
       </div>
 
       <div class="card card-feishu" id="sec-feishu">
@@ -171,7 +169,7 @@
         <table class="help-table">
           <thead><tr><th>配置项</th><th>说明</th></tr></thead>
           <tbody>
-          <tr><td>LLM 对话模型</td><td>通过 pi agent 配置（<code>pi</code> 命令），对话页可临时切换模型</td></tr>
+          <tr><td>LLM 对话模型</td><td>「设置 → 💬 对话模型配置」可配置多个 OpenAI 兼容接入，对话页可临时切换模型</td></tr>
           <tr><td>笔记库目录</td><td>本地笔记库路径，知识浏览与 AI 检索共用</td></tr>
           <tr><td>嵌入模型</td><td>语义检索用的向量模型（Ollama 或 OpenAI 兼容 API）</td></tr>
           <tr><td>笔记库索引配置</td><td>配置索引时排除的目录和文件（支持通配符）</td></tr>
@@ -188,12 +186,12 @@
         <table class="help-table">
           <thead><tr><th>问题</th><th>原因</th><th>解决</th></tr></thead>
           <tbody>
-          <tr><td>对话为空或超时</td><td>pi agent 未安装或模型未配置</td><td>运行 <code>npm install -g @earendil-works/pi-coding-agent</code>，然后 <code>pi</code> 配置模型</td></tr>
+          <tr><td>对话为空或超时</td><td>对话模型未配置或配置有误</td><td>在「设置 → 💬 对话模型配置」填写服务地址、API Key 和模型名称，并点「测试」验证</td></tr>
           <tr><td>AI 答非所问，没有用到笔记</td><td>知识库未索引或未配置嵌入模型</td><td>在知识库「概览」Tab 点击索引按钮，检查嵌入模型配置</td></tr>
           <tr><td>飞书消息收不到</td><td>Webhook 或 Bot 配置有误</td><td>在设置页检查飞书配置，点「测试」验证</td></tr>
           <tr><td>定时任务未执行</td><td>调度器未开启</td><td>在设置页确认调度器运行中，检查任务是否已启用</td></tr>
           <tr><td>可以完全离线使用吗</td><td>—</td><td>可以。对话模型和嵌入模型都配置为 Ollama 本地模型即可完全离线</td></tr>
-          <tr><td>提示"模型连接失败"</td><td>pi agent 模型配置有误或 Ollama 未启动</td><td>运行 <code>pi</code> 检查配置，Ollama 需先 <code>ollama pull</code> 模型并确保服务运行</td></tr>
+          <tr><td>提示"模型连接失败"</td><td>对话模型配置有误或 Ollama 未启动</td><td>在「设置 → 💬 对话模型配置」检查服务地址与模型名称并点「测试」，Ollama 需先 <code>ollama pull</code> 模型并确保服务运行</td></tr>
           <tr><td>数据会丢失吗</td><td>—</td><td>数据保存在本机数据库，正常退出不丢失；可在「设置 → 数据备份与恢复」一键备份、自动备份或从备份恢复</td></tr>
           </tbody>
         </table>

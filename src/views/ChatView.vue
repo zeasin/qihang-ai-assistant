@@ -157,7 +157,7 @@
                     {{ m.providerLabel }} · {{ m.name }}
                   </option>
                 </select>
-                <span class="input-hint">Enter 发送 · Shift+Enter 换行 · pi agent 驱动</span>
+                <span class="input-hint">Enter 发送 · Shift+Enter 换行 · AI 驱动</span>
               </div>
               <div class="input-right">
                 <button
