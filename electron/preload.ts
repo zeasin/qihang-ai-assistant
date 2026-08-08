@@ -142,6 +142,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // pi agent 模型
   pi: {
     models: () => ipcRenderer.invoke('pi:models'),
+    configGet: () => ipcRenderer.invoke('pi:config:get'),
+    configSet: (providers: unknown) => ipcRenderer.invoke('pi:config:set', { providers }),
+    configTest: (cfg: { baseUrl: string; apiKey: string; modelName: string }) => ipcRenderer.invoke('pi:config:test', cfg),
   },
 
   // Service Management

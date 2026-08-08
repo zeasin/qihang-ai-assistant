@@ -367,3 +367,204 @@ export async function disposeAll(): Promise<void> {
   }
   sessions.clear();
 }
+
+// ---- 应用对话模型配置（读写 ~/.pi/agent/models.json，支持多条 provider） ----
+
+export interface BuiltinModelConfig {
+  baseUrl: string;
+  apiKey: string;
+  modelName: string;
+}
+
+export interface BuiltinModelEntry {
+  id: string;
+  name?: string;
+  [k: string]: any;
+}
+
+export interface BuiltinModelProviderConfig {
+  /** provider 键（models.json 中的键名） */
+  name: string;
+  /** provider 显示名 */
+  displayName: string;
+  baseUrl: string;
+  apiKey: string;
+  api: string;
+  models: BuiltinModelEntry[];
+}
+
+function modelsJsonPath(): string {
+  return path.join(getAgentDir(), 'models.json');
+}
+
+/** Strip line and block comments from JSON content (state machine, handles strings correctly) */
+function stripJsonComments(src: string): string {
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  let inStr = false;
+  let esc = false;
+  while (i < n) {
+    const ch = src[i];
+    if (inStr) {
+      out += ch;
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      i++;
+      continue;
+    }
+    if (ch === '"') { inStr = true; out += ch; i++; continue; }
+    if (ch === '/' && i + 1 < n && src[i + 1] === '/') {
+      i += 2;
+      while (i < n && src[i] !== '\n') i++;
+      continue;
+    }
+    if (ch === '/' && i + 1 < n && src[i + 1] === '*') {
+      i += 2;
+      while (i + 1 < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
+/** 读取 models.json 全部 provider（容错解析，兼容注释格式） */
+function readModelsJson(): any {
+  const p = modelsJsonPath();
+  if (!fs.existsSync(p)) return { providers: {} };
+  try {
+    const content = fs.readFileSync(p, 'utf-8');
+    let parsed: any;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      parsed = JSON.parse(stripJsonComments(content));
+    }
+    if (!parsed || typeof parsed !== 'object') return { providers: {} };
+    if (!parsed.providers) parsed.providers = {};
+    return parsed;
+  } catch (e: any) {
+    logger.warn('[PiAgent] models.json parse failed: %s', e && e.message ? e.message : e);
+    return { providers: {} };
+  }
+}
+
+/** 列出 models.json 中的全部 provider 配置 */
+export function listBuiltinModelConfigs(): { providers: BuiltinModelProviderConfig[] } {
+  const cfg = readModelsJson();
+  const providers = Object.entries(cfg.providers || {}).map(([key, p]: [string, any]) => ({
+    name: key,
+    displayName: (p && p.name) || '',
+    baseUrl: (p && p.baseUrl) || '',
+    apiKey: (p && p.apiKey) || '',
+    api: (p && p.api) || '',
+    models: (p && Array.isArray(p.models) ? p.models : []) as BuiltinModelEntry[],
+  }));
+  return { providers };
+}
+
+/**
+ * 保存对话模型配置（全量替换 providers，保留每条的 api/compat 等其他字段）。
+ * 写入后热重载 ModelRegistry，立即生效。
+ */
+export async function saveBuiltinModelConfigs(providers: {
+  name: string;
+  displayName?: string;
+  baseUrl: string;
+  apiKey: string;
+  api?: string;
+  modelNames: string[];
+  models?: any[];
+}[]): Promise<void> {
+  const current = readModelsJson();
+  const next: any = {};
+  for (const p of providers) {
+    const key = p.name.trim();
+    if (!key) continue;
+    const existing = current.providers[key] || {};
+    let models: any[];
+    if (Array.isArray(p.models) && p.models.length) {
+      models = p.models
+        .filter((m: any) => m && m.id && String(m.id).trim())
+        .map((m: any) => {
+          const entry: any = { id: String(m.id).trim() };
+          if (m.name) entry.name = String(m.name).trim();
+          if (m.reasoning) entry.reasoning = true;
+          if (Array.isArray(m.input) && m.input.length) entry.input = m.input;
+          else entry.input = ['text'];
+          if (m.contextWindow) entry.contextWindow = Number(m.contextWindow);
+          if (m.maxTokens) entry.maxTokens = Number(m.maxTokens);
+          if (m.compat) entry.compat = m.compat;
+          return entry;
+        });
+    } else {
+      const modelNames = p.modelNames.map((id: string) => id.trim()).filter(Boolean);
+      models = modelNames.map((id: string) => {
+        const old = Array.isArray(existing.models) ? existing.models.find((m: any) => m && m.id === id) : undefined;
+        if (old) {
+          const { id: _omit, ...rest } = old;
+          return { ...rest, id };
+        }
+        return { id, input: ['text'] };
+      });
+    }
+    next[key] = {
+      ...existing,
+      baseUrl: p.baseUrl.replace(/\/+$/, ''),
+      apiKey: p.apiKey.trim(),
+      api: p.api || existing.api || 'openai-completions',
+      models,
+    };
+  }
+  current.providers = next;
+  fs.writeFileSync(modelsJsonPath(), JSON.stringify(current, null, 2), 'utf-8');
+  await reloadModelRegistry();
+}
+
+/** 热重载 ModelRegistry（配置变更后立即生效，无需重启） */
+export async function reloadModelRegistry(): Promise<void> {
+  try {
+    const bundle = await getRuntime();
+    if (bundle.modelRegistry && typeof bundle.modelRegistry.refresh === 'function') {
+      bundle.modelRegistry.refresh();
+    }
+  } catch (e: any) {
+    logger.warn('[PiAgent] reloadModelRegistry failed: %s', e && e.message ? e.message : e);
+  }
+}
+
+/** 测试 OpenAI 兼容对话端点连通性 */
+export async function testBuiltinModelConnection(cfg: BuiltinModelConfig): Promise<{ ok: boolean; error?: string; latencyMs?: number }> {
+  const base = cfg.baseUrl.replace(/\/+$/, '');
+  if (!base || !cfg.modelName.trim()) return { ok: false, error: '请填写服务地址与模型名称' };
+  const url = base.includes('/chat/completions') ? base : base + '/chat/completions';
+  const started = Date.now();
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(cfg.apiKey.trim() ? { Authorization: 'Bearer ' + cfg.apiKey.trim() } : {}),
+      },
+      body: JSON.stringify({ model: cfg.modelName.trim(), messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const latencyMs = Date.now() - started;
+    const text = await res.text();
+    if (!res.ok) {
+      let reason = text.slice(0, 300);
+      try { reason = JSON.parse(text)?.error?.message || reason; } catch {}
+      return { ok: false, error: `HTTP ${res.status}: ${reason}`, latencyMs };
+    }
+    return { ok: true, latencyMs };
+  } catch (e: any) {
+    return { ok: false, error: (e && e.message) || String(e), latencyMs: Date.now() - started };
+  }
+}

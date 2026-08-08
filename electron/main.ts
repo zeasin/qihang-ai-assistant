@@ -34,7 +34,7 @@ try {
 } catch {} // worker_threads not available
 import * as db from './services/database';
 import * as appConfig from './services/app-config';
-import { runPi, listPiModels, generateDailyReport as piGenerateDailyReport } from './services/pi-agent';
+import { runPi, listPiModels, generateDailyReport as piGenerateDailyReport, listBuiltinModelConfigs, saveBuiltinModelConfigs, testBuiltinModelConnection } from './services/pi-agent';
 import { buildNoteToolDefs, buildDataToolDefs, buildCodingToolDefs } from './services/tools';
 import { initCodingTasks, isCodingMessage, handleFeishuCodingMessage, getWorktreeService, listCodingProjects, collectSessionChanges, applySessionChanges, commitSessionChanges, abortSessionChanges, discardSessionChanges, latestCodingSessions, recordFeishuTask, followUpTask } from './services/coding-task';
 import * as aitool from './services/ai-tools';
@@ -1146,6 +1146,27 @@ function piModelPattern(modelName) {
 
 // --- pi agent 模型列表 ---
 ipcMain.handle('pi:models', async () => listPiModels());
+
+// 对话模型配置（应用内配置，读写 ~/.pi/agent/models.json，支持多条 provider）
+ipcMain.handle('pi:config:get', () => {
+  return listBuiltinModelConfigs();
+});
+ipcMain.handle('pi:config:set', async (_, { providers }) => {
+  if (!Array.isArray(providers) || !providers.length) {
+    return { ok: false, error: '至少需要一条接入配置' };
+  }
+  for (const p of providers) {
+    if (!p.baseUrl || !String(p.baseUrl).trim()) return { ok: false, error: `服务地址不能为空（${p.name || '未命名'}）` };
+    if (!Array.isArray(p.modelNames) || p.modelNames.filter((n: string) => n && String(n).trim()).length === 0) {
+      return { ok: false, error: `模型名称不能为空（${p.name || '未命名'}）` };
+    }
+  }
+  await saveBuiltinModelConfigs(providers);
+  return { ok: true };
+});
+ipcMain.handle('pi:config:test', async (_, { baseUrl, apiKey, modelName }) => {
+  return testBuiltinModelConnection({ baseUrl: String(baseUrl || ''), apiKey: String(apiKey || ''), modelName: String(modelName || '') });
+});
 
 // --- Projects ---
 ipcMain.handle('project:list', (_, { type } = {}) => db.project.list(type));

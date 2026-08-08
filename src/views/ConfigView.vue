@@ -23,6 +23,148 @@
         <span v-if="notesDirStatus" class="text-muted" :style="{ color: notesDirStatus.startsWith('✅') ? '#22c55e' : '#ef4444' }">{{ notesDirStatus }}</span>
       </div>
 
+      <!-- 对话模型配置 -->
+      <div class="card">
+        <h2>💬 对话模型配置</h2>
+        <div class="text-muted mb-2">配置 AI 对话使用的接入点（OpenAI 兼容接口，如 DeepSeek、Ollama、LM Studio 等）。支持配置多个接入，每个接入可包含多个模型。配置完成后所有 AI 对话、日报生成即可直接使用，无需安装终端工具。</div>
+
+        <div v-if="!llmProviders.length" class="llm-empty">
+          <div class="llm-empty-icon">🤖</div>
+          <div class="text-muted" style="font-size:13px;">尚未配置任何 AI 接入点，点击下方按钮添加</div>
+        </div>
+
+        <div v-else class="llm-provider-table">
+          <div class="llm-provider-thead">
+            <span class="col-name">接入名称</span>
+            <span class="col-url">服务地址</span>
+            <span class="col-type">API 类型</span>
+            <span class="col-models">模型数</span>
+            <span class="col-actions">操作</span>
+          </div>
+          <div v-for="(prov, idx) in llmProviders" :key="idx" class="llm-provider-row">
+            <div class="col-name">
+              <span class="llm-prov-name">{{ prov.name || '未命名' }}</span>
+            </div>
+            <div class="col-url">
+              <span class="llm-prov-url" :title="prov.baseUrl">{{ prov.baseUrl || '-' }}</span>
+            </div>
+            <div class="col-type">
+              <span class="llm-prov-type">{{ apiTypeLabel(prov.api) }}</span>
+            </div>
+            <div class="col-models">
+              <span class="badge badge-primary">{{ (prov.models || []).length }}</span>
+            </div>
+            <div class="col-actions">
+              <button class="btn btn-sm btn-secondary" @click="openProviderModal(idx)">编辑</button>
+              <button class="btn btn-sm btn-secondary" @click="openModelModal(idx)">管理模型</button>
+              <button class="btn btn-sm btn-secondary" @click="testLlmProvider(idx)" :disabled="prov.testing">{{ prov.testing ? '测试中' : '测试' }}</button>
+              <button class="btn btn-sm btn-danger" @click="removeLlmProvider(idx)">删除</button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="llmStatus" class="text-muted" :style="{ color: llmStatus.startsWith('✅') ? '#22c55e' : llmStatus.startsWith('⏳') ? '#f59e0b' : '#ef4444' }" style="margin-top:8px;display:block;">{{ llmStatus }}</div>
+
+        <div class="text-muted" style="font-size:12px;margin-top:10px;">⚡ 快速添加常用 Provider（点击后可继续编辑 API Key）</div>
+        <div class="flex" style="gap:6px;flex-wrap:wrap;margin-top:4px;">
+          <button class="btn btn-sm btn-outline" @click="quickAddProvider('deepseek')">🔷 DeepSeek (Responses API)</button>
+          <button class="btn btn-sm btn-outline" @click="quickAddProvider('siliconflow')">🟣 硅基流动 SiliconFlow</button>
+          <button class="btn btn-sm btn-outline" @click="quickAddProvider('ollama')">🐳 Ollama 本地</button>
+          <button class="btn btn-sm btn-outline" @click="quickAddProvider('sensenova')">🟦 SensNova (端侧)</button>
+        </div>
+
+        <div class="flex" style="gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center;">
+          <button class="btn btn-primary" @click="openProviderModal(-1)">+ 自定义 Provider</button>
+          <button class="btn btn-primary" @click="saveLlmConfig">💾 保存配置</button>
+          <span v-if="llmProviders.length" class="badge badge-success">● 已配置 {{ llmProviders.length }} 个 Provider</span>
+        </div>
+      </div>
+
+      <!-- Provider Edit Modal -->
+      <div v-if="providerModalOpen" class="modal-overlay" @click.self="closeProviderModal">
+        <div class="modal" style="width:520px;">
+          <div class="modal-header">
+            <h3>{{ editingProviderIndex === -1 ? '添加 Provider' : '编辑 Provider' }}</h3>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>接入名称</label>
+              <input v-model="providerForm.name" type="text" class="form-control" placeholder="如 deepseek / ollama / sensenova">
+            </div>
+            <div class="form-group">
+              <label>服务地址（API Base URL）</label>
+              <input v-model="providerForm.baseUrl" type="text" class="form-control" placeholder="https://api.deepseek.com/v1">
+            </div>
+            <div class="form-group">
+              <label>API 类型</label>
+              <select v-model="providerForm.api" class="form-control">
+                <option value="openai-completions">Chat Completions (默认)</option>
+                <option value="openai-responses">Responses API</option>
+                <option value="ollama">Ollama</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>API Key（Ollama 本地留空）</label>
+              <input v-model="providerForm.apiKey" type="password" class="form-control" placeholder="sk-...">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="closeProviderModal">取消</button>
+            <button class="btn btn-primary" @click="saveProviderFromModal">确定</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Model Management Modal -->
+      <div v-if="modelModalOpen" class="modal-overlay" @click.self="closeModelModal">
+        <div class="modal" style="width:720px;">
+          <div class="modal-header">
+            <h3>管理模型 — {{ llmProviders[modelModalProviderIndex]?.name || 'Provider' }}</h3>
+          </div>
+          <div class="modal-body">
+            <div v-if="!modelEditList.length" class="text-muted" style="text-align:center;padding:20px;">暂无模型，点击下方按钮添加</div>
+            <div v-for="(m, mi) in modelEditList" :key="mi" class="llm-model-edit-row">
+              <div class="form-row" style="gap:8px;">
+                <div class="form-group" style="flex:2;min-width:160px;margin-bottom:6px;">
+                  <label style="font-size:11px;">模型 ID</label>
+                  <input v-model="m.id" type="text" class="form-control" placeholder="如 deepseek-chat">
+                </div>
+                <div class="form-group" style="flex:1;min-width:120px;margin-bottom:6px;">
+                  <label style="font-size:11px;">显示名称（可选）</label>
+                  <input v-model="m.name" type="text" class="form-control" placeholder="Deepseek Chat">
+                </div>
+              </div>
+              <div class="form-row" style="gap:8px;align-items:flex-end;">
+                <div class="form-group" style="flex:1;min-width:100px;margin-bottom:6px;">
+                  <label style="font-size:11px;">上下文窗口</label>
+                  <input v-model.number="m.contextWindow" type="number" class="form-control" placeholder="1000000">
+                </div>
+                <div class="form-group" style="flex:1;min-width:100px;margin-bottom:6px;">
+                  <label style="font-size:11px;">最大 Token</label>
+                  <input v-model.number="m.maxTokens" type="number" class="form-control" placeholder="65535">
+                </div>
+                <div class="form-group" style="flex:0 0 auto;margin-bottom:6px;display:flex;align-items:center;gap:4px;padding-bottom:4px;">
+                  <label style="font-size:11px;margin:0;">推理模型</label>
+                  <input v-model="m.reasoning" type="checkbox" style="margin:0;">
+                </div>
+                <div class="form-group" style="flex:0 0 auto;margin-bottom:6px;display:flex;align-items:center;gap:4px;padding-bottom:4px;">
+                  <label style="font-size:11px;margin:0;">支持图片</label>
+                  <input type="checkbox" :checked="hasImageInput(m)" @change="toggleImageInput(m)" style="margin:0;">
+                </div>
+                <button class="btn btn-sm btn-danger" @click="removeModelRow(mi)">删除</button>
+              </div>
+            </div>
+            <div style="margin-top:8px;">
+              <button class="btn btn-secondary" @click="addModelRow">+ 添加模型</button>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="closeModelModal">取消</button>
+            <button class="btn btn-primary" @click="saveModelsFromModal">保存模型</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Embedding Model Configuration (hidden) -->
       <div v-if="false" class="card">
         <h2>🧠 嵌入模型配置</h2>
@@ -266,8 +408,220 @@ const embeddingProvider = ref('');
 const embeddingBaseUrl = ref('');
 const embeddingApiKey = ref('');
 const embeddingStatus = ref('');
+
+// 对话模型（支持多个接入，每个接入可含多个模型）
+interface LlmModelEntry {
+  id: string;
+  name?: string;
+  reasoning?: boolean;
+  input?: string[];
+  contextWindow?: number;
+  maxTokens?: number;
+  compat?: any;
+  [k: string]: any;
+}
+interface LlmProviderRow {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  api: string;
+  models: LlmModelEntry[];
+  modelNamesText: string;
+  testing: boolean;
+  status: string;
+}
+const llmProviders = ref<LlmProviderRow[]>([]);
+const llmStatus = ref('');
 const notesDir = ref('');
 const notesDirStatus = ref('');
+
+// Provider modal state
+const providerModalOpen = ref(false);
+const editingProviderIndex = ref(-1);
+const providerForm = ref<{ name: string; baseUrl: string; apiKey: string; api: string }>({ name: '', baseUrl: '', apiKey: '', api: 'openai-completions' });
+
+// Model modal state
+const modelModalOpen = ref(false);
+const modelModalProviderIndex = ref(-1);
+const modelEditList = ref<LlmModelEntry[]>([]);
+
+function apiTypeLabel(api: string): string {
+  if (api === 'openai-responses') return 'Responses API';
+  if (api === 'ollama') return 'Ollama';
+  return 'Chat Completions';
+}
+
+function openProviderModal(idx: number) {
+  editingProviderIndex.value = idx;
+  if (idx >= 0 && llmProviders.value[idx]) {
+    const p = llmProviders.value[idx];
+    providerForm.value = { name: p.name, baseUrl: p.baseUrl, apiKey: p.apiKey, api: p.api || 'openai-completions' };
+  } else {
+    providerForm.value = { name: '', baseUrl: '', apiKey: '', api: 'openai-completions' };
+  }
+  providerModalOpen.value = true;
+}
+
+function closeProviderModal() {
+  providerModalOpen.value = false;
+}
+
+function saveProviderFromModal() {
+  const form = providerForm.value;
+  if (!form.name.trim()) { llmStatus.value = '❌ 请填写接入名称'; return; }
+  if (!form.baseUrl.trim()) { llmStatus.value = '❌ 请填写服务地址'; return; }
+  if (editingProviderIndex.value === -1) {
+    const entry: LlmProviderRow = {
+      name: form.name.trim(),
+      baseUrl: form.baseUrl.trim(),
+      apiKey: form.apiKey.trim(),
+      api: form.api,
+      models: [],
+      modelNamesText: '',
+      testing: false,
+      status: '',
+    };
+    llmProviders.value.push(entry);
+  } else {
+    const p = llmProviders.value[editingProviderIndex.value];
+    p.name = form.name.trim();
+    p.baseUrl = form.baseUrl.trim();
+    p.apiKey = form.apiKey.trim();
+    p.api = form.api;
+  }
+  providerModalOpen.value = false;
+  llmStatus.value = '✅ 已保存到本地，配置完模型后点击「保存配置」生效';
+}
+
+function openModelModal(idx: number) {
+  modelModalProviderIndex.value = idx;
+  const p = llmProviders.value[idx];
+  if (p) {
+    modelEditList.value = (p.models || []).map((m: any) => ({
+      id: m.id || '',
+      name: m.name || '',
+      reasoning: !!m.reasoning,
+      input: Array.isArray(m.input) ? [...m.input] : undefined,
+      contextWindow: m.contextWindow,
+      maxTokens: m.maxTokens,
+      compat: m.compat,
+    }));
+  } else {
+    modelEditList.value = [];
+  }
+  modelModalOpen.value = true;
+}
+
+function closeModelModal() {
+  modelModalOpen.value = false;
+}
+
+function addModelRow() {
+  modelEditList.value.push({ id: '', name: '', reasoning: false, input: ['text'], contextWindow: undefined, maxTokens: undefined });
+}
+
+function removeModelRow(mi: number) {
+  modelEditList.value.splice(mi, 1);
+}
+
+function hasImageInput(m: LlmModelEntry): boolean {
+  return Array.isArray(m.input) && m.input.includes('image');
+}
+
+function toggleImageInput(m: LlmModelEntry) {
+  if (!Array.isArray(m.input)) m.input = ['text'];
+  const idx = m.input.indexOf('image');
+  if (idx >= 0) m.input.splice(idx, 1);
+  else m.input.push('image');
+}
+
+function saveModelsFromModal() {
+  const cleanList = modelEditList.value.filter((m) => m.id && m.id.trim());
+  const models = cleanList.map((m) => {
+    const entry: any = { id: m.id.trim() };
+    if (m.name && m.name.trim()) entry.name = m.name.trim();
+    if (m.reasoning) entry.reasoning = true;
+    if (Array.isArray(m.input) && m.input.length) entry.input = [...m.input];
+    if (m.contextWindow) entry.contextWindow = Number(m.contextWindow);
+    if (m.maxTokens) entry.maxTokens = Number(m.maxTokens);
+    return entry;
+  });
+  const p = llmProviders.value[modelModalProviderIndex.value];
+  if (p) {
+    p.models = models;
+    p.modelNamesText = models.map((m: any) => m.id).join('\n');
+  }
+  modelModalOpen.value = false;
+  llmStatus.value = '✅ 模型已更新，点击「保存配置」生效';
+}
+
+type ProviderPresetKey = 'deepseek' | 'siliconflow' | 'ollama' | 'sensenova';
+const PROVIDER_PRESETS: Record<ProviderPresetKey, Partial<LlmProviderRow> & { presetModels: LlmModelEntry[] }> = {
+  deepseek: {
+    name: 'deepseek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    api: 'openai-responses',
+    apiKey: '',
+    presetModels: [
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', reasoning: true, input: ['text'], contextWindow: 1000000, maxTokens: 65535 },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', reasoning: true, input: ['text'], contextWindow: 1000000, maxTokens: 65535 },
+    ],
+  },
+  siliconflow: {
+    name: 'siliconflow',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    api: 'openai-completions',
+    apiKey: '',
+    presetModels: [
+      { id: 'deepseek-ai/DeepSeek-V3', name: 'DeepSeek V3', reasoning: false, input: ['text'], contextWindow: 131072, maxTokens: 16384 },
+      { id: 'Qwen/Qwen2.5-72B-Instruct', name: 'Qwen 2.5 72B', reasoning: false, input: ['text'], contextWindow: 131072, maxTokens: 16384 },
+    ],
+  },
+  ollama: {
+    name: 'ollama',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    api: 'ollama',
+    apiKey: '',
+    presetModels: [
+      { id: 'qwen2.5:7b', name: 'Qwen 2.5 7B', reasoning: false, input: ['text'], contextWindow: 131072, maxTokens: 8192 },
+      { id: 'llama3.1:8b', name: 'Llama 3.1 8B', reasoning: false, input: ['text'], contextWindow: 131072, maxTokens: 8192 },
+    ],
+  },
+  sensenova: {
+    name: 'sensenova',
+    baseUrl: 'https://token.sensenova.cn/v1',
+    api: 'openai-completions',
+    apiKey: '',
+    presetModels: [
+      { id: 'sensenova-6.7-flash-lite', name: 'SenseNova 6.7 Flash Lite', reasoning: false, input: ['text', 'image'], contextWindow: 262144, maxTokens: 65535 },
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', reasoning: true, input: ['text'], contextWindow: 1000000, maxTokens: 65535, compat: { supportsDeveloperRole: false } },
+      { id: 'glm-5.2', name: 'GLM 5.2', reasoning: true, input: ['text'], contextWindow: 1000000, maxTokens: 65535, compat: { supportsDeveloperRole: false } },
+    ],
+  },
+};
+
+function quickAddProvider(key: ProviderPresetKey) {
+  const preset = PROVIDER_PRESETS[key];
+  if (!preset) return;
+  const existing = llmProviders.value.find((p) => p.name === preset.name);
+  if (existing) {
+    llmStatus.value = `⏭ Provider「${preset.name}」已存在，可点击「编辑」修改`;
+    setTimeout(() => { if (llmStatus.value.startsWith('⏭')) llmStatus.value = ''; }, 3000);
+    return;
+  }
+  const models = [...(preset.presetModels || [])];
+  llmProviders.value.push({
+    name: preset.name || '',
+    baseUrl: preset.baseUrl || '',
+    apiKey: preset.apiKey || '',
+    api: preset.api || 'openai-completions',
+    models,
+    modelNamesText: models.map((m: any) => m.id).join('\n'),
+    testing: false,
+    status: '',
+  });
+  llmStatus.value = `✅ 已添加「${preset.name}」预设，请填写 API Key 后点击「保存配置」`;
+}
 
 // Backup
 const backupBusy = ref(false);
@@ -623,6 +977,110 @@ async function loadConfig() {
   } catch { console.warn('加载配置失败'); }
 }
 
+async function loadLlmConfig() {
+  try {
+    const res = await API.pi.configGet();
+    const providers = res?.providers || [];
+    llmProviders.value = providers.map((p: any) => ({
+      name: p.name || '',
+      baseUrl: p.baseUrl || '',
+      apiKey: p.apiKey || '',
+      api: p.api || 'openai-completions',
+      models: (p.models || []).map((m: any) => ({
+        id: m.id || '',
+        name: m.name || '',
+        reasoning: m.reasoning,
+        input: m.input,
+        contextWindow: m.contextWindow,
+        maxTokens: m.maxTokens,
+        compat: m.compat,
+      })).filter((m: any) => m.id),
+      modelNamesText: (p.models || []).map((m: any) => m.id || '').filter(Boolean).join('\n'),
+      testing: false,
+      status: '',
+    }));
+  } catch { llmProviders.value = []; }
+}
+
+function removeLlmProvider(idx: number) {
+  if (!llmProviders.value[idx]) return;
+  llmProviders.value.splice(idx, 1);
+}
+
+async function saveLlmConfig() {
+  const providers = llmProviders.value
+    .map((p) => ({
+      name: p.name.trim(),
+      displayName: p.name.trim(),
+      baseUrl: p.baseUrl.trim(),
+      apiKey: p.apiKey.trim(),
+      api: p.api || 'openai-completions',
+      modelNames: (p.models || []).map((m: any) => (m.id || '').trim()).filter(Boolean),
+      models: (p.models || []).map((m: any) => {
+        const entry: any = { id: (m.id || '').trim() };
+        if (m.name) entry.name = m.name.trim();
+        if (m.reasoning) entry.reasoning = true;
+        if (Array.isArray(m.input) && m.input.length) entry.input = [...m.input];
+        else entry.input = ['text'];
+        if (m.contextWindow) entry.contextWindow = Number(m.contextWindow);
+        if (m.maxTokens) entry.maxTokens = Number(m.maxTokens);
+        if (m.compat) entry.compat = m.compat;
+        return entry;
+      }).filter((m: any) => m.id),
+    }))
+    .filter((p) => p.name || p.baseUrl || p.modelNames.length);
+  if (!providers.length) { llmStatus.value = '❌ 请至少配置一个 Provider'; return; }
+  const bad = providers.find((p) => !p.name || !p.baseUrl || !p.modelNames.length);
+  if (bad) {
+    llmStatus.value = `❌ Provider「${bad.name || '未命名'}」需要填写接入名称、服务地址和至少一个模型`;
+    return;
+  }
+  llmStatus.value = '⏳ 正在保存...';
+  try {
+    const r = await API.pi.configSet(providers);
+    if (r.ok) {
+      llmStatus.value = '✅ 配置已保存，立即生效';
+      await loadLlmConfig();
+      setTimeout(() => { if (llmStatus.value.startsWith('✅')) llmStatus.value = ''; }, 4000);
+    } else {
+      llmStatus.value = '❌ ' + (r.error || '保存失败');
+    }
+  } catch (e: any) {
+    llmStatus.value = '❌ ' + (e.message || '保存失败');
+  }
+}
+
+async function testLlmProvider(idx: number) {
+  const prov = llmProviders.value[idx];
+  if (!prov) return;
+  if (!prov.baseUrl.trim() || !(prov.models || []).length) {
+    prov.status = '❌ 请先配置服务地址和模型';
+    llmStatus.value = '❌ 请先配置服务地址和模型';
+    return;
+  }
+  const firstModel = (prov.models || []).map((m: any) => (m.id || '').trim()).find(Boolean);
+  if (!firstModel) { llmStatus.value = '❌ 模型 ID 不能为空'; return; }
+  prov.testing = true;
+  prov.status = '⏳ 正在测试连接...';
+  try {
+    const r = await API.pi.configTest({
+      baseUrl: prov.baseUrl.trim(),
+      apiKey: prov.apiKey.trim(),
+      modelName: firstModel,
+    });
+    if (r.ok) {
+      prov.status = `✅ 连接成功（延迟 ${r.latencyMs ?? '?'}ms）`;
+    } else {
+      prov.status = '❌ ' + (r.error || '连接失败');
+    }
+  } catch (e: any) {
+    prov.status = '❌ ' + (e.message || '测试异常');
+  }
+  prov.testing = false;
+  llmStatus.value = prov.status;
+  setTimeout(() => { prov.status = ''; }, 8000);
+}
+
 async function saveReportSettings() {
   try {
     await API.config.set({
@@ -689,6 +1147,7 @@ async function testEmbedding() {
 
 onMounted(async () => {
   await loadConfig();
+  await loadLlmConfig();
   await loadProjects();
   await loadNotesDir();
   await loadSchedulerStatus();
@@ -804,6 +1263,8 @@ onBeforeUnmount(() => {});
 .btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
 .btn-secondary { background: #f5f5f7; }
 .btn-danger { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
+.btn-outline { background: white; border: 1px solid #e5e7eb; color: var(--text-secondary); }
+.btn-outline:hover { background: rgba(99,102,241,0.05); border-color: rgba(99,102,241,0.3); color: var(--primary); }
 
 /* Toggle switch */
 .toggle { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
@@ -821,4 +1282,43 @@ onBeforeUnmount(() => {});
 .backup-name { flex: 1; font-family: 'SF Mono', 'Consolas', monospace; font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .backup-size { font-size: 12px; color: var(--text-muted); min-width: 60px; text-align: right; }
 .backup-time { font-size: 12px; color: var(--text-muted); min-width: 140px; }
+
+/* LLM Provider table */
+.llm-empty { text-align: center; padding: 32px 16px; }
+.llm-empty-icon { font-size: 32px; margin-bottom: 8px; }
+.llm-provider-table { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.llm-provider-thead {
+  display: grid;
+  grid-template-columns: 1.2fr 2fr 1fr 0.6fr auto;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--hover);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.llm-provider-row {
+  display: grid;
+  grid-template-columns: 1.2fr 2fr 1fr 0.6fr auto;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 13px;
+}
+.llm-provider-row:last-child { border-bottom: none; }
+.llm-provider-row:hover { background: rgba(99,102,241,0.03); }
+.llm-prov-name { font-weight: 500; color: var(--text-primary); }
+.llm-prov-url { color: var(--text-muted); font-family: monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.llm-prov-type { color: var(--text-secondary); font-size: 12px; }
+
+/* Model edit rows */
+.llm-model-edit-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: #fafbfc;
+}
 </style>

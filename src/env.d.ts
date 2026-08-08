@@ -83,6 +83,9 @@ interface ElectronAPI {
       models: { provider: string; providerLabel: string; id: string; name: string; pattern: string; configured: boolean }[];
       error?: string;
     }>;
+    configGet: () => Promise<{ providers: { name: string; displayName: string; baseUrl: string; apiKey: string; models: { id: string; name?: string }[] }[] }>;
+    configSet: (providers: { name: string; displayName?: string; baseUrl: string; apiKey: string; modelNames: string[] }[]) => Promise<{ ok: boolean; error?: string }>;
+    configTest: (cfg: { baseUrl: string; apiKey: string; modelName: string }) => Promise<{ ok: boolean; error?: string; latencyMs?: number }>;
   };
   service: {
     status: () => Promise<{ feishu: boolean; scheduler: boolean; indexer: boolean }>;
