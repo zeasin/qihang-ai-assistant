@@ -544,19 +544,21 @@ const project = {
 const chat = {
   sessions: (projectId) => {
     try {
-      if (projectId) return q("SELECT s.*, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", projectId);
+      const pid = (projectId !== null && projectId !== undefined && projectId !== '') ? Number(projectId) : NaN;
+      if (Number.isFinite(pid)) return q("SELECT s.*, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.project_id = ? ORDER BY s.updated_at DESC", Math.trunc(pid));
       return q("SELECT s.*, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s ORDER BY s.updated_at DESC");
     } catch { return []; }
   },
   sessionsBySource: (source, projectId) => {
     try {
-      if (projectId) return q(`SELECT s.*, (SELECT COUNT(*) FROM prj_messages WHERE session_id = s.session_id) as msg_count, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.source = ? AND s.project_id = ? ORDER BY updated_at DESC`, source, projectId);
+      const pid = (projectId !== null && projectId !== undefined && projectId !== '') ? Number(projectId) : NaN;
+      if (Number.isFinite(pid)) return q(`SELECT s.*, (SELECT COUNT(*) FROM prj_messages WHERE session_id = s.session_id) as msg_count, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.source = ? AND s.project_id = ? ORDER BY updated_at DESC`, source, Math.trunc(pid));
       return q(`SELECT s.*, (SELECT COUNT(*) FROM prj_messages WHERE session_id = s.session_id) as msg_count, (SELECT content FROM prj_messages WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1) as last_message FROM prj_sessions s WHERE s.source = ? ORDER BY updated_at DESC`, source);
     } catch { return []; }
   },
   createSession: (id, projectId, title, mode, agent, source) => {
     // project_id 可能传入 'notesdir' 等字符串哨兵值（飞书场景），INT 列只存合法数字
-    const n = Number(projectId);
+    const n = (projectId === null || projectId === undefined) ? NaN : Number(projectId);
     const pid = Number.isFinite(n) ? Math.trunc(n) : null;
     const existing = qOne('SELECT * FROM prj_sessions WHERE session_id = ?', id);
     if (existing) return existing;
@@ -742,9 +744,10 @@ const task = {
   },
   get: (id: number) => qOne('SELECT * FROM plan_tasks WHERE id = ?', id),
   add: (data: any) => {
+    const pid = (data.project_id !== null && data.project_id !== undefined && data.project_id !== '') ? (Number.isFinite(Number(data.project_id)) ? Math.trunc(Number(data.project_id)) : null) : null;
     run('INSERT INTO plan_tasks (title, prompt, description, priority, status, task_type, project_id, trigger_type, scheduled_start, cycle_type, cycle_value, cycle_time, cycle_end, output_type, output_target, notify_feishu, session_id, source, dataset_id, record_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       data.title, data.prompt || '', data.description || '', data.priority || 'mid', data.status || 'pending',
-      data.task_type || '', data.project_id || null,
+      data.task_type || '', pid,
       data.trigger_type || '', data.scheduled_start || '', data.cycle_type || '', data.cycle_value || '',
       data.cycle_time || '', data.cycle_end || '', data.output_type || '', data.output_target || '',
       data.notify_feishu ? 1 : 0, data.session_id || '', data.source || '', data.dataset_id || '', data.record_id || '');
@@ -759,7 +762,10 @@ const task = {
     if (data.priority !== undefined) { fields.push('priority = ?'); params.push(data.priority); }
     if (data.status !== undefined) { fields.push('status = ?'); params.push(data.status); }
     if (data.task_type !== undefined) { fields.push('task_type = ?'); params.push(data.task_type); }
-    if (data.project_id !== undefined) { fields.push('project_id = ?'); params.push(data.project_id); }
+    if (data.project_id !== undefined) {
+        const v = (data.project_id === null || data.project_id === undefined || data.project_id === '') ? null : (Number.isFinite(Number(data.project_id)) ? Math.trunc(Number(data.project_id)) : null);
+        fields.push('project_id = ?'); params.push(v);
+      }
     if (data.trigger_type !== undefined) { fields.push('trigger_type = ?'); params.push(data.trigger_type); }
     if (data.scheduled_start !== undefined) { fields.push('scheduled_start = ?'); params.push(data.scheduled_start); }
     if (data.cycle_type !== undefined) { fields.push('cycle_type = ?'); params.push(data.cycle_type); }

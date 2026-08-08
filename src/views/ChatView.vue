@@ -19,9 +19,9 @@
       <div class="conversation-list" v-if="sessions.length" ref="conversationListRef">
         <div
           v-for="session in sessions"
-          :key="session.id"
+          :key="session.session_id || session.id"
           class="conversation-item"
-          :class="{ active: currentSessionId === session.id }"
+          :class="{ active: currentSessionId === (session.session_id || String(session.id)) }"
           @click="selectSession(session)"
         >
           <span class="conv-icon">🗨️</span>
@@ -292,9 +292,9 @@ async function loadMessages(sessionId: string) {
 // ========== 对话操作 ==========
 async function selectSession(session: any) {
   if (isStreaming.value) return;
-  currentSessionId.value = session.id;
+  currentSessionId.value = session.session_id || String(session.id);
   currentSession.value = session;
-  await loadMessages(session.session_id || session.id);
+  await loadMessages(currentSessionId.value);
   saveState();
 }
 
@@ -347,11 +347,11 @@ async function restoreState() {
     if (!saved) return false;
     const { sessionId } = JSON.parse(saved);
     if (!sessionId) return false;
-    const session = sessions.value.find((s) => s.session_id === sessionId);
+    const session = sessions.value.find((s) => s.session_id === sessionId || String(s.id) === String(sessionId));
     if (!session) return false;
-    currentSessionId.value = session.id;
+    currentSessionId.value = session.session_id || String(session.id);
     currentSession.value = session;
-    await loadMessages(session.session_id);
+    await loadMessages(currentSessionId.value);
     return true;
   } catch { return false; }
 }

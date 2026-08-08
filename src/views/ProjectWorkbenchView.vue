@@ -35,9 +35,9 @@
             <div v-if="expandedProjects.has(project.id)" class="conversation-list">
               <div
                 v-for="session in sessionsWithoutTask(project.id)"
-                :key="session.id"
+                :key="session.session_id || session.id"
                 class="conversation-item"
-                :class="{ active: currentSessionId === session.id }"
+                :class="{ active: currentSessionId === (session.session_id || String(session.id)) }"
                 @click="selectSession(session)"
               >
                 <span class="conv-icon">🗨️</span>
@@ -906,9 +906,9 @@ function toggleProject(projectId: number) {
 async function selectSession(session: any) {
   if (isStreaming.value) return;
   rightTab.value = 'chat';
-  currentSessionId.value = session.id;
+  currentSessionId.value = session.session_id || String(session.id);
   currentSession.value = session;
-  await loadMessages(session.session_id || session.id);
+  await loadMessages(currentSessionId.value);
   saveCodingState();
 }
 
@@ -979,15 +979,15 @@ async function restoreCodingState() {
     selectedProject.value = project;
     await loadSessions(projectId);
     
-    // 找到对应的对话
+    // 找到对应的对话（兼容 session_id 和 id 两种存储格式）
     const sessions = projectSessions[projectId] || [];
-    const session = sessions.find((s) => s.session_id === sessionId);
+    const session = sessions.find((s) => s.session_id === sessionId || String(s.id) === String(sessionId));
     if (!session) return false;
     
     // 恢复选中状态
-    currentSessionId.value = session.id;
+    currentSessionId.value = session.session_id || String(session.id);
     currentSession.value = session;
-    await loadMessages(session.session_id);
+    await loadMessages(currentSessionId.value);
     
     return true;
   } catch (e) {

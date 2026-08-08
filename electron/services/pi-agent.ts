@@ -67,6 +67,20 @@ interface SessionHandle {
 }
 const sessions = new Map<string, SessionHandle>();
 
+/** 固定系统提示词（硬编码，不允许用户修改；不依赖 ~/.pi/agent/SYSTEM.md） */
+export const QIHANG_SYSTEM_PROMPT = `你是「启航 AI 助手」，一个运行在本地的智能办公助手，集成在启航 AI 工作台中。
+
+你的特点：
+- 使用中文交流，回复简洁、专业、可执行
+- 熟悉工作台提供的数据查询、笔记读写、文件与代码操作等工具，需要时主动查询数据后再回答
+- 回答问题时先理解用户意图，必要时用工具核实数据，不编造
+
+行为准则：
+- 回复始终使用简体中文（用户用其他语言提问时，用对应语言回复）
+- 语气友好自然，但不要过度客套，不要每轮都说自我介绍
+- 涉及文件或代码时，明确给出路径与改动点
+- 数据为空时如实说明，不要编造`;
+
 function sessionFilePath(sessionId: string): string {
   const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
   return path.join(getAgentDir(), 'sessions', `assistant-v2-${safe}.jsonl`);
@@ -101,6 +115,14 @@ async function getSession(opts: {
     if (!model) modelFallbackMessage = `model ${modelPattern} not found, using default`;
   }
 
+  const settingsManager = sdk.SettingsManager.create(cwd || process.cwd(), getAgentDir());
+  const resourceLoader = new sdk.DefaultResourceLoader({
+    cwd: cwd || process.cwd(),
+    agentDir: getAgentDir(),
+    settingsManager,
+    systemPrompt: QIHANG_SYSTEM_PROMPT,
+  });
+  await resourceLoader.reload();
   const { session } = await sdk.createAgentSession({
     cwd: cwd || process.cwd(),
     agentDir: getAgentDir(),
@@ -110,7 +132,8 @@ async function getSession(opts: {
     sessionManager: sm,
     thinkingLevel: 'off',
     customTools,
-    settingsManager: sdk.SettingsManager.create(cwd || process.cwd(), getAgentDir()),
+    settingsManager,
+    resourceLoader,
   });
   if (modelFallbackMessage) logger.warn('[PiAgent] %s', modelFallbackMessage);
 
